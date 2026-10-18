@@ -93,8 +93,10 @@ Google only shares profile photos with apps registered to it, so this needs a on
 for the app. It's free and has no secret to copy:
 
 1. In the [Google Cloud console](https://console.cloud.google.com/), create a project (or pick one).
-2. Under **Google Auth Platform**, set up the consent screen as **External** and **publish** it. The
-   app asks only for basic profile info, which needs no Google review.
+2. Under **Google Auth Platform**, set up the app as **External** and leave it in **Testing**. Under
+   **Audience**, add the TV's Google account as a test user. (Publishing would need a public home
+   page and privacy policy. Testing is fine here: access to basic profile info doesn't expire after
+   seven days, as it does for other scopes.)
 3. Under **Clients**, create an **Android** client with package name `app.tvhome` and the SHA-1 of
    the key the APK is signed with:
 
