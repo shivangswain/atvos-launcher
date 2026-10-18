@@ -1,6 +1,9 @@
 package app.tvhome;
 
+import android.accounts.Account;
 import android.accounts.AccountManager;
+import android.accounts.AuthenticatorException;
+import android.accounts.OperationCanceledException;
 import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
@@ -15,29 +18,51 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Shader;
 import android.graphics.Typeface;
+import android.net.Uri;
+import android.util.Log;
 import android.widget.Toast;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 
 /**
- * The profile picture in the clock pill: the signed-in Google account's letter avatar (what Google
- * shows for accounts without a photo), or files/avatar.png if you push one. The account is picked
- * once with Android's own chooser; nothing is fetched from the network.
+ * The profile picture in the clock pill: the Google account's profile photo, else its letter avatar
+ * (what Google shows for accounts without one); files/avatar.png, if you push one, beats both. The
+ * account is picked once with Android's own chooser.
+ *
+ * Google gives profile photos only to apps it knows: this one needs an Android OAuth client in a
+ * Google Cloud project (see README). Until then the token request fails and the letter stays. The
+ * token is only ever sent to Google over HTTPS and never stored; the photo is cached privately and
+ * refreshed at most once a day.
  */
 final class Profile {
 
     static final int REQUEST_ACCOUNT = 7;
+    private static final String TAG = "Home";
     private static final String GOOGLE = "com.google";
-    private static final String KEY_ACCOUNT = "account";
+    private static final String KEY_ACCOUNT = "account", KEY_PHOTO_TRIED = "photo_tried";
+    private static final String SCOPE = "oauth2:https://www.googleapis.com/auth/userinfo.profile";
+    private static final String USERINFO = "https://www.googleapis.com/oauth2/v3/userinfo";
+    private static final long REFRESH_MS = 24 * 60 * 60_000L;
+    private static final int MAX_PHOTO = 4 << 20;
 
     private final Activity activity;
     private final Executor io;
     private final SharedPreferences prefs;
-    private final File file;
+    private final File file, photo;
     private final int size;
 
     Profile(Activity activity, Executor io, int sizePx) {
@@ -46,18 +71,116 @@ final class Profile {
         this.prefs = activity.getSharedPreferences("home", Context.MODE_PRIVATE);
         File external = activity.getExternalFilesDir(null);
         this.file = new File(external != null ? external : activity.getFilesDir(), "avatar.png");
+        this.photo = new File(activity.getFilesDir(), "google_photo");
         this.size = sizePx;
     }
 
-    /** avatar.png if present, else the chosen account's monogram; nothing if no account was chosen. */
+    /** avatar.png, else the account's Google photo, else its monogram; nothing if no account was chosen. */
     void load(Consumer<Bitmap> onAvatar) {
         String account = prefs.getString(KEY_ACCOUNT, null);
         io.execute(() -> {
             Bitmap shown = file.isFile() ? decodeCircle(file, size) : null;
+            if (shown == null && account != null && photo.isFile()) shown = decodeCircle(photo, size);
             if (shown == null && account != null) shown = monogram(account, size);
             Bitmap result = shown;
             if (result != null) activity.runOnUiThread(() -> onAvatar.accept(result));
         });
+        refresh(onAvatar);
+    }
+
+    /**
+     * Fetches the account's Google photo if it's been a day since the last try, then shows it. The
+     * first time, Android may ask on screen to let Home see your basic profile info. UI thread.
+     */
+    void refresh(Consumer<Bitmap> onAvatar) {
+        String name = prefs.getString(KEY_ACCOUNT, null);
+        long now = System.currentTimeMillis();
+        if (name == null || file.isFile() || now - prefs.getLong(KEY_PHOTO_TRIED, 0) < REFRESH_MS) return;
+        prefs.edit().putLong(KEY_PHOTO_TRIED, now).apply();
+        AccountManager am = AccountManager.get(activity);
+        Account account = null;
+        for (Account a : am.getAccountsByType(GOOGLE)) if (a.name.equals(name)) account = a;
+        if (account == null) return;
+        am.getAuthToken(account, SCOPE, null, activity, future -> io.execute(() -> {
+            try {
+                String token = future.getResult().getString(AccountManager.KEY_AUTHTOKEN);
+                if (token == null) return;
+                if (!download(token)) {
+                    am.invalidateAuthToken(GOOGLE, token); // expired: a fresh one next time
+                    return;
+                }
+                Bitmap round = photo.isFile() ? decodeCircle(photo, size) : monogram(name, size);
+                if (round != null) activity.runOnUiThread(() -> onAvatar.accept(round));
+            } catch (OperationCanceledException | AuthenticatorException | IOException | RuntimeException e) {
+                // Typically "UnregisteredOnApiConsole" until the app has an OAuth client.
+                Log.w(TAG, "No Google profile photo: " + e.getMessage());
+            }
+        }), null);
+    }
+
+    /**
+     * Reads the photo's address from Google's userinfo, then saves the photo (or removes the old one
+     * if there's none now). False if the token was refused. IO thread.
+     */
+    private boolean download(String token) throws IOException {
+        String picture;
+        HttpURLConnection http = (HttpURLConnection) new URL(USERINFO).openConnection();
+        try {
+            http.setConnectTimeout(8000);
+            http.setReadTimeout(15000);
+            http.setUseCaches(false);
+            http.setRequestProperty("Authorization", "Bearer " + token);
+            int code = http.getResponseCode();
+            if (code == HttpURLConnection.HTTP_UNAUTHORIZED) return false;
+            if (code != HttpURLConnection.HTTP_OK) throw new IOException("userinfo returned " + code);
+            try (InputStream in = http.getInputStream()) {
+                picture = new JSONObject(new String(read(in, 64 << 10), StandardCharsets.UTF_8)).optString("picture", "");
+            }
+        } catch (JSONException e) {
+            throw new IOException(e);
+        } finally {
+            http.disconnect();
+        }
+        if (picture.isEmpty()) {
+            //noinspection ResultOfMethodCallIgnored
+            photo.delete();
+            return true;
+        }
+        Uri uri = Uri.parse(picture);
+        String host = uri.getHost();
+        if (!"https".equals(uri.getScheme()) || host == null || !host.endsWith(".googleusercontent.com")) {
+            throw new IOException("unexpected photo address");
+        }
+        // Google serves 96px by default; ask for the size it's shown at.
+        String sized = picture.replaceAll("=s\\d+(-c)?$", "") + "=s" + Math.max(128, size * 2) + "-c";
+        http = (HttpURLConnection) new URL(sized).openConnection();
+        File tmp = new File(photo.getPath() + ".part");
+        try {
+            http.setConnectTimeout(8000);
+            http.setReadTimeout(15000);
+            http.setInstanceFollowRedirects(false);
+            if (http.getResponseCode() != HttpURLConnection.HTTP_OK) throw new IOException("photo returned " + http.getResponseCode());
+            try (InputStream in = http.getInputStream(); OutputStream out = new FileOutputStream(tmp)) {
+                out.write(read(in, MAX_PHOTO));
+            }
+            if (!tmp.renameTo(photo)) throw new IOException("couldn't save the photo");
+        } finally {
+            http.disconnect();
+            //noinspection ResultOfMethodCallIgnored
+            tmp.delete();
+        }
+        return true;
+    }
+
+    /** The whole stream, refusing anything over {@code max} bytes. */
+    private static byte[] read(InputStream in, int max) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buf = new byte[8 << 10];
+        for (int n; (n = in.read(buf)) > 0; ) {
+            if (out.size() + n > max) throw new IOException("too large");
+            out.write(buf, 0, n);
+        }
+        return out.toByteArray();
     }
 
     /** Decodes avatar.png straight to about the size it's shown at, then rounds it. */
@@ -95,7 +218,10 @@ final class Profile {
     void onActivityResult(int resultCode, Intent data, Consumer<Bitmap> onAvatar) {
         String name = data != null ? data.getStringExtra(AccountManager.KEY_ACCOUNT_NAME) : null;
         if (resultCode != Activity.RESULT_OK || name == null) return;
-        prefs.edit().putString(KEY_ACCOUNT, name).apply();
+        // A new pick also retries the photo now (say, after setting up the OAuth client).
+        prefs.edit().putString(KEY_ACCOUNT, name).remove(KEY_PHOTO_TRIED).apply();
+        //noinspection ResultOfMethodCallIgnored
+        photo.delete();
         load(onAvatar);
     }
 

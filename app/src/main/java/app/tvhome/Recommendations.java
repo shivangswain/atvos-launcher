@@ -6,7 +6,9 @@ import android.database.Cursor;
 import android.media.tv.TvContract;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * What apps recommend on the TV home screen, read from the system TV provider: each app's
@@ -17,6 +19,15 @@ import java.util.Map;
  * selections, so rows are filtered here.
  */
 final class Recommendations {
+
+    /** The two sources, also the bits of {@link Backdrops#sources}. */
+    static final int WATCH_NEXT = 1, PREVIEWS = 2;
+
+    /** What was found: the program to show per app, and which apps publish each source at all. */
+    static final class Found {
+        final Map<String, Item> best = new HashMap<>();
+        final Set<String> watchNext = new HashSet<>(), previews = new HashSet<>();
+    }
 
     /** One program to show behind the dock. */
     static final class Item {
@@ -34,7 +45,7 @@ final class Recommendations {
     private static final int PKG = 0, TITLE = 1, THUMB = 2, THUMB_RATIO = 3, POSTER = 4, POSTER_RATIO = 5,
             INTENT = 6, ORDER_A = 7, ORDER_B = 8;
 
-    private static final String[] WATCH_NEXT = {
+    private static final String[] WATCH_NEXT_COLUMNS = {
             TvContract.WatchNextPrograms.COLUMN_PACKAGE_NAME,
             TvContract.WatchNextPrograms.COLUMN_TITLE,
             TvContract.WatchNextPrograms.COLUMN_THUMBNAIL_URI,
@@ -46,7 +57,7 @@ final class Recommendations {
             TvContract.WatchNextPrograms._ID,
     };
 
-    private static final String[] PREVIEW = {
+    private static final String[] PREVIEW_COLUMNS = {
             TvContract.PreviewPrograms.COLUMN_PACKAGE_NAME,
             TvContract.PreviewPrograms.COLUMN_TITLE,
             TvContract.PreviewPrograms.COLUMN_THUMBNAIL_URI,
@@ -60,17 +71,20 @@ final class Recommendations {
 
     private Recommendations() {}
 
-    /** The best recommendation per package. IO thread. */
-    static Map<String, Item> load(Context context) {
-        Map<String, Item> best = new HashMap<>();
+    /** The best program per package, leaving out the sources switched off for each app. IO thread. */
+    static Found load(Context context, Set<String> noWatchNext, Set<String> noPreviews) {
+        Found found = new Found();
+        Map<String, Item> best = found.best;
         ContentResolver cr = context.getContentResolver();
 
         // Watch Next first (what you're in the middle of): the most recently engaged entry wins.
         Map<String, Long> engaged = new HashMap<>();
-        try (Cursor c = cr.query(TvContract.WatchNextPrograms.CONTENT_URI, WATCH_NEXT, null, null, null)) {
+        try (Cursor c = cr.query(TvContract.WatchNextPrograms.CONTENT_URI, WATCH_NEXT_COLUMNS, null, null, null)) {
             while (c != null && c.moveToNext()) {
                 Item item = item(c);
                 if (item == null) continue;
+                found.watchNext.add(item.pkg);
+                if (noWatchNext.contains(item.pkg)) continue;
                 long when = c.isNull(ORDER_A) ? 0 : c.getLong(ORDER_A);
                 Long prev = engaged.get(item.pkg);
                 if (prev == null || when > prev) {
@@ -84,12 +98,14 @@ final class Recommendations {
 
         // Then the app's preview channels: first channel, heaviest program.
         Map<String, long[]> rank = new HashMap<>();
-        try (Cursor c = cr.query(TvContract.PreviewPrograms.CONTENT_URI, PREVIEW, null, null, null)) {
+        try (Cursor c = cr.query(TvContract.PreviewPrograms.CONTENT_URI, PREVIEW_COLUMNS, null, null, null)) {
             while (c != null && c.moveToNext()) {
                 String pkg = c.getString(PKG);
-                if (pkg == null || engaged.containsKey(pkg)) continue;
+                if (pkg == null) continue;
                 Item item = item(c);
                 if (item == null) continue;
+                found.previews.add(pkg);
+                if (engaged.containsKey(pkg) || noPreviews.contains(pkg)) continue;
                 long channel = c.isNull(ORDER_A) ? Long.MAX_VALUE : c.getLong(ORDER_A);
                 long weight = c.isNull(ORDER_B) ? 0 : c.getLong(ORDER_B);
                 long[] prev = rank.get(pkg);
@@ -101,7 +117,7 @@ final class Recommendations {
         } catch (RuntimeException ignored) {
             // As above.
         }
-        return best;
+        return found;
     }
 
     private static Item item(Cursor c) {

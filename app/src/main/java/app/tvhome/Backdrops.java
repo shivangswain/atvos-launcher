@@ -3,6 +3,7 @@ package app.tvhome;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ProviderInfo;
@@ -24,8 +25,10 @@ import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
+import android.graphics.drawable.AdaptiveIconDrawable;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.DrawableWrapper;
 import android.net.Uri;
 import android.text.StaticLayout;
 import android.text.TextPaint;
@@ -55,11 +58,11 @@ import java.util.Set;
 /**
  * Full-screen backgrounds. Behind the dock, for the focused app, in order of preference:
  *
- *   files/topshelf/<package>.jpg     your own image (push with adb)
  *   the app's TV recommendation      see {@link Recommendations}, downloaded once and cached;
  *                                    under 720p it's shown as a card with its title instead
- *   files/wallpaper.jpg              if you've pushed one
- *   the app's own logo               large, over a field of its colours, as tvOS does
+ *   the app's splash image           when its launch screen is a real picture of 720p or more
+ *   the app's own logo               large, as tvOS does: its icon's artwork, or its banner's
+ *                                    logo cut from its background, over a glow in its colour
  *
  * A built-in aurora covers the moment before apps load. Each backdrop is kept sharp at screen size
  * plus a tiny blurred copy for the glass and the grid's blur.
@@ -72,14 +75,26 @@ final class Backdrops {
         final BitmapShader blurShader;
         /** Set when the image is an app's recommendation. */
         final Recommendations.Item program;
+        /**
+         * For a recommendation under 720p, shown as a card: where the card is (design units, see
+         * {@link #CARD}) and the bottom of the title beside it. Null for a full-screen picture.
+         */
+        final RectF card;
+        final float titleBottom;
         /** Brightness (0–1) behind the clock, the full-screen hint and the Control Center, so text can flip to dark. */
         final float clockLight, hintLight, controlsLight;
 
         Backdrop(Bitmap sharp, Bitmap blur, Recommendations.Item program) {
+            this(sharp, blur, program, null, 0f);
+        }
+
+        Backdrop(Bitmap sharp, Bitmap blur, Recommendations.Item program, RectF card, float titleBottom) {
             this.sharp = sharp;
             this.blur = blur;
             this.blurShader = new BitmapShader(blur, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
             this.program = program;
+            this.card = card;
+            this.titleBottom = titleBottom;
             this.clockLight = light(blur, 0.86f, 0.03f, 1f, 0.11f);
             this.hintLight = light(blur, 0.40f, 0.62f, 0.60f, 0.70f);
             this.controlsLight = light(blur, 0.72f, 0.10f, 1f, 0.53f);
@@ -100,22 +115,26 @@ final class Backdrops {
     }
 
     static final String DEFAULT = "default";
+    /** The card a small recommendation is shown on, in 1920-wide design units, and its corner radius. */
+    static final RectF CARD = new RectF(92.5f, 172f, 828.5f, 586f);
+    static final float CARD_R = 26f;
+    // Per-app switches for the two recommendation sources (sets of packages switched off).
+    private static final String NO_WATCH_NEXT = "no_watch_next", NO_PREVIEWS = "no_previews";
     private static final String REMOTE = "rec:", APP = "app:";
-    private static final String[] EXTENSIONS = {"jpg", "jpeg", "png", "webp"};
     private static final int MAX_DOWNLOAD = 16 << 20;
     private static final int MAX_CACHED = 48;
 
     private final ContentResolver resolver;
     private final PackageManager pm;
-    private final File dir, downloads;
+    private final SharedPreferences prefs;
+    private final File downloads;
     private final int width, height;
     private final Backdrop fallback;
 
     // Written on the IO thread, read on the UI thread.
-    private volatile Map<String, String> userShelves = Collections.emptyMap();
     private volatile Map<String, Recommendations.Item> recommended = Collections.emptyMap();
     private volatile Set<String> downloaded = Collections.emptySet();
-    private volatile String wallpaper = DEFAULT;
+    private volatile Set<String> watchNext = Collections.emptySet(), previews = Collections.emptySet();
 
     // Network thread only: when each URL last failed, so a dead network isn't hammered.
     private final Map<String, Long> failedAt = new HashMap<>();
@@ -130,10 +149,9 @@ final class Backdrops {
     };
 
     Backdrops(Context context, int width, int height) {
-        File external = context.getExternalFilesDir(null);
         this.resolver = context.getContentResolver();
         this.pm = context.getPackageManager();
-        this.dir = external != null ? external : context.getFilesDir();
+        this.prefs = context.getSharedPreferences("home", Context.MODE_PRIVATE);
         this.downloads = new File(context.getCacheDir(), "shelf");
         this.width = width;
         this.height = height;
@@ -141,32 +159,42 @@ final class Backdrops {
         this.fallback = new Backdrop(aurora, blur(aurora), null);
     }
 
-    /** Re-reads local images and app recommendations. Keys include mtimes/URLs so changes are picked up. IO thread. */
+    /** Re-reads app recommendations. Keys include the image URL, so a new image is picked up. IO thread. */
     void scan(Context context) {
-        Map<String, String> found = new HashMap<>();
-        File[] files = new File(dir, "topshelf").listFiles();
-        if (files != null) {
-            for (File f : files) {
-                String name = f.getName();
-                int dot = name.lastIndexOf('.');
-                if (dot > 0 && isImage(name.substring(dot + 1)) && f.isFile()) found.put(name.substring(0, dot), key(f));
-            }
-        }
-        userShelves = found;
-        Map<String, Recommendations.Item> recs = Recommendations.load(context);
+        Recommendations.Found found = Recommendations.load(context, off(NO_WATCH_NEXT), off(NO_PREVIEWS));
         Set<String> ready = new HashSet<>();
-        for (Recommendations.Item item : recs.values()) if (cacheFile(item.image).isFile()) ready.add(item.image);
+        for (Recommendations.Item item : found.best.values()) if (cacheFile(item.image).isFile()) ready.add(item.image);
         downloaded = ready;
-        recommended = recs;
-        String wp = DEFAULT;
-        for (String ext : EXTENSIONS) {
-            File f = new File(dir, "wallpaper." + ext);
-            if (f.isFile()) {
-                wp = key(f);
-                break;
-            }
-        }
-        wallpaper = wp;
+        watchNext = found.watchNext;
+        previews = found.previews;
+        recommended = found.best;
+    }
+
+    /**
+     * The recommendation sources an app has, as {@link Recommendations#WATCH_NEXT} and
+     * {@link Recommendations#PREVIEWS} bits: the ones it publishes, and any switched off.
+     */
+    int sources(String pkg) {
+        int bits = 0;
+        if (watchNext.contains(pkg) || !sourceOn(pkg, Recommendations.WATCH_NEXT)) bits |= Recommendations.WATCH_NEXT;
+        if (previews.contains(pkg) || !sourceOn(pkg, Recommendations.PREVIEWS)) bits |= Recommendations.PREVIEWS;
+        return bits;
+    }
+
+    boolean sourceOn(String pkg, int source) {
+        return !off(source == Recommendations.WATCH_NEXT ? NO_WATCH_NEXT : NO_PREVIEWS).contains(pkg);
+    }
+
+    /** Switches one of an app's sources on or off; takes effect on the next {@link #scan}. */
+    void setSource(String pkg, int source, boolean on) {
+        String key = source == Recommendations.WATCH_NEXT ? NO_WATCH_NEXT : NO_PREVIEWS;
+        Set<String> set = new HashSet<>(off(key));
+        if (on) set.remove(pkg); else set.add(pkg);
+        prefs.edit().putStringSet(key, set).apply();
+    }
+
+    private Set<String> off(String key) {
+        return prefs.getStringSet(key, Collections.emptySet());
     }
 
     /**
@@ -196,26 +224,19 @@ final class Backdrops {
         }
     }
 
-    String shelfKey(String pkg) {
-        String own = userShelves.get(pkg);
-        if (own != null) return own;
+    private String shelfKey(String pkg) {
         Recommendations.Item item = recommended.get(pkg);
         return item != null && downloaded.contains(item.image) ? REMOTE + item.image : null;
     }
 
-    /** What sits behind the dock for an app: its top shelf, else your wallpaper, else its logo. */
+    /** What sits behind the dock for an app: its top shelf, else its splash picture or logo. */
     String backdropKey(String pkg) {
         String shelf = shelfKey(pkg);
-        if (shelf != null) return shelf;
-        return DEFAULT.equals(wallpaper) ? APP + pkg : wallpaper;
+        return shelf != null ? shelf : APP + pkg;
     }
 
     Recommendations.Item recommendation(String pkg) {
         return recommended.get(pkg);
-    }
-
-    String wallpaperKey() {
-        return wallpaper;
     }
 
     Backdrop cached(String key) {
@@ -230,8 +251,8 @@ final class Backdrops {
     Backdrop load(String key, Recommendations.Item program) {
         if (DEFAULT.equals(key)) return fallback;
         if (key.startsWith(APP)) return appLogo(key.substring(APP.length()));
-        boolean remote = key.startsWith(REMOTE);
-        File file = remote ? cacheFile(key.substring(REMOTE.length())) : new File(key.substring(0, key.lastIndexOf('@')));
+        if (!key.startsWith(REMOTE)) return null;
+        File file = cacheFile(key.substring(REMOTE.length()));
         if (!file.isFile()) return null;
 
         // Just the header first: the size decides between full screen and the card layout.
@@ -248,10 +269,15 @@ final class Backdrops {
         }
         Bitmap src = BitmapFactory.decodeFile(file.getPath(), opts);
         if (src == null) return null;
-        Bitmap sharp = hd ? cover(src, width, height) : poster(src, remote && program != null ? program.title : null);
+        if (!hd) {
+            Backdrop card = poster(src, program);
+            src.recycle();
+            return card;
+        }
+        Bitmap sharp = cover(src, width, height);
         if (sharp != src) src.recycle();
         Bitmap blurred = blur(sharp);
-        return new Backdrop(toHardware(sharp), blurred, remote ? program : null);
+        return new Backdrop(toHardware(sharp), blurred, program);
     }
 
     /**
@@ -259,7 +285,8 @@ final class Backdrops {
      * 16:9 card on the left (centre-cropped, which also drops letterbox bars) with the program's
      * name beside it, over a blurred, darkened copy of the picture.
      */
-    private Bitmap poster(Bitmap src, String title) {
+    private Backdrop poster(Bitmap src, Recommendations.Item program) {
+        String title = program != null ? program.title : null;
         Bitmap out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(out);
         float s = width / 1920f;
@@ -270,8 +297,8 @@ final class Backdrops {
         field.recycle();
         p.setColorFilter(null);
 
-        RectF card = new RectF(92.5f * s, 172f * s, (92.5f + 736f) * s, (172f + 414f) * s);
-        float radius = 26f * s;
+        RectF card = new RectF(CARD.left * s, CARD.top * s, CARD.right * s, CARD.bottom * s);
+        float radius = CARD_R * s, titleBottom = CARD.centerY();
         Paint shade = new Paint(Paint.ANTI_ALIAS_FLAG);
         shade.setColor(0x8C000000);
         shade.setMaskFilter(new BlurMaskFilter(36f * s, BlurMaskFilter.Blur.NORMAL));
@@ -300,88 +327,534 @@ final class Backdrops {
             c.translate(left, card.centerY() - layout.getHeight() / 2f);
             layout.draw(c);
             c.restore();
+            titleBottom = (card.centerY() + layout.getHeight() / 2f) / s;
+        }
+        Bitmap blurred = blur(out);
+        return new Backdrop(toHardware(out), blurred, program, CARD, titleBottom);
+    }
+
+    /**
+     * For apps without a top shelf, as tvOS does: the app's splash picture if it has one, else its
+     * logo large over a field of its colour: the icon's own artwork when that stands alone, else the
+     * banner's logo, cut from its background. Always from the highest-density resources the app ships.
+     */
+    private Backdrop appLogo(String pkg) {
+        Bitmap out;
+        try {
+            ActivityInfo ai = launchActivity(pkg);
+            if (ai == null) return null;
+            Resources res = pm.getResourcesForApplication(ai.applicationInfo);
+            out = splash(res, ai);
+            if (out == null) out = iconScene(res, ai);
+            if (out == null) out = bannerScene(res, ai);
+        } catch (PackageManager.NameNotFoundException | Resources.NotFoundException e) {
+            return null;
+        }
+        if (out == null) return null;
+        Bitmap blurred = blur(out);
+        return new Backdrop(toHardware(out), blurred, null);
+    }
+
+    private ActivityInfo launchActivity(String pkg) {
+        Intent launch = pm.getLeanbackLaunchIntentForPackage(pkg);
+        if (launch == null) launch = pm.getLaunchIntentForPackage(pkg);
+        ResolveInfo ri = launch != null ? pm.resolveActivity(launch, 0) : null;
+        return ri != null ? ri.activityInfo : null;
+    }
+
+    /**
+     * The icon's logo without its backdrop shape (an adaptive icon's foreground layer, or a legacy
+     * icon drawn on transparency), over a field lit in the brand colour of the app's tile. Null when
+     * the icon has no stand-alone logo (a full picture, or a logo on its own card) or too few pixels
+     * to show it large; the banner is used instead.
+     */
+    private Bitmap iconScene(Resources res, ActivityInfo ai) {
+        int iconId = ai.getIconResource();
+        if (iconId == 0) return null;
+        try {
+            Drawable icon = res.getDrawableForDensity(iconId, DisplayMetrics.DENSITY_XXXHIGH, null);
+            boolean adaptive = icon instanceof AdaptiveIconDrawable;
+            Drawable fg = adaptive ? ((AdaptiveIconDrawable) icon).getForeground() : icon;
+            // A legacy icon's canvas is the icon itself, so its logo fills more of it.
+            Glyph glyph = fg != null ? Glyph.measure(fg, adaptive ? 0.5f : 0.6f) : null;
+            if (glyph == null) return null;
+            int bitmap = bitmapWidth(fg);
+            float maxCanvas = bitmap > 0 ? bitmap * 1.5f : Float.MAX_VALUE; // enlarged no more than 1.5x, so it stays sharp
+            int bannerId = ai.banner != 0 ? ai.banner : ai.applicationInfo.banner;
+            int brand = brandColor(bannerId != 0 ? res.getDrawable(bannerId, null) : icon);
+            // Icons are drawn a little smaller than banner logos, which carry a wordmark: the same visual weight.
+            return logoScene(fg, glyph, 220f, maxCanvas, 0.5f, brand, glyph.light < 0.25f); // a dark logo goes on a pale field
+        } catch (RuntimeException e) {
+            return null; // another app's resources: anything can go wrong, and the banner still works
+        }
+    }
+
+    /**
+     * The banner (or, without one, the icon) the same way: its own background is cut away, so its
+     * logo floats over a field lit in that background's colour, light or dark as the tile is. Art
+     * that's a picture rather than a logo on a background is shown whole, as a card.
+     */
+    private Bitmap bannerScene(Resources res, ActivityInfo ai) {
+        int id = ai.banner != 0 ? ai.banner : ai.applicationInfo.banner;
+        if (id == 0) id = ai.getIconResource();
+        if (id == 0) return null;
+        Drawable art = res.getDrawableForDensity(id, DisplayMetrics.DENSITY_XXXHIGH, null);
+        if (art == null) return null;
+
+        // Cut at the pixels the app shipped (enlarging first gains nothing); a vector at a size that
+        // needn't be enlarged at all. (Resources keep a bitmap at its own size and scale it on drawing.)
+        int iw = art.getIntrinsicWidth(), ih = art.getIntrinsicHeight();
+        float aspect = iw > 0 && ih > 0 ? (float) iw / ih : 16f / 9f;
+        int bitmap = bitmapWidth(art);
+        int w = Math.max(64, Math.min(bitmap > 0 ? bitmap : 960, 1600));
+        int h = Math.max(36, Math.round(w / aspect));
+        Bitmap work = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        art.setBounds(0, 0, w, h);
+        art.draw(new Canvas(work));
+        int[] px = new int[w * h];
+        work.getPixels(px, 0, w, 0, 0, w, h);
+        float maxCanvas = w * (bitmap > 0 ? 1.5f : 1f); // as sharp as the icon
+
+        int bg = keyBackground(px, w, h);
+        Glyph glyph = bg != BUSY ? Glyph.of(px, w, h, 0.6f, false) : null;
+        if (glyph != null) {
+            work.setPixels(px, 0, w, 0, 0, w, h);
+            boolean own = bg != NO_BACKGROUND;
+            int brand = own ? bg : brandColor(art);
+            boolean pale = own ? luminance(bg) > 0.6f : glyph.light < 0.25f;
+            Bitmap out = logoScene(new BitmapDrawable(res, work), glyph, 300f, maxCanvas, 0f, brand, pale);
+            work.recycle();
+            return out;
+        }
+
+        // A picture: round its corners and show it as a card over its own colour.
+        Bitmap card = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setShader(new BitmapShader(work, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
+        float r = h * 0.08f;
+        new Canvas(card).drawRoundRect(0, 0, w, h, r, r, p);
+        work.recycle();
+        Glyph whole = new Glyph(new RectF(0, 0, 1, 1), aspect, 0.5f);
+        Bitmap out = logoScene(new BitmapDrawable(res, card), whole, 300f, maxCanvas, 0f, brandColor(art), false);
+        card.recycle();
+        return out;
+    }
+
+    /** {@link #keyBackground} results that aren't a colour: art without a background of its own, and art whose edges are too busy to be one. */
+    private static final int NO_BACKGROUND = 0, BUSY = 1;
+
+    /**
+     * Makes the art's background transparent so its logo can float. The background is read from the
+     * art's edges (flat, or a smooth gradient between them), and each pixel becomes the most
+     * transparent colour that over that background gives the original (GIMP's "colour to alpha"),
+     * so anti-aliased edges keep no fringe of the old background. Returns the background's colour
+     * behind the middle of the art, {@link #NO_BACKGROUND} if it's already transparent around its
+     * logo (left as it is), or {@link #BUSY} if its edges are too busy to be a background.
+     */
+    private static int keyBackground(int[] px, int w, int h) {
+        int[][] edges = new int[4][];
+        for (int side = 0; side < 4; side++) {
+            edges[side] = edge(px, w, h, side);
+            if (edges[side] == null) return NO_BACKGROUND;
+            if (edges[side].length == 0) return BUSY;
+        }
+        int[] top = edges[0], bottom = edges[1], left = edges[2], right = edges[3];
+        int tl = mix(top[0], left[0]), tr = mix(top[w - 1], right[0]);
+        int bl = mix(bottom[0], left[h - 1]), br = mix(bottom[w - 1], right[h - 1]);
+
+        // First guess: a Coons patch through the four edges, exact for flat and linear backgrounds.
+        int[] bg = new int[w * h];
+        for (int y = 0; y < h; y++) {
+            float v = h > 1 ? y / (h - 1f) : 0f;
+            for (int x = 0; x < w; x++) {
+                float u = w > 1 ? x / (w - 1f) : 0f;
+                int c = 0xFF000000;
+                for (int shift = 16; shift >= 0; shift -= 8) {
+                    float bc = (1 - v) * ch(top[x], shift) + v * ch(bottom[x], shift)
+                            + (1 - u) * ch(left[y], shift) + u * ch(right[y], shift)
+                            - ((1 - u) * (1 - v) * ch(tl, shift) + u * (1 - v) * ch(tr, shift)
+                            + (1 - u) * v * ch(bl, shift) + u * v * ch(br, shift));
+                    c |= Math.round(Math.max(0f, Math.min(255f, bc))) << shift;
+                }
+                bg[y * w + x] = c;
+            }
+        }
+        // Then follow radial and uneven gradients too: re-estimate it from the pixels that look like
+        // background, first loosely, then strictly.
+        refine(px, bg, w, h, 40);
+        refine(px, bg, w, h, 16);
+
+        for (int i = 0; i < px.length; i++) px[i] = unblend(px[i], bg[i]);
+        return bg[(h / 2) * w + w / 2];
+    }
+
+    /**
+     * Re-estimates the background {@code bg} as the average of the pixels within {@code near} of it,
+     * over a coarse grid (cells the logo covers take their neighbours' colour), smoothly interpolated.
+     */
+    private static void refine(int[] px, int[] bg, int w, int h, int near) {
+        int gx = 16, gy = Math.max(2, Math.round(16f * h / w)), cells = gx * gy;
+        float[] r = new float[cells], g = new float[cells], b = new float[cells];
+        int[] n = new int[cells];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int i = y * w + x, p = px[i];
+                if (p >>> 24 < 200 || difference(p, bg[i]) > near) continue;
+                int k = (y * gy / h) * gx + x * gx / w;
+                r[k] += ch(p, 16);
+                g[k] += ch(p, 8);
+                b[k] += ch(p, 0);
+                n[k]++;
+            }
+        }
+        int cellArea = Math.max(1, (w / gx) * (h / gy)), valid = 0;
+        int[] grid = new int[cells];
+        for (int k = 0; k < cells; k++) {
+            if (n[k] < cellArea * 0.15f) continue;
+            grid[k] = 0xFF000000 | Math.round(r[k] / n[k]) << 16 | Math.round(g[k] / n[k]) << 8 | Math.round(b[k] / n[k]);
+            valid++;
+        }
+        if (valid == 0) return;
+        while (valid < cells) { // fill the gaps from their neighbours
+            int[] next = grid.clone();
+            for (int k = 0; k < cells; k++) {
+                if (grid[k] != 0) continue;
+                int cx = k % gx, cy = k / gx, sr = 0, sg = 0, sb = 0, m = 0;
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int nx = cx + dx, ny = cy + dy;
+                        if (nx < 0 || ny < 0 || nx >= gx || ny >= gy || grid[ny * gx + nx] == 0) continue;
+                        int c = grid[ny * gx + nx];
+                        sr += ch(c, 16);
+                        sg += ch(c, 8);
+                        sb += ch(c, 0);
+                        m++;
+                    }
+                }
+                if (m > 0) {
+                    next[k] = 0xFF000000 | (sr / m) << 16 | (sg / m) << 8 | sb / m;
+                    valid++;
+                }
+            }
+            grid = next;
+        }
+        for (int y = 0; y < h; y++) {
+            float fy = Math.max(0f, Math.min(gy - 1f, (y + 0.5f) * gy / h - 0.5f));
+            int y0 = (int) fy, y1 = Math.min(gy - 1, y0 + 1);
+            float ty = fy - y0;
+            for (int x = 0; x < w; x++) {
+                float fx = Math.max(0f, Math.min(gx - 1f, (x + 0.5f) * gx / w - 0.5f));
+                int x0 = (int) fx, x1 = Math.min(gx - 1, x0 + 1);
+                float tx = fx - x0;
+                int c00 = grid[y0 * gx + x0], c10 = grid[y0 * gx + x1], c01 = grid[y1 * gx + x0], c11 = grid[y1 * gx + x1];
+                int c = 0xFF000000;
+                for (int shift = 16; shift >= 0; shift -= 8) {
+                    float top = ch(c00, shift) * (1 - tx) + ch(c10, shift) * tx;
+                    float bottom = ch(c01, shift) * (1 - tx) + ch(c11, shift) * tx;
+                    c |= Math.round(top * (1 - ty) + bottom * ty) << shift;
+                }
+                bg[y * w + x] = c;
+            }
+        }
+    }
+
+    /**
+     * The most transparent colour that over {@code b} gives {@code p}. Differences within the
+     * background's own grain and compression noise stay fully transparent.
+     */
+    private static int unblend(int p, int b) {
+        int diff = difference(p, b);
+        if (p >>> 24 == 0 || diff <= 16) return 0;
+        float alpha = 0;
+        for (int shift = 16; shift >= 0; shift -= 8) {
+            float d = ch(p, shift) - ch(b, shift), room = d > 0 ? 255f - ch(b, shift) : ch(b, shift);
+            alpha = Math.max(alpha, room > 0 ? Math.abs(d) / room : 1f);
+        }
+        alpha = Math.min(1f, alpha * Math.min(1f, (diff - 16) / 16f)); // fade in just above the noise
+        if (alpha <= 0.02f) return 0;
+        int out = Math.round(alpha * (p >>> 24)) << 24;
+        for (int shift = 16; shift >= 0; shift -= 8) {
+            float f = ch(b, shift) + (ch(p, shift) - ch(b, shift)) / alpha;
+            out |= Math.round(Math.max(0f, Math.min(255f, f))) << shift;
         }
         return out;
     }
 
+    /** The largest difference between two colours in any channel. */
+    private static int difference(int a, int b) {
+        return Math.max(Math.abs(ch(a, 16) - ch(b, 16)), Math.max(Math.abs(ch(a, 8) - ch(b, 8)), Math.abs(ch(a, 0) - ch(b, 0))));
+    }
+
     /**
-     * For apps without a top shelf, as tvOS does: the app's banner (or icon) large, over a field of
-     * its own colours. Taken from the highest-density resource the app ships and enlarged at most
-     * 3x, so it stays sharp; a banner's edges are feathered so the logo floats rather than sitting
-     * on a card.
+     * One edge of the art's background, smoothed (side 0 top, 1 bottom, 2 left, 3 right): from each
+     * pixel along it, the first opaque colour going inward, as medians over short runs so a logo
+     * touching the edge doesn't count. Null if the art is mostly transparent there; empty if the
+     * edge varies too much to be a background.
      */
-    private Backdrop appLogo(String pkg) {
-        Drawable art;
-        boolean banner;
-        float nativeScale = 1f; // decoded pixels per pixel the app actually shipped
-        try {
-            Intent launch = pm.getLeanbackLaunchIntentForPackage(pkg);
-            if (launch == null) launch = pm.getLaunchIntentForPackage(pkg);
-            ResolveInfo ri = launch != null ? pm.resolveActivity(launch, 0) : null;
-            if (ri == null) return null;
-            ActivityInfo ai = ri.activityInfo;
-            Resources res = pm.getResourcesForApplication(ai.applicationInfo);
-            int id = ai.banner != 0 ? ai.banner : ai.applicationInfo.banner;
-            banner = id != 0;
-            if (!banner) id = ai.getIconResource();
-            if (id == 0) return null;
-            TypedValue value = new TypedValue();
-            res.getValueForDensity(id, DisplayMetrics.DENSITY_XXXHIGH, value, true);
-            if (value.density > 0 && value.density != TypedValue.DENSITY_NONE) {
-                nativeScale = DisplayMetrics.DENSITY_XXXHIGH / (float) value.density;
+    private static int[] edge(int[] px, int w, int h, int side) {
+        int n = side < 2 ? w : h, depth = Math.max(1, (side < 2 ? h : w) / 4);
+        int[] raw = new int[n];
+        int found = 0;
+        for (int i = 0; i < n; i++) {
+            for (int d = 0; d < depth; d++) {
+                int x = side == 2 ? d : side == 3 ? w - 1 - d : i;
+                int y = side == 0 ? d : side == 1 ? h - 1 - d : i;
+                int p = px[y * w + x];
+                if (p >>> 24 >= 200) {
+                    raw[i] = p | 0xFF000000;
+                    found++;
+                    break;
+                }
             }
-            art = res.getDrawableForDensity(id, DisplayMetrics.DENSITY_XXXHIGH, null);
-        } catch (PackageManager.NameNotFoundException | Resources.NotFoundException e) {
-            return null;
         }
-        if (art == null) return null;
+        if (found < n * 0.6f) return null;
+
+        // Medians over 16 runs, then straight lines between their centres.
+        int runs = Math.min(16, n);
+        int[] median = new int[runs];
+        int[] values = new int[n];
+        for (int r = 0; r < runs; r++) {
+            int from = r * n / runs, to = (r + 1) * n / runs, m = 0;
+            int color = 0;
+            for (int shift = 16; shift >= 0; shift -= 8) {
+                m = 0;
+                for (int i = from; i < to; i++) if (raw[i] != 0) values[m++] = ch(raw[i], shift);
+                if (m == 0) break;
+                Arrays.sort(values, 0, m);
+                color |= values[m / 2] << shift;
+            }
+            median[r] = m == 0 ? 0 : 0xFF000000 | color;
+        }
+        for (int r = 0; r < runs; r++) { // runs with no opaque pixels take a neighbour's colour
+            if (median[r] != 0) continue;
+            for (int k = 1; k < runs && median[r] == 0; k++) {
+                if (r - k >= 0 && median[r - k] != 0) median[r] = median[r - k];
+                else if (r + k < runs && median[r + k] != 0) median[r] = median[r + k];
+            }
+        }
+        int[] smooth = new int[n];
+        float deviation = 0;
+        for (int i = 0; i < n; i++) {
+            float at = (i + 0.5f) * runs / n - 0.5f;
+            int r0 = Math.max(0, Math.min(runs - 1, (int) Math.floor(at))), r1 = Math.min(runs - 1, r0 + 1);
+            float t = Math.max(0f, Math.min(1f, at - r0));
+            int c = 0xFF000000;
+            for (int shift = 16; shift >= 0; shift -= 8) {
+                c |= Math.round(ch(median[r0], shift) * (1 - t) + ch(median[r1], shift) * t) << shift;
+            }
+            smooth[i] = c;
+            if (raw[i] != 0) {
+                for (int shift = 16; shift >= 0; shift -= 8) deviation += Math.abs(ch(raw[i], shift) - ch(c, shift));
+            }
+        }
+        // Mean difference from the smoothed edge, per channel: a photo's edge is far from smooth.
+        return deviation / (3f * found) > 14f ? new int[0] : smooth;
+    }
+
+    private static int ch(int color, int shift) {
+        return (color >> shift) & 255;
+    }
+
+    private static int mix(int a, int b) {
+        return 0xFF000000 | ((ch(a, 16) + ch(b, 16)) / 2) << 16 | ((ch(a, 8) + ch(b, 8)) / 2) << 8 | (ch(a, 0) + ch(b, 0)) / 2;
+    }
+
+    /**
+     * A logo (transparent around it) large and centred above the dock, with a soft shadow, over a
+     * field lit in the brand colour. Sized by its visible pixels, not its padded canvas: the area of
+     * a {@code size}-unit square for any shape, within the space above the dock, with the canvas at most
+     * {@code maxCanvas} pixels wide so a bitmap isn't enlarged too far. Null if that leaves the logo
+     * smaller than {@code minFill} of the size it should be.
+     */
+    private Bitmap logoScene(Drawable fg, Glyph glyph, float size, float maxCanvas, float minFill, int brand, boolean pale) {
+        float s = width / 1920f, cx = width / 2f, cy = 370f * s;
+        RectF g = glyph.bounds;
+        float aspect = g.width() / g.height() * glyph.aspect; // the logo's own shape, in pixels
+        float want = Math.min(size * s * (float) Math.sqrt(aspect), Math.min(700f * s, size * s * aspect));
+        float canvasW = Math.min(want / g.width(), maxCanvas), canvasH = canvasW / glyph.aspect;
+        float lw = g.width() * canvasW, lh = g.height() * canvasH;
+        if (lw < minFill * want) return null;
 
         Bitmap out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(out);
-        float s = width / 1920f;
-
-        // The field: a banner blurred down to its colours, or the icon's average colour.
-        Bitmap swatch = Bitmap.createBitmap(384, 216, Bitmap.Config.ARGB_8888);
-        Canvas sc = new Canvas(swatch);
-        if (banner) {
-            coverDraw(art, sc, 384, 216);
-        } else {
-            int color = Apps.averageColor(art);
-            Paint g = new Paint();
-            g.setShader(new LinearGradient(0, 0, 0, 216, color, Color.rgb(Color.red(color) / 3, Color.green(color) / 3,
-                    Color.blue(color) / 3), Shader.TileMode.CLAMP));
-            sc.drawPaint(g);
-        }
-        Bitmap field = blur(swatch);
-        swatch.recycle();
+        // The field is all soft gradients: drawn at a quarter size and enlarged, it's the same and far quicker.
+        Bitmap field = Bitmap.createBitmap(width / 4, height / 4, Bitmap.Config.ARGB_8888);
+        brandField(new Canvas(field), field.getWidth(), field.getHeight(), brand, pale, glyph.light, cx / 4f, cy / 4f, s / 4f);
         c.drawBitmap(field, null, new RectF(0, 0, width, height), new Paint(Paint.FILTER_BITMAP_FLAG));
         field.recycle();
+        int pad = 4;
+        Bitmap logo = Bitmap.createBitmap((int) Math.ceil(lw) + 2 * pad, (int) Math.ceil(lh) + 2 * pad, Bitmap.Config.ARGB_8888);
+        int fx = Math.round(pad - g.left * canvasW), fy = Math.round(pad - g.top * canvasH);
+        fg.setBounds(fx, fy, fx + Math.round(canvasW), fy + Math.round(canvasH));
+        fg.draw(new Canvas(logo));
+        int lx = Math.round(cx - lw / 2f) - pad, ly = Math.round(cy - lh / 2f) - pad;
+        Paint soft = new Paint();
+        soft.setMaskFilter(new BlurMaskFilter(30f * s, BlurMaskFilter.Blur.NORMAL));
+        int[] at = new int[2];
+        Bitmap shadow = logo.extractAlpha(soft, at);
+        Paint ink = new Paint(Paint.FILTER_BITMAP_FLAG);
+        ink.setColor(pale ? 0x2E000000 : 0x59000000);
+        c.drawBitmap(shadow, lx + at[0], ly + at[1] + 16f * s, ink);
+        shadow.recycle();
+        c.drawBitmap(logo, lx, ly, null);
+        logo.recycle();
+        return out;
+    }
 
-        // The art itself, centred above the dock.
-        int iw = art.getIntrinsicWidth(), ih = art.getIntrinsicHeight();
-        float aspect = iw > 0 && ih > 0 ? (float) iw / ih : banner ? 16f / 9f : 1f;
-        float w = Math.min((banner ? 980f : 380f) * s, (banner ? 420f : 380f) * s * aspect);
-        if (art instanceof BitmapDrawable) w = Math.min(w, ((BitmapDrawable) art).getBitmap().getWidth() / nativeScale * 3f);
-        float h = w / aspect, cx = width / 2f, cy = 370f * s;
-        art.setBounds(Math.round(cx - w / 2f), Math.round(cy - h / 2f), Math.round(cx + w / 2f), Math.round(cy + h / 2f));
-        if (banner) {
-            RectF dst = new RectF(art.getBounds());
-            int layer = c.saveLayer(dst, null);
-            art.draw(c);
-            Paint mask = new Paint();
-            mask.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_IN));
-            int[] fade = {0x00000000, 0xFF000000, 0xFF000000, 0x00000000};
-            float[] stops = {0f, 0.14f, 0.86f, 1f};
-            mask.setShader(new LinearGradient(dst.left, 0, dst.right, 0, fade, stops, Shader.TileMode.CLAMP));
-            c.drawRect(dst, mask);
-            mask.setShader(new LinearGradient(0, dst.top, 0, dst.bottom, fade, stops, Shader.TileMode.CLAMP));
-            c.drawRect(dst, mask);
-            c.restoreToCount(layer);
-        } else {
-            art.draw(c);
+    /** Where a logo sits on its canvas, and how bright it is. */
+    private static final class Glyph {
+        private static final int N = 216; // measuring size for icons
+
+        /** The visible pixels' bounds, as fractions of the canvas. */
+        final RectF bounds;
+        /** The canvas's width over its height. */
+        final float aspect;
+        /** The visible pixels' mean luminance, 0–1. */
+        final float light;
+
+        Glyph(RectF bounds, float aspect, float light) {
+            this.bounds = bounds;
+            this.aspect = aspect;
+            this.light = light;
         }
-        Bitmap blurred = blur(out);
-        return new Backdrop(toHardware(out), blurred, null);
+
+        /** An icon layer's logo, or null unless it's a stand-alone one covering at most {@code maxCover} of the canvas. */
+        static Glyph measure(Drawable fg, float maxCover) {
+            Bitmap b = Bitmap.createBitmap(N, N, Bitmap.Config.ARGB_8888);
+            fg.setBounds(0, 0, N, N);
+            fg.draw(new Canvas(b));
+            int[] px = new int[N * N];
+            b.getPixels(px, 0, N, 0, 0, N, N);
+            b.recycle();
+            return of(px, N, N, maxCover, true);
+        }
+
+        /**
+         * The logo in w×h pixels, or null if there's nothing there or it covers more than
+         * {@code maxCover} (a whole picture). With {@code noCards}, a large solid shape filling its
+         * bounds is refused too: a logo with its own background.
+         */
+        static Glyph of(int[] px, int w, int h, float maxCover, boolean noCards) {
+            int minX = w, minY = h, maxX = -1, maxY = -1, count = 0;
+            double lum = 0, weight = 0;
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    int p = px[y * w + x], a = p >>> 24;
+                    if (a < 40) continue;
+                    count++;
+                    minX = Math.min(minX, x);
+                    maxX = Math.max(maxX, x);
+                    minY = Math.min(minY, y);
+                    maxY = Math.max(maxY, y);
+                    lum += a * luminance(p);
+                    weight += a;
+                }
+            }
+            float cover = count / (float) (w * h);
+            if (cover < 0.004f || cover > maxCover) return null;
+            int bw = maxX - minX + 1, bh = maxY - minY + 1;
+            if (noCards && count > 0.9f * bw * bh && bw > 0.4f * w && bh > 0.4f * h) return null;
+            // Leave out stray specks at the far edges: the few outermost visible pixels on each side.
+            int[] cols = new int[w], rows = new int[h];
+            for (int y = minY; y <= maxY; y++) {
+                for (int x = minX; x <= maxX; x++) {
+                    if (px[y * w + x] >>> 24 < 40) continue;
+                    cols[x]++;
+                    rows[y]++;
+                }
+            }
+            int stray = Math.round(count * 0.003f);
+            for (int sum = cols[minX]; sum <= stray && minX < maxX; ) sum += cols[++minX];
+            for (int sum = cols[maxX]; sum <= stray && maxX > minX; ) sum += cols[--maxX];
+            for (int sum = rows[minY]; sum <= stray && minY < maxY; ) sum += rows[++minY];
+            for (int sum = rows[maxY]; sum <= stray && maxY > minY; ) sum += rows[--maxY];
+            RectF bounds = new RectF(minX / (float) w, minY / (float) h, (maxX + 1) / (float) w, (maxY + 1) / (float) h);
+            return new Glyph(bounds, w / (float) h, (float) (lum / weight));
+        }
+    }
+
+    /** The pixel width of the bitmap behind a drawable, or 0 if it's a vector (sharp at any size). */
+    private static int bitmapWidth(Drawable d) {
+        while (d instanceof DrawableWrapper) d = ((DrawableWrapper) d).getDrawable();
+        return d instanceof BitmapDrawable ? ((BitmapDrawable) d).getBitmap().getWidth() : 0;
+    }
+
+
+    /**
+     * The colour a brand reads as: vivid pixels grouped by hue, each weighted by how vivid it is, and
+     * the best-represented hue averaged. Art with too little colour (white on black, say) gives grey.
+     */
+    private static int brandColor(Drawable d) {
+        int iw = d.getIntrinsicWidth(), ih = d.getIntrinsicHeight();
+        int w = 64, h = iw > 0 && ih > 0 && iw > ih * 1.2f ? 36 : 64;
+        Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        coverDraw(d, new Canvas(b), w, h);
+        int[] px = new int[w * h];
+        b.getPixels(px, 0, w, 0, 0, w, h);
+        b.recycle();
+        final int bins = 24;
+        float[] weight = new float[bins], red = new float[bins], green = new float[bins], blue = new float[bins];
+        float[] hsv = new float[3];
+        int opaque = 0;
+        for (int p : px) {
+            if (p >>> 24 < 128) continue;
+            opaque++;
+            Color.colorToHSV(p, hsv);
+            if (hsv[1] < 0.2f || hsv[2] < 0.18f) continue; // greys, black and white
+            int bin = (int) (hsv[0] / 360f * bins) % bins;
+            float vivid = hsv[1] * hsv[2];
+            weight[bin] += vivid;
+            red[bin] += vivid * ((p >> 16) & 255);
+            green[bin] += vivid * ((p >> 8) & 255);
+            blue[bin] += vivid * (p & 255);
+        }
+        int best = -1;
+        float bestWeight = 0;
+        for (int i = 0; i < bins; i++) {
+            float sum = weight[(i + bins - 1) % bins] + weight[i] + weight[(i + 1) % bins];
+            if (sum > bestWeight) {
+                bestWeight = sum;
+                best = i;
+            }
+        }
+        if (best < 0 || bestWeight < 0.03f * opaque) return 0xFF808080;
+        float r = 0, g = 0, bl = 0;
+        for (int i = best - 1; i <= best + 1; i++) {
+            int k = (i + bins) % bins;
+            r += red[k];
+            g += green[k];
+            bl += blue[k];
+        }
+        return Color.rgb(Math.round(r / bestWeight), Math.round(g / bestWeight), Math.round(bl / bestWeight));
+    }
+
+    /**
+     * A field in the brand's colour, brightest behind the logo like light falling on it: deep for a
+     * light logo, pale for a dark one, grey for a brand without a colour.
+     */
+    private static void brandField(Canvas c, int w, int h, int brand, boolean pale, float logoLight, float cx, float cy, float s) {
+        float[] hsv = new float[3];
+        Color.colorToHSV(brand, hsv);
+        float hue = hsv[0], sat = Math.min(hsv[1], 0.85f);
+        // Keep the glow well below the logo's own brightness so the logo stands out from it.
+        float glow = pale ? 0.98f : sat < 0.12f ? 0.34f : 0.62f;
+        while (!pale && glow > 0.28f && luminance(Color.HSVToColor(new float[]{hue, sat * 0.9f, glow})) > logoLight - 0.4f) {
+            glow -= 0.02f;
+        }
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setDither(true);
+        int top = Color.HSVToColor(new float[]{hue, sat, pale ? 0.80f : 0.17f});
+        int bottom = Color.HSVToColor(new float[]{hue, sat, pale ? 0.60f : 0.05f});
+        p.setShader(new LinearGradient(0, 0, 0, h, top, bottom, Shader.TileMode.CLAMP));
+        c.drawPaint(p);
+        int bloom = Color.HSVToColor(new float[]{hue, sat * (pale ? 0.6f : 0.9f), glow}) & 0x00FFFFFF;
+        int[] falloff = {bloom | 0xE0000000, bloom | 0x80000000, bloom | 0x26000000, bloom};
+        p.setShader(new RadialGradient(cx, cy, 1050f * s, falloff, new float[]{0f, 0.3f, 0.65f, 1f}, Shader.TileMode.CLAMP));
+        c.drawPaint(p);
+    }
+
+    private static float luminance(int p) {
+        return (0.2126f * ((p >> 16) & 255) + 0.7152f * ((p >> 8) & 255) + 0.0722f * (p & 255)) / 255f;
     }
 
     /**
@@ -393,6 +866,29 @@ final class Backdrops {
         if (hardware == null) return software;
         software.recycle();
         return hardware;
+    }
+
+    /**
+     * The app's launch screen (its launch theme's windowBackground), screen-sized, when that's a real
+     * picture of about 720p or more. Most TV apps launch on a flat colour or a small logo on black,
+     * which make a worse backdrop than the logo field, so those return null.
+     */
+    private Bitmap splash(Resources res, ActivityInfo ai) {
+        int themeId = ai.getThemeResource();
+        if (themeId == 0) return null;
+        try {
+            Resources.Theme theme = res.newTheme();
+            theme.applyStyle(themeId, true);
+            TypedValue value = new TypedValue();
+            if (!theme.resolveAttribute(android.R.attr.windowBackground, value, true) || value.resourceId == 0) return null;
+            Drawable d = res.getDrawable(value.resourceId, theme);
+            if (!(d instanceof BitmapDrawable) || d.getIntrinsicWidth() < 1216 || d.getIntrinsicHeight() < 684) return null;
+            Bitmap out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            coverDraw(d, new Canvas(out), width, height);
+            return out;
+        } catch (RuntimeException e) {
+            return null; // another app's resources: anything can go wrong, and the logo still works
+        }
     }
 
     /** Draws {@code d} scaled to cover w×h, centred. */
@@ -488,15 +984,6 @@ final class Backdrops {
         } catch (NoSuchAlgorithmException e) {
             return Integer.toHexString(s.hashCode());
         }
-    }
-
-    private static String key(File f) {
-        return f.getPath() + '@' + f.lastModified();
-    }
-
-    private static boolean isImage(String ext) {
-        for (String e : EXTENSIONS) if (e.equalsIgnoreCase(ext)) return true;
-        return false;
     }
 
     /** Scales and centre-crops {@code src} to exactly w×h. */

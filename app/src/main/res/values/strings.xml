@@ -6,8 +6,9 @@
     <string name="hide_app">Hide App</string>
     <string name="hidden">Hidden</string>
     <string name="hidden_empty">Move apps here to hide them</string>
-    <string name="edit_hint">Select an app to move it · Press Back when done</string>
-    <string name="hold_hint">Use the arrows to move · Press select to drop it</string>
+    <string name="continue_watching">Continue Watching</string>
+    <string name="recommendations">Recommendations</string>
+    <string name="play">Play</string>
     <string name="full_screen_hint">Press up for full screen</string>
     <string name="cannot_open">Can\'t open %s</string>
     <string name="not_available">Not available on this TV</string>

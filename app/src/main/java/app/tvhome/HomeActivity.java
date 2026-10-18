@@ -97,6 +97,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         super.onResume();
         resumed = true;
         refresh();
+        profile.refresh(view::setAvatar); // at most once a day
         view.setClockRunning(true);
     }
 
@@ -157,16 +158,14 @@ public final class HomeActivity extends Activity implements HomeView.Host {
 
     /** A recommendation image just finished downloading: show it if its app is focused. */
     private void shelfReady() {
-        if (isDestroyed()) return;
-        updateBackdrop();
-        view.invalidate(); // the "Press up for full screen" hint may now apply
+        if (!isDestroyed()) updateBackdrop();
     }
 
     private void updateBackdrop() {
         // Below the dock the backdrop stays on what the dock last showed (blurred and dimmed, as on
         // tvOS): no image switch, so no costly crossfade on top of the blur transition.
         if (!focusInDock && !wantedBackdrop.isEmpty()) return;
-        String key = focused != null ? backdrops.backdropKey(focused.pkg) : backdrops.wallpaperKey();
+        String key = focused != null ? backdrops.backdropKey(focused.pkg) : Backdrops.DEFAULT;
         Recommendations.Item program = focused != null ? backdrops.recommendation(focused.pkg) : null;
         if (key.equals(wantedBackdrop)) return;
         wantedBackdrop = key;
@@ -196,8 +195,19 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     }
 
     @Override
-    public boolean hasTopShelf(Apps.Entry entry) {
-        return entry != null && backdrops.shelfKey(entry.pkg) != null;
+    public int shelfSources(Apps.Entry entry) {
+        return backdrops.sources(entry.pkg);
+    }
+
+    @Override
+    public boolean shelfSourceOn(Apps.Entry entry, int source) {
+        return backdrops.sourceOn(entry.pkg, source);
+    }
+
+    @Override
+    public void setShelfSource(Apps.Entry entry, int source, boolean on) {
+        backdrops.setSource(entry.pkg, source, on);
+        refresh(); // re-reads recommendations without it, and swaps the backdrop
     }
 
     @Override

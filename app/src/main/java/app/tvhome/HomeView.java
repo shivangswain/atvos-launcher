@@ -3,6 +3,7 @@ package app.tvhome;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.BitmapShader;
 import android.graphics.BlurMaskFilter;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -47,13 +48,16 @@ final class HomeView extends View {
 
     interface Host {
         void onFocusChanged(Apps.Entry entry, boolean inDock);
-        boolean hasTopShelf(Apps.Entry entry);
         void launch(Apps.Entry entry, Rect from);
         void showInfo(Apps.Entry entry);
         void hide(Apps.Entry entry);
         /** Persists the order and the hidden apps after Edit Home Screen. */
         void saveLayout(List<Apps.Entry> visible, List<Apps.Entry> hidden);
         void launchProgram(Recommendations.Item program, Rect from);
+        /** The app's recommendation sources worth a menu switch, as {@link Recommendations#WATCH_NEXT} / {@link Recommendations#PREVIEWS} bits. */
+        int shelfSources(Apps.Entry entry);
+        boolean shelfSourceOn(Apps.Entry entry, int source);
+        void setShelfSource(Apps.Entry entry, int source, boolean on);
         Controls.State controlState();
         /** Runs a Control Center action; returns true to keep the Control Center open. */
         boolean control(int id);
@@ -74,7 +78,11 @@ final class HomeView extends View {
     private static final float SHADOW_PAD = 60f, SHADOW_DY = 20f, SHADOW_BLUR = 30f;
     private static final float CLOCK_TOP = 50f, CLOCK_H = 56f, AVATAR = 40f;
     private static final float HIDDEN_GAP = 84f; // room for the "Hidden" title above hidden apps in edit mode
-    private static final int RED = 0xFFFF5F57, DARK_RED = 0xFFE0342B;
+    private static final int RED = 0xFFFF5F57, DARK_RED = 0xFFE0342B, INK = 0xFF141416;
+    private static final float PLAY_H = 64f;
+    private static final long IDLE_MS = 60_000;
+    /** What the focused app's top shelf is: nothing, a full-screen picture, or a smaller one on a card. */
+    private static final int NO_SHELF = 0, FULL_SHELF = 1, CARD_SHELF = 2;
 
     private final Host host;
     private final List<Apps.Entry> apps = new ArrayList<>();   // visible, in order
@@ -87,11 +95,20 @@ final class HomeView extends View {
 
     // Animated values and the states that drive them
     private float scroll, expand, hint, menuAnim, pillAnim, ccAnim, editAnim, fade = 1f;
+    private float cardAnim, playFocus, chrome = 1f; // card focused; Play button focused; dock and Play shown (not idle)
     private float away; // 0 in the dock, 1 once focus is in the grid: blurs and dims the backdrop
     private int dim; // black overlay alpha once focus leaves the dock
     // Liquid-glass text colour over the backdrop: 0 = white, 1 = dark (on bright images)
     private float clockInk, hintInk, ccInk;
     private boolean expanded, menuOpen, longPressed, pillFocused, ccOpen;
+    private boolean cardFocused; // a small recommendation's card, selected from the dock
+    private boolean idle;        // a minute untouched on the full-screen shelf: only the picture shows
+    private final Runnable goIdle = () -> {
+        if (expanded && !pillFocused && !ccOpen && !menuOpen) {
+            idle = true;
+            kick();
+        }
+    };
     private boolean editing, holding; // Edit Home Screen; holding = the focused app is picked up
     private Backdrops.Backdrop backdrop, previous;
 
@@ -104,7 +121,8 @@ final class HomeView extends View {
     private final List<Drawable> menuIcons = new ArrayList<>();
     private final List<Boolean> menuDanger = new ArrayList<>();
     private final List<Runnable> menuActions = new ArrayList<>();
-    private final Drawable editIcon, infoIcon, hideIcon;
+    private final List<Boolean> menuStays = new ArrayList<>(); // switches keep the menu open to show their new state
+    private final Drawable editIcon, infoIcon, hideIcon, onIcon, offIcon, playIcon;
     private int menuSel;
 
     // Clock
@@ -133,15 +151,20 @@ final class HomeView extends View {
     private final Paint labelText = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint hintText = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint menuText = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint playText = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint cardPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private BitmapShader sharpShader; // the backdrop itself, to redraw a focused card larger
+    private Bitmap sharpShaderOf;
     private final Paint bottomScrim = new Paint();
     private final Paint topScrim = new Paint();
     private final LinearGradient rimGradient, sheenGradient;
     private final Path chevron = new Path();
-    private final RectF r = new RectF(), r2 = new RectF();
+    private final RectF r = new RectF(), r2 = new RectF(), playRect = new RectF();
     private final Matrix m = new Matrix();
     private Bitmap defaultAvatar, avatar, shadowMask;
 
-    private final String fullScreenHint, editHint, holdHint, hiddenTitle, hiddenEmpty;
+    private final String fullScreenHint, hiddenTitle, hiddenEmpty, playLabel;
+    private final float playWidth;
 
     HomeView(Context context, Host host) {
         super(context);
@@ -150,13 +173,15 @@ final class HomeView extends View {
         setFocusableInTouchMode(true);
 
         fullScreenHint = context.getString(R.string.full_screen_hint);
-        editHint = context.getString(R.string.edit_hint);
-        holdHint = context.getString(R.string.hold_hint);
+        playLabel = context.getString(R.string.play);
         hiddenTitle = context.getString(R.string.hidden);
         hiddenEmpty = context.getString(R.string.hidden_empty);
         editIcon = menuIcon(context, R.drawable.ic_tv);
         infoIcon = menuIcon(context, R.drawable.ic_info);
         hideIcon = menuIcon(context, R.drawable.ic_hide);
+        onIcon = menuIcon(context, R.drawable.ic_check_on);
+        offIcon = menuIcon(context, R.drawable.ic_check_off);
+        playIcon = menuIcon(context, R.drawable.ic_play);
 
         Typeface medium = Typeface.create(Typeface.DEFAULT, 500, false);
         Typeface semibold = Typeface.create(Typeface.DEFAULT, 600, false);
@@ -171,6 +196,9 @@ final class HomeView extends View {
         hintText.setTextAlign(Paint.Align.CENTER);
         menuText.setTypeface(medium);
         menuText.setTextSize(26f);
+        playText.setTypeface(semibold);
+        playText.setTextSize(26f);
+        playWidth = 26f + 30f + 10f + playText.measureText(playLabel) + 34f;
         headerText.setTypeface(semibold);
         headerText.setTextSize(30f);
         ColorMatrix grey = new ColorMatrix();
@@ -251,7 +279,8 @@ final class HomeView extends View {
         ccOpen = false;
         pillFocused = false;
         if (editing) finishEditing();
-        expanded = false;
+        setExpanded(false);
+        cardFocused = false;
         if (!apps.isEmpty()) focus = Math.min(focus, apps.size() - 1) % COLS;
         focusChanged();
     }
@@ -292,6 +321,16 @@ final class HomeView extends View {
 
     @Override
     public boolean onKeyDown(int code, KeyEvent e) {
+        if (expanded) {
+            removeCallbacks(goIdle);
+            postDelayed(goIdle, IDLE_MS);
+        }
+        if (idle) {
+            // The first press only brings the dock and Play button back.
+            idle = false;
+            kick();
+            if (isSelect(code) || isArrow(code) || code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_MENU) return true;
+        }
         if (menuOpen) {
             // Select acts on release (see onKeyUp): a held remote key repeats, and those repeats
             // must not pick a menu item the moment the long press opens the menu.
@@ -325,8 +364,8 @@ final class HomeView extends View {
                 case KeyEvent.KEYCODE_BACK:
                     if (code == KeyEvent.KEYCODE_DPAD_DOWN) navSound(0, 1);
                     pillFocused = false;
-                    expanded = false;
-                    kick();
+                    setExpanded(false);
+                    cardFocused = false;
                     return true;
                 case KeyEvent.KEYCODE_MENU:
                     openControlCenter();
@@ -339,12 +378,13 @@ final class HomeView extends View {
                     return super.onKeyDown(code, e);
             }
         }
-        if (expanded) {
+        if (expanded || cardFocused) {
             switch (code) {
                 case KeyEvent.KEYCODE_DPAD_DOWN:
                 case KeyEvent.KEYCODE_BACK:
                     if (code == KeyEvent.KEYCODE_DPAD_DOWN) navSound(0, 1);
                     setExpanded(false);
+                    cardFocused = false;
                     return true;
                 case KeyEvent.KEYCODE_DPAD_UP:
                     navSound(0, -1);
@@ -370,7 +410,7 @@ final class HomeView extends View {
 
     @Override
     public boolean onKeyLongPress(int code, KeyEvent e) {
-        if (isSelect(code) && !editing && !expanded && !menuOpen && !pillFocused && !ccOpen) {
+        if (isSelect(code) && !editing && !expanded && !cardFocused && !menuOpen && !pillFocused && !ccOpen) {
             longPressed = true;
             openMenu();
             return true;
@@ -395,6 +435,11 @@ final class HomeView extends View {
     private static boolean isSelect(int code) {
         return code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
                 || code == KeyEvent.KEYCODE_NUMPAD_ENTER || code == KeyEvent.KEYCODE_BUTTON_A;
+    }
+
+    private static boolean isArrow(int code) {
+        return code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN
+                || code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT;
     }
 
     /**
@@ -444,9 +489,17 @@ final class HomeView extends View {
                 return;
             }
         } else if (!editing) {
-            // Up from the dock: the full-screen top shelf if there is one, else the clock pill.
+            // Up from the dock: a full-screen top shelf, or a small one's card, else the clock pill.
             navSound(0, -1);
-            if (host.hasTopShelf(focused())) setExpanded(true); else focusPill();
+            int shelf = shelf();
+            if (shelf == FULL_SHELF) {
+                setExpanded(true);
+            } else if (shelf == CARD_SHELF) {
+                cardFocused = true;
+                kick();
+            } else {
+                focusPill();
+            }
             return;
         } else {
             return;
@@ -494,19 +547,22 @@ final class HomeView extends View {
             kick();
             return;
         }
+        Recommendations.Item program = backdrop != null ? backdrop.program : null;
+        if ((expanded || cardFocused) && program != null && program.pkg.equals(e.pkg)) {
+            // Play on the top shelf: what's shown (as on tvOS), zooming out of the Play button.
+            Rect from = new Rect(Math.round(playRect.left * scale), Math.round(playRect.top * scale),
+                    Math.round(playRect.right * scale), Math.round(playRect.bottom * scale));
+            if (program.intentUri != null) host.launchProgram(program, from); else host.launch(e, from);
+            setExpanded(false);
+            cardFocused = false;
+            return;
+        }
         // Launch from the focused tile's on-screen rect so the system zooms the app out of it.
         float w = TILE_W * FOCUS_SCALE, h = TILE_H * FOCUS_SCALE;
         float cx = e.x + TILE_W / 2f, cy = e.y + TILE_H / 2f - scroll + lift();
         Rect from = new Rect(Math.round((cx - w / 2) * scale), Math.round((cy - h / 2) * scale),
                 Math.round((cx + w / 2) * scale), Math.round((cy + h / 2) * scale));
-        // In the full-screen top shelf, select plays what's shown (as on tvOS); otherwise open the app.
-        Recommendations.Item program = backdrop != null ? backdrop.program : null;
-        if (expanded && program != null && program.intentUri != null && program.pkg.equals(e.pkg)) {
-            host.launchProgram(program, from);
-        } else {
-            host.launch(e, from);
-        }
-        if (expanded) setExpanded(false);
+        host.launch(e, from);
     }
 
     private void focusPill() {
@@ -528,9 +584,21 @@ final class HomeView extends View {
         }
     }
 
+    /** The full-screen top shelf; after a minute untouched, the dock and Play button fade away. */
     private void setExpanded(boolean on) {
         expanded = on;
+        idle = false;
+        removeCallbacks(goIdle);
+        if (on) postDelayed(goIdle, IDLE_MS);
         kick();
+    }
+
+    /** The top shelf showing for the focused dock app (only once its backdrop is the one on screen). */
+    private int shelf() {
+        Apps.Entry e = focused();
+        Backdrops.Backdrop b = backdrop;
+        if (e == null || b == null || b.program == null || !inDock() || !b.program.pkg.equals(e.pkg)) return NO_SHELF;
+        return b.card != null ? CARD_SHELF : FULL_SHELF;
     }
 
     /** Edit Home Screen: every app jiggles; select picks one up, the arrows move it, select drops it. */
@@ -551,29 +619,54 @@ final class HomeView extends View {
     private void openMenu() {
         Apps.Entry e = focused();
         if (e == null) return;
-        menuLabels.clear();
-        menuIcons.clear();
-        menuDanger.clear();
-        menuActions.clear();
-        addMenu(R.string.edit_home, editIcon, false, this::startEditing);
-        addMenu(R.string.app_info, infoIcon, false, () -> host.showInfo(e));
-        addMenu(R.string.hide_app, hideIcon, true, () -> host.hide(e));
+        buildMenu(e);
         menuSel = 0;
         menuOpen = true;
         kick();
     }
 
-    private void addMenu(int label, Drawable icon, boolean danger, Runnable action) {
+    /**
+     * The app's menu. Apps that publish Continue Watching or recommendations get a switch for each,
+     * so the top shelf can show either, both, or neither (then just the app's logo).
+     */
+    private void buildMenu(Apps.Entry e) {
+        menuLabels.clear();
+        menuIcons.clear();
+        menuDanger.clear();
+        menuActions.clear();
+        menuStays.clear();
+        addMenu(R.string.edit_home, editIcon, false, false, this::startEditing);
+        addMenu(R.string.app_info, infoIcon, false, false, () -> host.showInfo(e));
+        int sources = host.shelfSources(e);
+        if ((sources & Recommendations.WATCH_NEXT) != 0) addSwitch(R.string.continue_watching, e, Recommendations.WATCH_NEXT);
+        if ((sources & Recommendations.PREVIEWS) != 0) addSwitch(R.string.recommendations, e, Recommendations.PREVIEWS);
+        addMenu(R.string.hide_app, hideIcon, true, false, () -> host.hide(e));
+    }
+
+    private void addSwitch(int label, Apps.Entry e, int source) {
+        boolean on = host.shelfSourceOn(e, source);
+        addMenu(label, on ? onIcon : offIcon, false, true, () -> host.setShelfSource(e, source, !on));
+    }
+
+    private void addMenu(int label, Drawable icon, boolean danger, boolean stays, Runnable action) {
         menuLabels.add(getContext().getString(label));
         menuIcons.add(icon);
         menuDanger.add(danger);
         menuActions.add(action);
+        menuStays.add(stays);
     }
 
     private void activateMenu() {
         playSoundEffect(SoundEffectConstants.CLICK);
-        menuOpen = false;
-        menuActions.get(menuSel).run();
+        int sel = menuSel;
+        menuActions.get(sel).run();
+        Apps.Entry e = focused();
+        if (menuStays.get(sel) && e != null) {
+            buildMenu(e);
+            menuSel = sel;
+        } else {
+            menuOpen = false;
+        }
         kick();
     }
 
@@ -664,9 +757,16 @@ final class HomeView extends View {
         }
         scroll = ease(scroll, scrollTo, 10f, dt, 0.2f);
         away = ease(away, dock ? 0f : 1f, 8f, dt, 0.002f);
+        // A shelf that went away (its source switched off, say) can't stay selected.
+        int shelf = shelf();
+        if (expanded && shelf != FULL_SHELF) setExpanded(false);
+        if (cardFocused && shelf != CARD_SHELF) cardFocused = false;
         expand = ease(expand, expanded ? 1f : 0f, 9f, dt, 0.001f);
+        cardAnim = ease(cardAnim, cardFocused && !pillFocused && !ccOpen ? 1f : 0f, 14f, dt, 0.002f);
+        playFocus = ease(playFocus, (expanded || cardFocused) && !pillFocused && !ccOpen ? 1f : 0f, 14f, dt, 0.002f);
+        chrome = ease(chrome, idle ? 0f : 1f, idle ? 2.5f : 12f, dt, 0.002f); // fades out slowly, back at once
         editAnim = ease(editAnim, editing ? 1f : 0f, 10f, dt, 0.002f);
-        boolean showHint = dock && !expanded && !menuOpen && !editing && !pillFocused && host.hasTopShelf(focused());
+        boolean showHint = dock && !expanded && !cardFocused && !menuOpen && !editing && !pillFocused && shelf == FULL_SHELF;
         hint = ease(hint, showHint ? 1f : 0f, 8f, dt, 0.002f);
         menuAnim = ease(menuAnim, menuOpen ? 1f : 0f, 18f, dt, 0.002f);
         pillAnim = ease(pillAnim, pillFocused ? 1f : 0f, 16f, dt, 0.002f);
@@ -692,14 +792,14 @@ final class HomeView extends View {
             }
             e.x = ease(e.x, sx, 14f, dt, 0.2f);
             e.y = ease(e.y, sy, 14f, dt, 0.2f);
-            e.focus = ease(e.focus, i == focus && !expanded && !pillFocused ? 1f : 0f, 14f, dt, 0.002f);
+            e.focus = ease(e.focus, i == focus && !expanded && !cardFocused && !pillFocused ? 1f : 0f, 14f, dt, 0.002f);
         }
         if (editing) animating = true; // jiggle
     }
 
-    /** How far the UI has slid down for the full-screen top shelf. */
+    /** How far the UI has slid down for the full-screen top shelf: the dock peeks in where the second row was. */
     private float lift() {
-        return expand * (height - DOCK_ROW_Y + DOCK_PAD_Y + 40f);
+        return expand * ROW_PITCH;
     }
 
     // ---- Drawing -----------------------------------------------------------------------------
@@ -725,22 +825,31 @@ final class HomeView extends View {
         c.save();
         c.scale(scale, scale);
         drawBackground(c);
+        drawCard(c);
 
         float offset = lift() - scroll;
-        c.save();
-        c.translate(0, offset);
-        drawDock(c, offset);
-        drawHiddenSection(c);
-        int n = total();
-        for (int i = 0; i < n; i++) if (i != focus) drawTile(c, entry(i), i, offset);
-        if (focus < n) drawTile(c, entry(focus), focus, offset);
-        drawHint(c);
-        c.restore();
+        // Idle on the full-screen shelf, the dock fades away with the Play button (as one layer, only while fading).
+        int chromeAlpha = Math.round(255 * (expanded ? chrome : 1f));
+        if (chromeAlpha > 2) {
+            int layer = chromeAlpha < 253
+                    ? c.saveLayerAlpha(0f, Math.max(0f, DOCK_ROW_Y - DOCK_PAD_Y - PLAY_H - 120f + offset), W, height, chromeAlpha)
+                    : -1;
+            c.save();
+            c.translate(0, offset);
+            drawDock(c, offset);
+            drawHiddenSection(c);
+            int n = total();
+            for (int i = 0; i < n; i++) if (i != focus) drawTile(c, entry(i), i, offset);
+            if (focus < n) drawTile(c, entry(focus), focus, offset);
+            drawHint(c);
+            c.restore();
+            drawFullScreenPlay(c);
+            if (layer >= 0) c.restoreToCount(layer);
+        }
 
         if (ccAnim > 0f) c.drawColor(Color.argb(Math.round(110 * ccAnim), 0, 0, 0));
         drawClock(c);
         if (ccAnim > 0f) cc.draw(c, ccGlass, ccAnim, ccInk);
-        if (editing) drawBanner(c, holding ? holdHint : editHint);
         if (menuAnim > 0f) drawMenu(c, offset);
         c.restore();
 
@@ -930,14 +1039,66 @@ final class HomeView extends View {
         }
     }
 
-    /** A glass pill centred at the top of the screen. */
-    private void drawBanner(Canvas c, String text) {
-        float w = menuText.measureText(text) + 56f, top = 50f, h = 56f;
-        r.set((W - w) / 2f, top, (W + w) / 2f, top + h);
-        drawGlass(c, r, h / 2f, 0f, 0x26000000, 255);
-        menuText.setColor(Color.WHITE);
-        menuText.setTextAlign(Paint.Align.CENTER);
-        c.drawText(text, W / 2f, top + h / 2f + 9f, menuText);
+    /**
+     * A small recommendation's card while it's selected: redrawn from the backdrop a little larger,
+     * lifted on a shadow with a sheen, as a focused tile is, with a Play button under its title.
+     */
+    private void drawCard(Canvas c) {
+        Backdrops.Backdrop b = backdrop;
+        if (cardAnim <= 0.01f || b == null || b.card == null) return;
+        RectF card = b.card;
+        float k = 1f + 0.06f * cardAnim, cx = card.centerX(), cy = card.centerY();
+        float w = card.width() * k, h = card.height() * k, radius = Backdrops.CARD_R * k;
+        r.set(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f);
+        if (shadowMask != null) {
+            float pad = SHADOW_PAD * w / (TILE_W * FOCUS_SCALE), dy = SHADOW_DY * 1.5f * cardAnim;
+            r2.set(r.left - pad, r.top - pad + dy, r.right + pad, r.bottom + pad + dy);
+            shadow.setAlpha(Math.round(190 * cardAnim));
+            c.drawBitmap(shadowMask, null, r2, shadow);
+        }
+        if (sharpShaderOf != b.sharp) {
+            sharpShader = new BitmapShader(b.sharp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            sharpShaderOf = b.sharp;
+        }
+        m.setScale(W / b.sharp.getWidth() * k, height / b.sharp.getHeight() * k);
+        m.postTranslate(cx * (1f - k), cy * (1f - k)); // the backdrop, enlarged about the card's centre
+        sharpShader.setLocalMatrix(m);
+        cardPaint.setShader(sharpShader);
+        c.drawRoundRect(r, radius, radius, cardPaint);
+        m.setScale(1f, h * 0.6f);
+        m.postTranslate(0f, r.top);
+        sheenGradient.setLocalMatrix(m);
+        sheen.setAlpha(Math.round(255 * cardAnim));
+        c.drawRoundRect(r, radius, radius, sheen);
+        drawPlay(c, card.right + 60f, b.titleBottom + 34f, Math.round(255 * cardAnim));
+    }
+
+    /** The full-screen shelf's Play button, above the peeking dock. */
+    private void drawFullScreenPlay(Canvas c) {
+        if (expand <= 0.01f) return;
+        float y = DOCK_ROW_Y - DOCK_PAD_Y + ROW_PITCH - 44f - PLAY_H + (1f - expand) * 30f;
+        drawPlay(c, GRID_X, y, Math.round(255 * expand));
+    }
+
+    /** A capsule button: glass, or white with dark ink while focused (the only thing focused on a shelf). */
+    private void drawPlay(Canvas c, float x, float y, int alpha) {
+        r.set(x, y, x + playWidth, y + PLAY_H);
+        playRect.set(r);
+        float radius = PLAY_H / 2f, f = playFocus;
+        if (f < 0.99f) drawGlass(c, r, radius, 0f, 0x24FFFFFF, Math.round(alpha * (1f - f)));
+        if (f > 0.01f) {
+            fill.setColor(Color.argb(Math.round(alpha * f * 0.96f), 255, 255, 255));
+            c.drawRoundRect(r, radius, radius, fill);
+        }
+        int level = Math.round(255 - (255 - Color.red(INK)) * f);
+        int ink = Color.argb(alpha, level, level, level);
+        float size = 30f, ix = x + 26f, iy = y + (PLAY_H - size) / 2f;
+        playIcon.setBounds(Math.round(ix), Math.round(iy), Math.round(ix + size), Math.round(iy + size));
+        playIcon.setTint(ink | 0xFF000000);
+        playIcon.setAlpha(alpha);
+        playIcon.draw(c);
+        playText.setColor(ink);
+        c.drawText(playLabel, ix + size + 10f, y + PLAY_H / 2f + 9f, playText);
     }
 
     /** The tvOS long-press menu: a dark glass list beside the focused icon, icons on the right. */
@@ -954,8 +1115,9 @@ final class HomeView extends View {
         left += (1f - menuAnim) * (right ? -16f : 16f);
         float top = Math.max(30f, Math.min(tileT, height - 30f - h));
 
+        // Capsule rows in a container whose corners follow them, like the dock and Control Center.
         r.set(left, top, left + w, top + h);
-        drawGlass(c, r, 22f, 0f, 0xB0141418, alpha);
+        drawGlass(c, r, itemH / 2f + pad, 0f, 0xB0141418, alpha);
         menuText.setTextAlign(Paint.Align.LEFT);
         for (int i = 0; i < menuLabels.size(); i++) {
             float y = top + pad + i * itemH;
@@ -963,15 +1125,15 @@ final class HomeView extends View {
             if (sel) {
                 r.set(left + pad, y, left + w - pad, y + itemH);
                 fill.setColor(Color.argb(Math.round(245 * menuAnim), 255, 255, 255));
-                c.drawRoundRect(r, 15f, 15f, fill);
+                c.drawRoundRect(r, itemH / 2f, itemH / 2f, fill);
             }
-            int ink = danger ? (sel ? DARK_RED : RED) : (sel ? 0xFF141416 : Color.WHITE);
+            int ink = danger ? (sel ? DARK_RED : RED) : (sel ? INK : Color.WHITE);
             menuText.setColor(ink);
             menuText.setAlpha(alpha);
-            c.drawText(menuLabels.get(i), left + pad + 22f, y + itemH / 2f + 9f, menuText);
+            c.drawText(menuLabels.get(i), left + pad + 30f, y + itemH / 2f + 9f, menuText);
             Drawable icon = menuIcons.get(i);
             if (icon != null) {
-                float size = 30f, ix = left + w - pad - 22f - size, iy = y + (itemH - size) / 2f;
+                float size = 30f, ix = left + w - pad - 28f - size, iy = y + (itemH - size) / 2f;
                 icon.setBounds(Math.round(ix), Math.round(iy), Math.round(ix + size), Math.round(iy + size));
                 icon.setTint(ink);
                 icon.setAlpha(alpha);

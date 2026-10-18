@@ -32,7 +32,7 @@ final class ControlCenter {
     private static final int COUNT = 11;
 
     // One grid, as on tvOS: circles as tall as the pills, two circles to a pill column.
-    private static final float ROW_H = 92f, GAP = 20f, COL_W = 2 * ROW_H + GAP, TOP = 134f, SETTINGS_D = 56f;
+    private static final float ROW_H = 92f, GAP = 20f, COL_W = 2 * ROW_H + GAP, TOP = 134f, SETTINGS_D = 62f;
     /** Width of the tile block, also the span of the top status row. */
     static final float WIDTH = 2 * COL_W + GAP;
     private static final float LINE_1 = 23f, LINE_2 = 21f, TEXT_ROOM = COL_W - 88f;
@@ -42,6 +42,7 @@ final class ControlCenter {
     private final RectF[] rects = new RectF[COUNT];
     private final float[] radii = new float[COUNT];
     private final float[] focus = new float[COUNT];
+    private final float cogSize; // the Settings cog, about as large as the profile avatar beside it
     private final Drawable power, wifi, ethernet, moon, bluetooth, headphones, timer, input, accessibility,
             system, search, settings;
     private final String powerOff, wifiLabel, ethernetLabel, connected, notConnected, dnd1, dnd2,
@@ -78,6 +79,7 @@ final class ControlCenter {
         }
         for (int i = 0; i < COUNT; i++) radii[i] = rects[i].height() / 2f;
         radii[POWER] = 44f;
+        cogSize = avatar.width() * 1.1f; // its glyph (20 of the icon's 24 units) just under the avatar's size
 
         power = icon(context, R.drawable.ic_power);
         wifi = icon(context, R.drawable.ic_wifi);
@@ -260,7 +262,7 @@ final class ControlCenter {
             text.setAlpha(alpha);
             c.drawText(powerOff, r.centerX(), r.bottom - 34f * grow, text);
         } else if (line1 == null) {
-            float size = r.height() * 0.46f;
+            float size = id == SETTINGS ? cogSize * grow : r.height() * 0.46f;
             drawIcon(c, icon, r.centerX() - size / 2f, r.centerY() - size / 2f, size, iconColor, alpha);
         } else {
             float size = 36f * grow, x = r.left + 24f * grow;

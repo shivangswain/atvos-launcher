@@ -12,7 +12,7 @@ corner, a clock pill opens a tvOS-style Control Center.
   moving. It runs at 60 fps on the TV's MT5896, with about 1 ms of UI-thread work per frame.
 - **Small, explained permission set.** Each permission is listed with its reason below. Only the
   launcher activity and the system-only device admin receiver are exported. Network access is
-  HTTPS-only and used just for recommendation artwork.
+  HTTPS-only and used just for recommendation artwork and your Google profile photo.
 
 ## Using it
 
@@ -20,9 +20,9 @@ corner, a clock pill opens a tvOS-style Control Center.
 | --- | --- |
 | D-pad | Move focus. Down from the dock scrolls into the grid. |
 | Select | Open the app (it zooms out of its icon). |
-| Hold select (or Menu) | Opens the tvOS menu beside the icon: **Edit Home Screen**, **App Info**, **Hide App**. |
+| Hold select (or Menu) | Opens the tvOS menu beside the icon: **Edit Home Screen**, **App Info**, switches for the app's **Continue Watching** and **Recommendations** (when it has them), and **Hide App**. |
 | Edit Home Screen | Every icon jiggles. Select picks an app up, the arrows move it, and select drops it. Back finishes. |
-| Up on the dock | Shows the top shelf full screen. Select there opens what's shown; Down or Back returns. |
+| Up on the dock | On a full-screen top shelf: the dock slides down to peek in at the bottom and a **Play** button appears. On a small one's card: the card is selected, with **Play** under its title. Select plays what's shown; Down or Back returns. |
 | Up again (or Up when there's no top shelf) | Focuses the clock pill. Select opens the **Control Center**. |
 | Back / Home | Returns to the dock row. |
 
@@ -46,24 +46,29 @@ rotation. Images are downloaded once over HTTPS and cached. An app's shelf appea
 image is on disk, so a slow or missing network never blocks the UI. Local `content://` and
 `android.resource://` images are only accepted from the app that published the recommendation.
 
-- **HD images** (720p or larger) fill the screen.
+- **HD images** (720p or larger) fill the screen, with "Press up for full screen" above the dock.
+  Up there leaves the dock peeking in at the bottom with a **Play** button. Left alone for a minute,
+  both fade away so the picture is a wallpaper; the next press brings them back.
 - **Smaller images**, such as YouTube thumbnails, would look soft stretched, so they're shown as a
-  card on the left with the program's name beside it, over a blurred copy.
-- **Apps without recommendations** show their own banner or icon large, over a field of their
-  colours, as tvOS does.
+  card on the left with the program's name beside it, over a blurred copy. The dock stays put: Up
+  selects the card and shows **Play** under the title, and Up again goes to the clock pill.
+- **Apps without recommendations** show their launch screen when it's a real full-screen picture
+  (like Crunchyroll's). Most TV apps launch on a flat colour or a small logo on black, which would
+  look worse, so the rest show their logo over a glow in their own colour, as tvOS does:
+  - the icon's own artwork without its backdrop shape (an adaptive icon's foreground layer, or a
+    legacy icon drawn on transparency), lit in the brand colour of the app's tile;
+  - otherwise the banner's logo, cut out of the banner's background (flat or gradient) without a
+    fringe, over a field in that background's colour, light or dark as the tile is. A banner that's
+    a picture rather than a logo on a background is shown whole, as a card.
+
+  Logos are never enlarged more than 1.5x the pixels the app ships, so they stay sharp; most TV
+  apps ship small banners, so their logos are modest in size rather than soft.
+
+Each app's long-press menu has a switch for its **Continue Watching** and one for its
+**Recommendations** (shown only for apps that publish them). Turn off Continue Watching to see the
+app's recommendations instead, turn off both to see just its logo. The switches are saved on the TV.
 
 Below the dock, the last top shelf stays behind the grid, blurred and dimmed, as on tvOS.
-
-You can override any app's image, or set a wallpaper to use instead of app logos, by pushing your
-own images:
-
-```bash
-adb push wallpaper.jpg /sdcard/Android/data/app.tvhome/files/wallpaper.jpg
-```
-
-```bash
-adb push poster.jpg /sdcard/Android/data/app.tvhome/files/topshelf/com.netflix.ninja.jpg
-```
 
 Text on the clock pill, the hint and the Control Center switches to dark over bright images, like
 Liquid Glass. The clock follows the TV's 12/24-hour setting, and moving around plays the TV's
@@ -74,7 +79,7 @@ navigation sounds when **System sounds** are on in Settings.
 | Tile | Does |
 | --- | --- |
 | Top row | As on tvOS: the time, glyphs for what's on (Bluetooth audio, Do Not Disturb, sleep timer), a **Settings** button that opens TV Settings, and your profile. |
-| Profile (Up from the top tiles, then Right) | Pick the TV's Google account with Android's chooser. The pill then shows its letter avatar. Push `files/avatar.png` to use a picture instead. |
+| Profile (Up from the top tiles, then Right) | Pick the TV's Google account with Android's chooser. The pill then shows its Google profile photo (see below), else its letter avatar. Push `files/avatar.png` to use another picture instead. |
 | Power Off | Puts the TV to sleep, like the remote's power button. |
 | Wi-Fi / Ethernet | Shows the connection; opens network settings. |
 | Do Not Disturb | Toggles priority-only notifications. |
@@ -82,12 +87,31 @@ navigation sounds when **System sounds** are on in Settings.
 | Sleep Timer | Each press cycles Off → 15 → 30 → 60 → 90 → 120 min. |
 | Inputs, Accessibility, System, Search | Open TCL's input picker, accessibility settings, Settings > System, and Google search (the Assistant). |
 
+### Google profile photo
+
+Google only shares profile photos with apps registered to it, so this needs a one-time OAuth client
+for the app. It's free and has no secret to copy:
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), create a project (or pick one).
+2. Under **Google Auth Platform**, set up the consent screen as **External** and **publish** it. The
+   app asks only for basic profile info, which needs no Google review.
+3. Under **Clients**, create an **Android** client with package name `app.tvhome` and the SHA-1 of
+   the key the APK is signed with:
+
+```bash
+keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android
+```
+
+Then pick your account again in the Control Center (Profile). The TV asks once to let Home see your
+basic profile info. After that the photo is fetched over HTTPS, cached on the TV and refreshed at
+most once a day. The access token is never stored. Until the client exists, the letter avatar stays.
+
 ## Permissions
 
 | Permission | Why | Granted by |
 | --- | --- | --- |
 | `READ_TV_LISTINGS` | Lets the TV provider share other apps' Watch Next and preview programs. | A one-time prompt on first launch, or `adb install -g`. |
-| `INTERNET` | Downloads recommendation images (HTTPS only; cleartext is disabled). | Install. |
+| `INTERNET` | Downloads recommendation images and your profile photo (HTTPS only; cleartext is disabled). | Install. |
 | `ACCESS_NETWORK_STATE` | The Wi-Fi/Ethernet tile. | Install. |
 | `ACCESS_NOTIFICATION_POLICY` | The Do Not Disturb tile. | adb (below). |
 | `USE_EXACT_ALARM` | The sleep timer fires on time. | Install. |
@@ -175,9 +199,9 @@ app/src/main/java/app/tvhome/
   ControlCenter.java     Control Center layout, focus and drawing
   Controls.java          what the Control Center tiles read and do
   Apps.java              launchable apps, tile artwork, order and hidden apps
-  Backdrops.java         wallpaper and top-shelf images, download cache, blur
+  Backdrops.java         top-shelf images, app logo backdrops, download cache, blur
   Recommendations.java   apps' Watch Next / preview programs from the TV provider
-  Profile.java           Google account letter avatar (or avatar.png)
+  Profile.java           Google profile photo or letter avatar (or avatar.png)
   PowerAdmin.java        force-lock device admin
   ReleasePower.java      adb-only release of that admin, before uninstalling
   SleepTimer.java        sleep timer alarm receiver

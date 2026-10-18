@@ -234,7 +234,7 @@ final class Apps {
     }
 
     /** The alpha-weighted average colour of a drawable. */
-    static int averageColor(Drawable d) {
+    private static int averageColor(Drawable d) {
         Bitmap b = Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888);
         d.setBounds(0, 0, 16, 16);
         d.draw(new Canvas(b));
