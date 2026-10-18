@@ -1,0 +1,1028 @@
+package app.tvhome;
+
+import android.annotation.SuppressLint;
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BlurMaskFilter;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.ColorFilter;
+import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
+import android.graphics.DashPathEffect;
+import android.graphics.LightingColorFilter;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
+import android.graphics.Rect;
+import android.graphics.RectF;
+import android.graphics.Shader;
+import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.os.SystemClock;
+import android.text.format.DateFormat;
+import android.view.KeyEvent;
+import android.view.SoundEffectConstants;
+import android.view.View;
+
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+import java.util.TimeZone;
+
+/**
+ * The whole home screen, drawn on one canvas. Everything is laid out in 1920-wide design units and
+ * the canvas is scaled to the real width, so the layout is identical at any resolution.
+ *
+ * Animations are critically-damped exponential approaches evaluated per frame, so they can be
+ * interrupted at any point and the view only redraws while something is still moving.
+ */
+@SuppressLint("ViewConstructor")
+final class HomeView extends View {
+
+    interface Host {
+        void onFocusChanged(Apps.Entry entry, boolean inDock);
+        boolean hasTopShelf(Apps.Entry entry);
+        void launch(Apps.Entry entry, Rect from);
+        void showInfo(Apps.Entry entry);
+        void hide(Apps.Entry entry);
+        /** Persists the order and the hidden apps after Edit Home Screen. */
+        void saveLayout(List<Apps.Entry> visible, List<Apps.Entry> hidden);
+        void launchProgram(Recommendations.Item program, Rect from);
+        Controls.State controlState();
+        /** Runs a Control Center action; returns true to keep the Control Center open. */
+        boolean control(int id);
+    }
+
+    // Layout in design units, measured from the tvOS home screen.
+    static final float W = 1920f;
+    static final float TILE_W = 250f, TILE_H = 150f;
+    static final float FOCUS_SCALE = 1.2f;
+    private static final int COLS = 6;
+    private static final float TILE_R = 22f;
+    private static final float GAP_X = 47f, ROW_PITCH = 224f;
+    private static final float GRID_X = (W - COLS * TILE_W - (COLS - 1) * GAP_X) / 2f;
+    private static final float DOCK_ROW_Y = 800f;
+    private static final float DOCK_PAD_X = 48f, DOCK_PAD_Y = 36f;
+    private static final float EDGE = W - GRID_X + DOCK_PAD_X;      // right edge shared by dock and clock
+    private static final float ROW_ANCHOR = 430f;                     // where a focused grid row settles
+    private static final float SHADOW_PAD = 60f, SHADOW_DY = 20f, SHADOW_BLUR = 30f;
+    private static final float CLOCK_TOP = 50f, CLOCK_H = 56f, AVATAR = 40f;
+    private static final float HIDDEN_GAP = 84f; // room for the "Hidden" title above hidden apps in edit mode
+    private static final int RED = 0xFFFF5F57, DARK_RED = 0xFFE0342B;
+
+    private final Host host;
+    private final List<Apps.Entry> apps = new ArrayList<>();   // visible, in order
+    private final List<Apps.Entry> hidden = new ArrayList<>(); // shown greyed out below, only while editing
+    private int focus;                                          // index into apps, then hidden (while editing)
+
+    private float scale = 1f, height = 1080f;
+    private long lastFrame;
+    private boolean animating;
+
+    // Animated values and the states that drive them
+    private float scroll, expand, hint, menuAnim, pillAnim, ccAnim, editAnim, fade = 1f;
+    private float away; // 0 in the dock, 1 once focus is in the grid: blurs and dims the backdrop
+    private int dim; // black overlay alpha once focus leaves the dock
+    // Liquid-glass text colour over the backdrop: 0 = white, 1 = dark (on bright images)
+    private float clockInk, hintInk, ccInk;
+    private boolean expanded, menuOpen, longPressed, pillFocused, ccOpen;
+    private boolean editing, holding; // Edit Home Screen; holding = the focused app is picked up
+    private Backdrops.Backdrop backdrop, previous;
+
+    // Control Center (opened from the clock pill)
+    private final ControlCenter cc;
+    private final ControlCenter.Glass ccGlass = (c, rect, radius, tint, alpha) -> drawGlass(c, rect, radius, 0f, tint, alpha);
+
+    // Long-press menu
+    private final List<String> menuLabels = new ArrayList<>();
+    private final List<Drawable> menuIcons = new ArrayList<>();
+    private final List<Boolean> menuDanger = new ArrayList<>();
+    private final List<Runnable> menuActions = new ArrayList<>();
+    private final Drawable editIcon, infoIcon, hideIcon;
+    private int menuSel;
+
+    // Clock
+    private String time = "";
+    private float timeWidth;
+    // "9:41 AM" as on tvOS, or "21:41" when the TV is set to 24-hour time.
+    private final SimpleDateFormat clock12 = new SimpleDateFormat("h:mm a", Locale.US);
+    private final SimpleDateFormat clock24 = new SimpleDateFormat("H:mm", Locale.US);
+    private final Runnable tick = this::tick;
+
+    // Drawing objects, allocated once
+    private final Paint image = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final Paint backdropPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private final LightingColorFilter[] dimFilters = new LightingColorFilter[26];
+    private final Paint art = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final Paint hiddenArt = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG); // greyscale
+    private final Paint headerText = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint dashed = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint glass = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint shadow = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private final Paint sheen = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint clockText = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint labelText = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint hintText = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint menuText = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint bottomScrim = new Paint();
+    private final Paint topScrim = new Paint();
+    private final LinearGradient rimGradient, sheenGradient;
+    private final Path chevron = new Path();
+    private final RectF r = new RectF(), r2 = new RectF();
+    private final Matrix m = new Matrix();
+    private Bitmap defaultAvatar, avatar, shadowMask;
+
+    private final String fullScreenHint, editHint, holdHint, hiddenTitle, hiddenEmpty;
+
+    HomeView(Context context, Host host) {
+        super(context);
+        this.host = host;
+        setFocusable(true);
+        setFocusableInTouchMode(true);
+
+        fullScreenHint = context.getString(R.string.full_screen_hint);
+        editHint = context.getString(R.string.edit_hint);
+        holdHint = context.getString(R.string.hold_hint);
+        hiddenTitle = context.getString(R.string.hidden);
+        hiddenEmpty = context.getString(R.string.hidden_empty);
+        editIcon = menuIcon(context, R.drawable.ic_tv);
+        infoIcon = menuIcon(context, R.drawable.ic_info);
+        hideIcon = menuIcon(context, R.drawable.ic_hide);
+
+        Typeface medium = Typeface.create(Typeface.DEFAULT, 500, false);
+        Typeface semibold = Typeface.create(Typeface.DEFAULT, 600, false);
+        clockText.setTypeface(semibold);
+        clockText.setTextSize(27f);
+        clockText.setColor(Color.WHITE);
+        labelText.setTypeface(medium);
+        labelText.setTextSize(25f);
+        labelText.setTextAlign(Paint.Align.CENTER);
+        hintText.setTypeface(medium);
+        hintText.setTextSize(21f);
+        hintText.setTextAlign(Paint.Align.CENTER);
+        menuText.setTypeface(medium);
+        menuText.setTextSize(26f);
+        headerText.setTypeface(semibold);
+        headerText.setTextSize(30f);
+        ColorMatrix grey = new ColorMatrix();
+        grey.setSaturation(0f);
+        hiddenArt.setColorFilter(new ColorMatrixColorFilter(grey));
+        dashed.setStyle(Paint.Style.STROKE);
+        dashed.setStrokeWidth(3f);
+        dashed.setPathEffect(new DashPathEffect(new float[]{14f, 10f}, 0f));
+
+        cc = new ControlCenter(context, EDGE,
+                new RectF(EDGE - 8f - AVATAR, CLOCK_TOP + (CLOCK_H - AVATAR) / 2f, EDGE - 8f, CLOCK_TOP + (CLOCK_H + AVATAR) / 2f));
+
+        // Liquid-glass: the blurred backdrop, more saturated, with a light rim brighter at the top.
+        ColorMatrix saturate = new ColorMatrix();
+        saturate.setSaturation(1.3f);
+        glass.setColorFilter(new ColorMatrixColorFilter(saturate));
+        rimGradient = new LinearGradient(0, 0, 0, 1, new int[]{0x73FFFFFF, 0x14FFFFFF, 0x2EFFFFFF},
+                new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP);
+        rim.setStyle(Paint.Style.STROKE);
+        rim.setStrokeWidth(1.5f);
+        rim.setShader(rimGradient);
+
+        // Specular highlight across the top of a focused icon.
+        sheenGradient = new LinearGradient(0, 0, 0, 1, 0x3DFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP);
+        sheen.setShader(sheenGradient);
+
+        shadow.setColor(Color.BLACK);
+        stroke.setStyle(Paint.Style.STROKE);
+        stroke.setStrokeWidth(3f);
+        stroke.setStrokeCap(Paint.Cap.ROUND);
+        stroke.setStrokeJoin(Paint.Join.ROUND);
+        stroke.setColor(Color.WHITE);
+        chevron.moveTo(-17f, 5f);
+        chevron.lineTo(0f, -4f);
+        chevron.lineTo(17f, 5f);
+    }
+
+    // ---- State from the activity -------------------------------------------------------------
+
+    /** False while editing: the arrangement being edited wins, and the caller retries later. */
+    boolean setApps(List<Apps.Entry> visible, List<Apps.Entry> hiddenApps) {
+        if (editing) return false;
+        Apps.Entry was = focused();
+        apps.clear();
+        apps.addAll(visible);
+        hidden.clear();
+        hidden.addAll(hiddenApps);
+        focus = Math.max(0, Math.min(focus, apps.size() - 1));
+        if (was != null) {
+            for (int i = 0; i < apps.size(); i++) {
+                if (apps.get(i).pkg.equals(was.pkg)) {
+                    focus = i;
+                    break;
+                }
+            }
+        }
+        focusChanged();
+        return true;
+    }
+
+    void setBackdrop(Backdrops.Backdrop b) {
+        if (b == null || b == backdrop) return;
+        previous = backdrop;
+        backdrop = b;
+        fade = previous == null ? 1f : 0f;
+        kick();
+    }
+
+    /** The account's avatar (already round), shown in the clock pill. */
+    void setAvatar(Bitmap round) {
+        avatar = round;
+        kick();
+    }
+
+    /** Home pressed while already home: back to the top row, everything closed. */
+    void goHome() {
+        menuOpen = false;
+        ccOpen = false;
+        pillFocused = false;
+        if (editing) finishEditing();
+        expanded = false;
+        if (!apps.isEmpty()) focus = Math.min(focus, apps.size() - 1) % COLS;
+        focusChanged();
+    }
+
+    /** Opens the Control Center (the clock pill was selected). */
+    void openControlCenter() {
+        menuOpen = false;
+        if (editing) finishEditing();
+        cc.setState(host.controlState());
+        cc.selected = ControlCenter.POWER;
+        pillFocused = true;
+        ccOpen = true;
+        kick();
+    }
+
+    private void closeControlCenter() {
+        ccOpen = false;
+        kick();
+    }
+
+    void setClockRunning(boolean run) {
+        removeCallbacks(tick);
+        if (run) tick();
+    }
+
+    private void tick() {
+        SimpleDateFormat format = DateFormat.is24HourFormat(getContext()) ? clock24 : clock12;
+        format.setTimeZone(TimeZone.getDefault()); // follow time-zone changes
+        time = format.format(new Date());
+        timeWidth = clockText.measureText(time);
+        if (ccOpen) cc.setState(host.controlState()); // sleep-timer countdown, network changes
+        kick();
+        long now = System.currentTimeMillis();
+        postDelayed(tick, 60_000 - now % 60_000 + 20);
+    }
+
+    // ---- Input -------------------------------------------------------------------------------
+
+    @Override
+    public boolean onKeyDown(int code, KeyEvent e) {
+        if (menuOpen) {
+            // Select acts on release (see onKeyUp): a held remote key repeats, and those repeats
+            // must not pick a menu item the moment the long press opens the menu.
+            if (isSelect(code)) return true;
+            return menuKey(code) || super.onKeyDown(code, e);
+        }
+        if (isSelect(code)) {
+            if (e.getRepeatCount() == 0) {
+                e.startTracking();
+                longPressed = false;
+            }
+            return true;
+        }
+        if (ccOpen) {
+            switch (code) {
+                case KeyEvent.KEYCODE_DPAD_LEFT: ccMove(-1, 0); return true;
+                case KeyEvent.KEYCODE_DPAD_RIGHT: ccMove(1, 0); return true;
+                case KeyEvent.KEYCODE_DPAD_UP: ccMove(0, -1); return true;
+                case KeyEvent.KEYCODE_DPAD_DOWN: ccMove(0, 1); return true;
+                case KeyEvent.KEYCODE_BACK:
+                case KeyEvent.KEYCODE_MENU:
+                    closeControlCenter();
+                    return true;
+                default:
+                    return super.onKeyDown(code, e);
+            }
+        }
+        if (pillFocused) {
+            switch (code) {
+                case KeyEvent.KEYCODE_DPAD_DOWN:
+                case KeyEvent.KEYCODE_BACK:
+                    if (code == KeyEvent.KEYCODE_DPAD_DOWN) navSound(0, 1);
+                    pillFocused = false;
+                    expanded = false;
+                    kick();
+                    return true;
+                case KeyEvent.KEYCODE_MENU:
+                    openControlCenter();
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_UP:
+                case KeyEvent.KEYCODE_DPAD_LEFT:
+                case KeyEvent.KEYCODE_DPAD_RIGHT:
+                    return true;
+                default:
+                    return super.onKeyDown(code, e);
+            }
+        }
+        if (expanded) {
+            switch (code) {
+                case KeyEvent.KEYCODE_DPAD_DOWN:
+                case KeyEvent.KEYCODE_BACK:
+                    if (code == KeyEvent.KEYCODE_DPAD_DOWN) navSound(0, 1);
+                    setExpanded(false);
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_UP:
+                    navSound(0, -1);
+                    focusPill();
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_LEFT:
+                case KeyEvent.KEYCODE_DPAD_RIGHT:
+                    return true;
+                default:
+                    return super.onKeyDown(code, e);
+            }
+        }
+        switch (code) {
+            case KeyEvent.KEYCODE_DPAD_LEFT: move(-1, 0); return true;
+            case KeyEvent.KEYCODE_DPAD_RIGHT: move(1, 0); return true;
+            case KeyEvent.KEYCODE_DPAD_UP: move(0, -1); return true;
+            case KeyEvent.KEYCODE_DPAD_DOWN: move(0, 1); return true;
+            case KeyEvent.KEYCODE_MENU: if (!editing) openMenu(); return true;
+            case KeyEvent.KEYCODE_BACK: back(); return true;
+            default: return super.onKeyDown(code, e);
+        }
+    }
+
+    @Override
+    public boolean onKeyLongPress(int code, KeyEvent e) {
+        if (isSelect(code) && !editing && !expanded && !menuOpen && !pillFocused && !ccOpen) {
+            longPressed = true;
+            openMenu();
+            return true;
+        }
+        return super.onKeyLongPress(code, e);
+    }
+
+    @Override
+    public boolean onKeyUp(int code, KeyEvent e) {
+        if (isSelect(code)) {
+            if (menuOpen) {
+                if (!longPressed) activateMenu(); // the release of the opening long press picks nothing
+            } else if (e.isTracking() && !e.isCanceled() && !longPressed) {
+                select();
+            }
+            longPressed = false;
+            return true;
+        }
+        return code == KeyEvent.KEYCODE_BACK || super.onKeyUp(code, e);
+    }
+
+    private static boolean isSelect(int code) {
+        return code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
+                || code == KeyEvent.KEYCODE_NUMPAD_ENTER || code == KeyEvent.KEYCODE_BUTTON_A;
+    }
+
+    /**
+     * D-pad movement over the grid. While editing, the hidden apps form a second section below the
+     * visible ones; with an app picked up, moving it between the sections hides or unhides it.
+     */
+    private void move(int dx, int dy) {
+        int v = apps.size(), total = total();
+        if (total == 0) return;
+        boolean inHidden = focus >= v;
+        int local = inHidden ? focus - v : focus, n = inHidden ? hidden.size() : v;
+        int col = local % COLS, row = local / COLS;
+        List<Apps.Entry> list = inHidden ? hidden : apps;
+        int base = inHidden ? v : 0;
+
+        if (dx != 0) {
+            if (col + dx < 0 || col + dx >= COLS || local + dx >= n) return;
+            if (holding) list.add(local + dx, list.remove(local));
+            focus = focus + dx;
+        } else if (dy > 0) {
+            if ((row + 1) * COLS < n) {
+                int to = Math.min(local + COLS, n - 1);
+                if (holding) list.add(to, list.remove(local));
+                focus = base + to;
+            } else if (!inHidden && editing && (hidden.size() > 0 || holding) && !(holding && v <= 1)) {
+                // Into the hidden section (dropping a held app there hides it; keep at least one app).
+                int to = Math.min(col, hidden.size() - (holding ? 0 : 1));
+                if (holding) hidden.add(to, apps.remove(local));
+                focus = apps.size() + to;
+            } else {
+                return;
+            }
+        } else if (row > 0) {
+            int to = local - COLS;
+            if (holding) list.add(to, list.remove(local));
+            focus = base + to;
+        } else if (inHidden) {
+            // Up out of the hidden section, into the last row of apps (unhides a held app).
+            int lastRow = v == 0 ? 0 : ((v - 1) / COLS) * COLS;
+            if (holding) {
+                int to = Math.min(lastRow + col, v);
+                apps.add(to, hidden.remove(local));
+                focus = to;
+            } else if (v > 0) {
+                focus = Math.min(lastRow + col, v - 1);
+            } else {
+                return;
+            }
+        } else if (!editing) {
+            // Up from the dock: the full-screen top shelf if there is one, else the clock pill.
+            navSound(0, -1);
+            if (host.hasTopShelf(focused())) setExpanded(true); else focusPill();
+            return;
+        } else {
+            return;
+        }
+        navSound(dx, dy);
+        focusChanged();
+    }
+
+    private void ccMove(int dx, int dy) {
+        if (!cc.move(dx, dy)) return;
+        navSound(dx, dy);
+        kick();
+    }
+
+    /** The system's navigation click (silent when System sounds are off in Settings). */
+    private void navSound(int dx, int dy) {
+        playSoundEffect(dx < 0 ? SoundEffectConstants.NAVIGATION_LEFT
+                : dx > 0 ? SoundEffectConstants.NAVIGATION_RIGHT
+                : dy < 0 ? SoundEffectConstants.NAVIGATION_UP
+                : SoundEffectConstants.NAVIGATION_DOWN);
+    }
+
+    private void select() {
+        if (ccOpen) {
+            playSoundEffect(SoundEffectConstants.CLICK);
+            if (host.control(cc.selected)) {
+                cc.setState(host.controlState());
+            } else {
+                ccOpen = false;
+                pillFocused = false;
+            }
+            kick();
+            return;
+        }
+        if (pillFocused) {
+            playSoundEffect(SoundEffectConstants.CLICK);
+            openControlCenter();
+            return;
+        }
+        Apps.Entry e = focused();
+        if (e == null) return;
+        playSoundEffect(SoundEffectConstants.CLICK);
+        if (editing) {
+            holding = !holding; // pick up / drop
+            kick();
+            return;
+        }
+        // Launch from the focused tile's on-screen rect so the system zooms the app out of it.
+        float w = TILE_W * FOCUS_SCALE, h = TILE_H * FOCUS_SCALE;
+        float cx = e.x + TILE_W / 2f, cy = e.y + TILE_H / 2f - scroll + lift();
+        Rect from = new Rect(Math.round((cx - w / 2) * scale), Math.round((cy - h / 2) * scale),
+                Math.round((cx + w / 2) * scale), Math.round((cy + h / 2) * scale));
+        // In the full-screen top shelf, select plays what's shown (as on tvOS); otherwise open the app.
+        Recommendations.Item program = backdrop != null ? backdrop.program : null;
+        if (expanded && program != null && program.intentUri != null && program.pkg.equals(e.pkg)) {
+            host.launchProgram(program, from);
+        } else {
+            host.launch(e, from);
+        }
+        if (expanded) setExpanded(false);
+    }
+
+    private void focusPill() {
+        pillFocused = true;
+        kick();
+    }
+
+    private void back() {
+        if (editing) {
+            if (holding) {
+                holding = false;
+                kick();
+            } else {
+                finishEditing();
+            }
+        } else if (focus >= COLS) {
+            focus %= COLS;
+            focusChanged();
+        }
+    }
+
+    private void setExpanded(boolean on) {
+        expanded = on;
+        kick();
+    }
+
+    /** Edit Home Screen: every app jiggles; select picks one up, the arrows move it, select drops it. */
+    private void startEditing() {
+        editing = true;
+        holding = false;
+        kick();
+    }
+
+    private void finishEditing() {
+        editing = false;
+        holding = false;
+        host.saveLayout(new ArrayList<>(apps), new ArrayList<>(hidden));
+        if (focus >= apps.size()) focus = Math.max(0, apps.size() - 1);
+        focusChanged();
+    }
+
+    private void openMenu() {
+        Apps.Entry e = focused();
+        if (e == null) return;
+        menuLabels.clear();
+        menuIcons.clear();
+        menuDanger.clear();
+        menuActions.clear();
+        addMenu(R.string.edit_home, editIcon, false, this::startEditing);
+        addMenu(R.string.app_info, infoIcon, false, () -> host.showInfo(e));
+        addMenu(R.string.hide_app, hideIcon, true, () -> host.hide(e));
+        menuSel = 0;
+        menuOpen = true;
+        kick();
+    }
+
+    private void addMenu(int label, Drawable icon, boolean danger, Runnable action) {
+        menuLabels.add(getContext().getString(label));
+        menuIcons.add(icon);
+        menuDanger.add(danger);
+        menuActions.add(action);
+    }
+
+    private void activateMenu() {
+        playSoundEffect(SoundEffectConstants.CLICK);
+        menuOpen = false;
+        menuActions.get(menuSel).run();
+        kick();
+    }
+
+    private static Drawable menuIcon(Context c, int res) {
+        Drawable d = c.getDrawable(res);
+        return d != null ? d.mutate() : null;
+    }
+
+    /** Keys while the long-press menu is open; false lets anything else (volume…) through. */
+    private boolean menuKey(int code) {
+        if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN) {
+            int dy = code == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1;
+            int to = Math.max(0, Math.min(menuLabels.size() - 1, menuSel + dy));
+            if (to != menuSel) navSound(0, dy);
+            menuSel = to;
+        } else if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_MENU
+                || code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT) {
+            menuOpen = false;
+        } else {
+            return false;
+        }
+        kick();
+        return true;
+    }
+
+    private Apps.Entry focused() {
+        return focus < total() ? entry(focus) : null;
+    }
+
+    private void focusChanged() {
+        host.onFocusChanged(focused(), inDock());
+        kick();
+    }
+
+    /** Tiles on screen: the visible apps, plus the hidden ones while editing. */
+    private int total() {
+        return apps.size() + (editing ? hidden.size() : 0);
+    }
+
+    private Apps.Entry entry(int i) {
+        return i < apps.size() ? apps.get(i) : hidden.get(i - apps.size());
+    }
+
+    private boolean inDock() {
+        return focus < COLS && focus < apps.size();
+    }
+
+    private float slotX(int i) {
+        int local = i < apps.size() ? i : i - apps.size();
+        return GRID_X + (local % COLS) * (TILE_W + GAP_X);
+    }
+
+    private float slotY(int i) {
+        if (i < apps.size()) return DOCK_ROW_Y + (i / COLS) * ROW_PITCH;
+        return hiddenTop() + ((i - apps.size()) / COLS) * ROW_PITCH;
+    }
+
+    /** Top of the hidden section: below the last row of apps, with room for its title. */
+    private float hiddenTop() {
+        int rows = Math.max(1, (apps.size() + COLS - 1) / COLS);
+        return DOCK_ROW_Y + rows * ROW_PITCH + HIDDEN_GAP;
+    }
+
+    // ---- Animation ---------------------------------------------------------------------------
+
+    /** Starts the frame loop; resets the clock if it was idle so the first step isn't a jump. */
+    private void kick() {
+        if (!animating) lastFrame = SystemClock.uptimeMillis() - 16;
+        postInvalidateOnAnimation();
+    }
+
+    private float ease(float v, float target, float rate, float dt, float eps) {
+        float d = target - v;
+        if (Math.abs(d) <= eps) return target;
+        animating = true;
+        return v + d * (1f - (float) Math.exp(-rate * dt));
+    }
+
+    private void step(float dt) {
+        boolean dock = inDock();
+        float scrollTo = 0f;
+        if (!dock && total() > 0) {
+            // A focused row comes up to the anchor, but never past where the last row (with its
+            // focused name) sits at the bottom edge, so short grids don't float mid-screen (tvOS).
+            float last = slotY(total() - 1) + TILE_H * (1f + (FOCUS_SCALE - 1f) / 2f) + 60f;
+            float max = Math.max(0f, last - height + 40f);
+            scrollTo = Math.max(0f, Math.min(slotY(focus) - ROW_ANCHOR, max));
+        }
+        scroll = ease(scroll, scrollTo, 10f, dt, 0.2f);
+        away = ease(away, dock ? 0f : 1f, 8f, dt, 0.002f);
+        expand = ease(expand, expanded ? 1f : 0f, 9f, dt, 0.001f);
+        editAnim = ease(editAnim, editing ? 1f : 0f, 10f, dt, 0.002f);
+        boolean showHint = dock && !expanded && !menuOpen && !editing && !pillFocused && host.hasTopShelf(focused());
+        hint = ease(hint, showHint ? 1f : 0f, 8f, dt, 0.002f);
+        menuAnim = ease(menuAnim, menuOpen ? 1f : 0f, 18f, dt, 0.002f);
+        pillAnim = ease(pillAnim, pillFocused ? 1f : 0f, 16f, dt, 0.002f);
+        ccAnim = ease(ccAnim, ccOpen ? 1f : 0f, 14f, dt, 0.002f);
+        if (ccAnim > 0f && cc.step(dt)) animating = true;
+        // Bright backdrops get dark text. Account for what's layered over the image at each spot.
+        float shade = 1f - 0.39f * away;
+        Backdrops.Backdrop b = backdrop;
+        float clockLight = b == null ? 0f : (b.clockLight * shade) * 0.9f + 0.1f;   // + the pill's white tint
+        float hintLight = b == null ? 0f : b.hintLight * 0.78f;                      // under the bottom scrim
+        float ccLight = b == null ? 0f : b.controlsLight * 0.86f + 0.14f;            // + the tiles' white tint
+        clockInk = ease(clockInk, clockLight > 0.6f ? 1f : 0f, 6f, dt, 0.002f);
+        hintInk = ease(hintInk, hintLight > 0.6f ? 1f : 0f, 6f, dt, 0.002f);
+        ccInk = ease(ccInk, ccLight > 0.62f ? 1f : 0f, 6f, dt, 0.002f);
+        fade = ease(fade, 1f, 9f, dt, 0.002f);
+        if (fade == 1f) previous = null;
+        for (int i = 0, n = total(); i < n; i++) {
+            Apps.Entry e = entry(i);
+            float sx = slotX(i), sy = slotY(i);
+            if (Float.isNaN(e.x)) {
+                e.x = sx;
+                e.y = sy;
+            }
+            e.x = ease(e.x, sx, 14f, dt, 0.2f);
+            e.y = ease(e.y, sy, 14f, dt, 0.2f);
+            e.focus = ease(e.focus, i == focus && !expanded && !pillFocused ? 1f : 0f, 14f, dt, 0.002f);
+        }
+        if (editing) animating = true; // jiggle
+    }
+
+    /** How far the UI has slid down for the full-screen top shelf. */
+    private float lift() {
+        return expand * (height - DOCK_ROW_Y + DOCK_PAD_Y + 40f);
+    }
+
+    // ---- Drawing -----------------------------------------------------------------------------
+
+    @Override
+    protected void onSizeChanged(int w, int h, int oldW, int oldH) {
+        scale = w / W;
+        height = h / scale;
+        bottomScrim.setShader(new LinearGradient(0, height * 0.45f, 0, height, 0x00000000, 0x8C000000, Shader.TileMode.CLAMP));
+        topScrim.setShader(new LinearGradient(0, 0, 0, 220f, 0x4D000000, 0x00000000, Shader.TileMode.CLAMP));
+        defaultAvatar = makeAvatar(Math.max(1, Math.round(AVATAR * scale)));
+        shadowMask = makeShadowMask(scale);
+    }
+
+    @Override
+    protected void onDraw(Canvas c) {
+        long now = SystemClock.uptimeMillis();
+        float dt = Math.min((now - lastFrame) / 1000f, 0.05f);
+        lastFrame = now;
+        animating = false;
+        step(dt);
+
+        c.save();
+        c.scale(scale, scale);
+        drawBackground(c);
+
+        float offset = lift() - scroll;
+        c.save();
+        c.translate(0, offset);
+        drawDock(c, offset);
+        drawHiddenSection(c);
+        int n = total();
+        for (int i = 0; i < n; i++) if (i != focus) drawTile(c, entry(i), i, offset);
+        if (focus < n) drawTile(c, entry(focus), focus, offset);
+        drawHint(c);
+        c.restore();
+
+        if (ccAnim > 0f) c.drawColor(Color.argb(Math.round(110 * ccAnim), 0, 0, 0));
+        drawClock(c);
+        if (ccAnim > 0f) cc.draw(c, ccGlass, ccAnim, ccInk);
+        if (editing) drawBanner(c, holding ? holdHint : editHint);
+        if (menuAnim > 0f) drawMenu(c, offset);
+        c.restore();
+
+        if (animating) postInvalidateOnAnimation();
+    }
+
+    /**
+     * The backdrop is the costliest thing on screen (each layer covers all 2 million pixels), so
+     * layers that can't be seen are skipped, the grid's dimming is folded into the image draw as a
+     * colour filter rather than a separate pass, and the scrims fade out once the grid is dimmed.
+     */
+    private void drawBackground(Canvas c) {
+        dim = Math.round(away * 100);
+        backdropPaint.setColorFilter(dimFilter(dim));
+        boolean crossfading = previous != null && fade < 0.98f;
+        if (crossfading) drawBackdrop(c, previous, 255);
+        if (backdrop != null) drawBackdrop(c, backdrop, crossfading ? Math.round(255 * fade) : 255);
+        int a = Math.round(255 * (1f - expand) * (1f - away));
+        if (a > 2) {
+            bottomScrim.setAlpha(a);
+            c.drawRect(0, height * 0.45f, W, height, bottomScrim);
+            topScrim.setAlpha(a);
+            c.drawRect(0, 0, W, 220f, topScrim);
+        }
+    }
+
+    /** Sharp, blurred, or (mid-transition) the blurred copy faded in over the sharp one. */
+    private void drawBackdrop(Canvas c, Backdrops.Backdrop b, int alpha) {
+        r.set(0, 0, W, height);
+        if (away < 0.97f) {
+            backdropPaint.setAlpha(alpha);
+            c.drawBitmap(b.sharp, null, r, backdropPaint);
+        }
+        if (away > 0.03f) {
+            backdropPaint.setAlpha(Math.round(alpha * away));
+            c.drawBitmap(b.blur, null, r, backdropPaint);
+        }
+    }
+
+    /** Darkens by {@code alpha}/255, like a black overlay, cached in 26 steps. */
+    private ColorFilter dimFilter(int alpha) {
+        int level = alpha / 4;
+        if (level == 0) return null;
+        if (dimFilters[level] == null) {
+            int k = 255 - level * 4;
+            dimFilters[level] = new LightingColorFilter(Color.rgb(k, k, k), 0);
+        }
+        return dimFilters[level];
+    }
+
+    /** A liquid-glass shape: blurred backdrop + tint + rim. {@code offsetY} is the canvas' current y translation. */
+    private void drawGlass(Canvas c, RectF rect, float radius, float offsetY, int tint, int alpha) {
+        if (previous != null) glassLayer(c, previous, rect, radius, offsetY, alpha);
+        if (backdrop != null) {
+            glassLayer(c, backdrop, rect, radius, offsetY, previous != null ? Math.round(alpha * fade) : alpha);
+        }
+        if (dim > 0) { // glass sees the same dimmed backdrop as everything else
+            fill.setColor(Color.argb(dim * alpha / 255, 0, 0, 0));
+            c.drawRoundRect(rect, radius, radius, fill);
+        }
+        fill.setColor(tint);
+        fill.setAlpha(Color.alpha(tint) * alpha / 255);
+        c.drawRoundRect(rect, radius, radius, fill);
+        m.setScale(1f, rect.height());
+        m.postTranslate(0f, rect.top);
+        rimGradient.setLocalMatrix(m);
+        rim.setAlpha(alpha);
+        c.drawRoundRect(rect, radius, radius, rim);
+    }
+
+    private void glassLayer(Canvas c, Backdrops.Backdrop b, RectF rect, float radius, float offsetY, int alpha) {
+        m.setScale(W / b.blur.getWidth(), height / b.blur.getHeight());
+        m.postTranslate(0f, -offsetY);
+        b.blurShader.setLocalMatrix(m);
+        glass.setShader(b.blurShader);
+        glass.setAlpha(alpha);
+        c.drawRoundRect(rect, radius, radius, glass);
+    }
+
+    private void drawDock(Canvas c, float offset) {
+        r.set(GRID_X - DOCK_PAD_X, DOCK_ROW_Y - DOCK_PAD_Y, EDGE, DOCK_ROW_Y + TILE_H + DOCK_PAD_Y);
+        if (r.bottom + offset < 0f || r.top + offset > height) return;
+        drawGlass(c, r, TILE_R + DOCK_PAD_Y, offset, 0x14FFFFFF, 255);
+    }
+
+    private void drawTile(Canvas c, Apps.Entry e, int i, float offset) {
+        boolean held = holding && i == focus, isHidden = i >= apps.size();
+        float f = e.focus, s = 1f + (FOCUS_SCALE - 1f) * f + (held ? 0.08f : 0f);
+        float w = TILE_W * s, h = TILE_H * s;
+        float cx = e.x + TILE_W / 2f, cy = e.y + TILE_H / 2f;
+        if (cy + h + offset < 0f || cy - h + offset > height) return;
+        r.set(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f);
+        float radius = TILE_R * s;
+
+        int save = c.save();
+        if (editing && !held) {
+            // tvOS-style jiggle, each icon slightly out of phase with its neighbours.
+            double t = SystemClock.uptimeMillis() / 1000.0;
+            c.rotate((float) Math.sin(t * Math.PI * 2 * 3.2 + i * 1.9) * 1.2f, cx, cy);
+        }
+        if (f > 0.01f && shadowMask != null) {
+            // Pre-blurred mask, scaled with the tile: no per-frame GPU blur.
+            float pad = SHADOW_PAD * w / (TILE_W * FOCUS_SCALE), dy = SHADOW_DY * f;
+            r2.set(r.left - pad, r.top - pad + dy, r.right + pad, r.bottom + pad + dy);
+            shadow.setAlpha(Math.round(165 * f));
+            c.drawBitmap(shadowMask, null, r2, shadow);
+        }
+        m.setScale(w / e.art.getWidth(), h / e.art.getHeight());
+        m.postTranslate(r.left, r.top);
+        e.shader.setLocalMatrix(m);
+        Paint p = art;
+        if (isHidden) {
+            p = hiddenArt;
+            p.setAlpha(Math.round(255 * (0.45f + 0.45f * f)));
+        }
+        p.setShader(e.shader);
+        c.drawRoundRect(r, radius, radius, p);
+        if (f > 0.01f) {
+            m.setScale(1f, h * 0.6f);
+            m.postTranslate(0f, r.top);
+            sheenGradient.setLocalMatrix(m);
+            sheen.setAlpha(Math.round(255 * f));
+            c.drawRoundRect(r, radius, radius, sheen);
+        }
+        c.restoreToCount(save);
+
+        // Names show under focused icons in the grid (not in the dock), as on tvOS.
+        if (f > 0.01f && (i >= COLS || isHidden)) {
+            int a = Math.round(240 * f);
+            labelText.setColor(Color.argb(a, 255, 255, 255));
+            labelText.setShadowLayer(8f, 0f, 1f, Color.argb(a / 2, 0, 0, 0));
+            c.drawText(e.label, cx, r.bottom + 38f, labelText);
+        }
+    }
+
+    private void drawHint(Canvas c) {
+        float a = hint * (1f - expand);
+        if (a <= 0.01f) return;
+        int alpha = Math.round(205 * a);
+        float y = DOCK_ROW_Y - DOCK_PAD_Y - 64f;
+        c.save();
+        c.translate(W / 2f, y - 6f);
+        int level = Math.round(255 - 227 * hintInk);
+        stroke.setColor(Color.argb(alpha, level, level, level));
+        c.drawPath(chevron, stroke);
+        c.restore();
+        hintText.setColor(Color.argb(alpha, level, level, level));
+        hintText.setShadowLayer(8f, 0f, 1f, Color.argb(Math.round(alpha / 2f * (1f - hintInk)), 0, 0, 0));
+        c.drawText(fullScreenHint, W / 2f, y + 37f, hintText);
+    }
+
+    /**
+     * The clock: a glass pill (white while focused). With the Control Center open it becomes the
+     * tvOS status row instead: time on the left, status glyphs, the Control Center button, profile.
+     */
+    private void drawClock(Canvas c) {
+        int alpha = Math.round(255 * Math.max(Math.max(1f - expand, pillAnim), ccAnim));
+        if (alpha <= 2) return;
+        float h = CLOCK_H, pad = 22f, gap = 12f, size = AVATAR, cy = CLOCK_TOP + h / 2f;
+
+        int pillAlpha = Math.round(alpha * (1f - ccAnim));
+        if (pillAlpha > 2) {
+            float grow = 1f + 0.05f * pillAnim;
+            float w = (pad + timeWidth + gap + size + 8f) * grow, gh = h * grow;
+            r.set(EDGE - w, cy - gh / 2f, EDGE, cy + gh / 2f);
+            drawGlass(c, r, gh / 2f, 0f, 0x1AFFFFFF, pillAlpha);
+            if (pillAnim > 0.01f) {
+                fill.setColor(Color.argb(Math.round(pillAlpha * pillAnim * 0.96f), 255, 255, 255));
+                c.drawRoundRect(r, gh / 2f, gh / 2f, fill);
+            }
+            int ink = Math.round(255 - (255 - 28) * Math.max(clockInk, Math.min(1f, pillAnim * 1.4f)));
+            clockText.setColor(Color.argb(pillAlpha, ink, ink, ink));
+            c.drawText(time, r.left + pad * grow, cy + 9.5f, clockText);
+        }
+        if (ccAnim > 0.01f) {
+            int rowAlpha = Math.round(255 * ccAnim);
+            clockText.setColor(Color.argb(rowAlpha, 255, 255, 255));
+            c.drawText(time, EDGE - ControlCenter.WIDTH + 6f, cy + 9.5f, clockText);
+            cc.drawStatus(c, cy, rowAlpha);
+        }
+        Bitmap face = avatar != null ? avatar : defaultAvatar;
+        if (face != null) {
+            float ax = EDGE - 8f - size, ay = cy - size / 2f;
+            r.set(ax, ay, ax + size, ay + size);
+            image.setAlpha(alpha);
+            c.drawBitmap(face, null, r, image);
+        }
+    }
+
+    /** A glass pill centred at the top of the screen. */
+    private void drawBanner(Canvas c, String text) {
+        float w = menuText.measureText(text) + 56f, top = 50f, h = 56f;
+        r.set((W - w) / 2f, top, (W + w) / 2f, top + h);
+        drawGlass(c, r, h / 2f, 0f, 0x26000000, 255);
+        menuText.setColor(Color.WHITE);
+        menuText.setTextAlign(Paint.Align.CENTER);
+        c.drawText(text, W / 2f, top + h / 2f + 9f, menuText);
+    }
+
+    /** The tvOS long-press menu: a dark glass list beside the focused icon, icons on the right. */
+    private void drawMenu(Canvas c, float offset) {
+        Apps.Entry e = focused();
+        if (e == null || menuLabels.isEmpty()) return;
+        int alpha = Math.round(255 * menuAnim);
+        float itemH = 68f, pad = 8f, w = 440f, h = pad * 2 + itemH * menuLabels.size();
+        float tcx = e.x + TILE_W / 2f, tcy = e.y + TILE_H / 2f + offset;
+        float tileL = tcx - TILE_W * FOCUS_SCALE / 2f, tileR = tcx + TILE_W * FOCUS_SCALE / 2f;
+        float tileT = tcy - TILE_H * FOCUS_SCALE / 2f;
+        boolean right = tileR + 14f + w <= W - 30f;
+        float left = right ? tileR + 14f : tileL - 14f - w;
+        left += (1f - menuAnim) * (right ? -16f : 16f);
+        float top = Math.max(30f, Math.min(tileT, height - 30f - h));
+
+        r.set(left, top, left + w, top + h);
+        drawGlass(c, r, 22f, 0f, 0xB0141418, alpha);
+        menuText.setTextAlign(Paint.Align.LEFT);
+        for (int i = 0; i < menuLabels.size(); i++) {
+            float y = top + pad + i * itemH;
+            boolean sel = i == menuSel, danger = menuDanger.get(i);
+            if (sel) {
+                r.set(left + pad, y, left + w - pad, y + itemH);
+                fill.setColor(Color.argb(Math.round(245 * menuAnim), 255, 255, 255));
+                c.drawRoundRect(r, 15f, 15f, fill);
+            }
+            int ink = danger ? (sel ? DARK_RED : RED) : (sel ? 0xFF141416 : Color.WHITE);
+            menuText.setColor(ink);
+            menuText.setAlpha(alpha);
+            c.drawText(menuLabels.get(i), left + pad + 22f, y + itemH / 2f + 9f, menuText);
+            Drawable icon = menuIcons.get(i);
+            if (icon != null) {
+                float size = 30f, ix = left + w - pad - 22f - size, iy = y + (itemH - size) / 2f;
+                icon.setBounds(Math.round(ix), Math.round(iy), Math.round(ix + size), Math.round(iy + size));
+                icon.setTint(ink);
+                icon.setAlpha(alpha);
+                icon.draw(c);
+            }
+        }
+    }
+
+    /** While editing: the "Hidden" title, and a drop target when nothing is hidden yet. */
+    private void drawHiddenSection(Canvas c) {
+        int a = Math.round(255 * editAnim);
+        if (a <= 2) return;
+        float top = hiddenTop();
+        headerText.setColor(Color.argb(Math.round(a * 0.9f), 255, 255, 255));
+        c.drawText(hiddenTitle, GRID_X, top - 30f, headerText);
+        if (hidden.isEmpty()) {
+            r.set(GRID_X, top, GRID_X + TILE_W, top + TILE_H);
+            dashed.setColor(Color.argb(Math.round(a * 0.45f), 255, 255, 255));
+            c.drawRoundRect(r, TILE_R, TILE_R, dashed);
+            hintText.setTextAlign(Paint.Align.LEFT);
+            hintText.setColor(Color.argb(Math.round(a * 0.6f), 255, 255, 255));
+            hintText.clearShadowLayer();
+            c.drawText(hiddenEmpty, GRID_X + TILE_W + 32f, top + TILE_H / 2f + 8f, hintText);
+            hintText.setTextAlign(Paint.Align.CENTER);
+        }
+    }
+
+    /** A soft drop shadow for a focused tile, blurred once in software. Drawn tinted by the paint's alpha. */
+    private static Bitmap makeShadowMask(float scale) {
+        float w = TILE_W * FOCUS_SCALE, h = TILE_H * FOCUS_SCALE;
+        int bw = Math.round((w + 2 * SHADOW_PAD) * scale), bh = Math.round((h + 2 * SHADOW_PAD) * scale);
+        Bitmap b = Bitmap.createBitmap(Math.max(1, bw), Math.max(1, bh), Bitmap.Config.ALPHA_8);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setMaskFilter(new BlurMaskFilter(SHADOW_BLUR * scale, BlurMaskFilter.Blur.NORMAL));
+        float pad = SHADOW_PAD * scale, radius = TILE_R * FOCUS_SCALE * scale;
+        new Canvas(b).drawRoundRect(new RectF(pad, pad, bw - pad, bh - pad), radius, radius, p);
+        return b;
+    }
+
+    /** The default profile picture: a grey disc with a person glyph. */
+    private static Bitmap makeAvatar(int size) {
+        Bitmap b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(b);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setShader(new LinearGradient(0, 0, 0, size, 0xFFA9A9AF, 0xFF6C6C72, Shader.TileMode.CLAMP));
+        c.drawCircle(size / 2f, size / 2f, size / 2f, p);
+        p.setShader(null);
+        p.setColor(0xF2FFFFFF);
+        p.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)); // clip the glyph to the disc
+        c.drawCircle(size / 2f, size * 0.39f, size * 0.19f, p);
+        c.drawOval(new RectF(size * 0.17f, size * 0.66f, size * 0.83f, size * 1.30f), p);
+        return b;
+    }
+}

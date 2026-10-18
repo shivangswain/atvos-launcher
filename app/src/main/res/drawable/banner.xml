@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 16:9 TV banner: a glass dock holding a row of app tiles. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <path android:fillColor="#FF10142A" android:pathData="M0,0h320v180h-320z" />
+    <path android:fillColor="#FF2A4FD6" android:fillAlpha="0.55" android:pathData="M0,0h320v110c-80,-40 -200,-40 -320,0z" />
+    <path android:fillColor="#33FFFFFF" android:pathData="M40,96h240a18,18 0 0 1 18,18v20a18,18 0 0 1 -18,18h-240a18,18 0 0 1 -18,-18v-20a18,18 0 0 1 18,-18z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M44,106h56a6,6 0 0 1 6,6v24a6,6 0 0 1 -6,6h-56a6,6 0 0 1 -6,-6v-24a6,6 0 0 1 6,-6z" />
+    <path android:fillColor="#CCFFFFFF" android:pathData="M132,108h56a6,6 0 0 1 6,6v20a6,6 0 0 1 -6,6h-56a6,6 0 0 1 -6,-6v-20a6,6 0 0 1 6,-6z" />
+    <path android:fillColor="#CCFFFFFF" android:pathData="M220,108h56a6,6 0 0 1 6,6v20a6,6 0 0 1 -6,6h-56a6,6 0 0 1 -6,-6v-20a6,6 0 0 1 6,-6z" />
+</vector>

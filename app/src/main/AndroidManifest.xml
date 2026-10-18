@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-feature android:name="android.software.leanback" android:required="true" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <!-- Recommendation artwork. HTTPS only (cleartext is off below). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Apps' TV recommendations (Watch Next + preview channels): lets the TV provider share other
+         apps' searchable programs. Asked for once at first launch. -->
+    <uses-permission android:name="android.permission.READ_TV_LISTINGS" />
+    <!-- Control Center: the Wi-Fi tile's status. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Control Center: Do Not Disturb (the user still has to grant access). -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <!-- Control Center: the sleep timer fires on time. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
+    <!-- Package visibility: apps that can be launched from a home screen, and the TV provider. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <provider android:authorities="android.media.tv" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:banner="@drawable/banner"
+        android:enableOnBackInvokedCallback="false"
+        android:hasFragileUserData="false"
+        android:icon="@drawable/icon"
+        android:label="@string/app_name"
+        android:theme="@style/Home"
+        android:usesCleartextTraffic="false">
+
+        <activity
+            android:name=".HomeActivity"
+            android:clearTaskOnLaunch="true"
+            android:configChanges="density|fontScale|keyboard|keyboardHidden|layoutDirection|locale|navigation|orientation|screenLayout|screenSize|smallestScreenSize|touchscreen|uiMode"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:resumeWhilePausing="true"
+            android:stateNotNeeded="true"
+            android:windowSoftInputMode="adjustNothing">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Force-lock only: lets Power Off and the Sleep Timer put the TV to sleep. Only the system can bind it. -->
+        <receiver
+            android:name=".PowerAdmin"
+            android:description="@string/power_admin_description"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/power_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- adb only, before uninstalling: am broadcast -n app.tvhome/.ReleasePower. The sender must
+             hold DUMP, which the adb shell has and apps can't get. -->
+        <receiver
+            android:name=".ReleasePower"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
+        <!-- Sleep timer alarm; only our own PendingIntent can reach it. -->
+        <receiver
+            android:name=".SleepTimer"
+            android:exported="false" />
+    </application>
+</manifest>
