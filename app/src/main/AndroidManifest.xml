@@ -37,7 +37,7 @@
         android:hasFragileUserData="false"
         android:icon="@drawable/icon"
         android:label="@string/app_name"
-        android:theme="@style/Home"
+        android:theme="@style/Launcher"
         android:usesCleartextTraffic="false">
 
         <activity
@@ -76,7 +76,7 @@
             </intent-filter>
         </receiver>
 
-        <!-- adb only, before uninstalling: am broadcast -n app.tvhome/.ReleasePower. The sender must
+        <!-- adb only, before uninstalling: am broadcast -n app.atvos.launcher/.ReleasePower. The sender must
              hold DUMP, which the adb shell has and apps can't get. -->
         <receiver
             android:name=".ReleasePower"

@@ -3,13 +3,13 @@ plugins {
 }
 
 android {
-    namespace = "app.tvhome"
+    namespace = "app.atvos.launcher"
     compileSdk = 36
     // Pinned to what the Nix-managed SDK ships (the SDK is read-only, Gradle can't fetch others)
     buildToolsVersion = "36.0.0"
 
     defaultConfig {
-        applicationId = "app.tvhome"
+        applicationId = "app.atvos.launcher"
         minSdk = 34 // Android 14, the TCL C6K
         targetSdk = 36
         versionCode = 1

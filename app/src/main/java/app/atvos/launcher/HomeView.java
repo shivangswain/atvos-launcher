@@ -1,4 +1,4 @@
-package app.tvhome;
+package app.atvos.launcher;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
@@ -74,10 +74,13 @@ final class HomeView extends View {
     private static final float DOCK_ROW_Y = 800f;
     private static final float DOCK_PAD_X = 48f, DOCK_PAD_Y = 36f;
     private static final float EDGE = W - GRID_X + DOCK_PAD_X;      // right edge shared by dock and clock
-    private static final float ROW_ANCHOR = 430f;                     // where a focused grid row settles
+    // Below the dock the apps fill the screen, as on tvOS: the top row rises to here, near the top
+    // edge (the clock fades away), and deeper rows scroll only to keep the focused one above the line.
+    private static final float GRID_TOP = 95f, FOCUS_LINE = 640f;
     private static final float SHADOW_PAD = 60f, SHADOW_DY = 20f, SHADOW_BLUR = 30f;
     private static final float CLOCK_TOP = 50f, CLOCK_H = 56f, AVATAR = 40f;
-    private static final float HIDDEN_GAP = 84f; // room for the "Hidden" title above hidden apps in edit mode
+    private static final float HIDDEN_GAP = 84f; // room for the "Hidden" title above the hidden apps
+    private static final long HOLD_MS = 800;     // holding Down on the last row this long reveals Hidden
     private static final int RED = 0xFFFF5F57, DARK_RED = 0xFFE0342B, INK = 0xFF141416;
     private static final float PLAY_H = 64f;
     private static final long IDLE_MS = 60_000;
@@ -86,8 +89,8 @@ final class HomeView extends View {
 
     private final Host host;
     private final List<Apps.Entry> apps = new ArrayList<>();   // visible, in order
-    private final List<Apps.Entry> hidden = new ArrayList<>(); // shown greyed out below, only while editing
-    private int focus;                                          // index into apps, then hidden (while editing)
+    private final List<Apps.Entry> hidden = new ArrayList<>(); // greyed out below, while editing or revealed
+    private int focus;                                          // index into apps, then hidden (when shown)
 
     private float scale = 1f, height = 1080f;
     private long lastFrame;
@@ -109,7 +112,11 @@ final class HomeView extends View {
             kick();
         }
     };
-    private boolean editing, holding; // Edit Home Screen; holding = the focused app is picked up
+    private boolean editing, holding; // Edit Home Screen: the focused app is picked up and moving
+    private boolean showHidden;       // the Hidden section, revealed by holding Down on the last row
+    private boolean downHeld, swallowDown; // Down held on the last row; its repeats after the reveal
+    private long downAt, bounceAt;
+    private float downAppear, downProgress, bounce, menuSelAnim;
     private Backdrops.Backdrop backdrop, previous;
 
     // Control Center (opened from the clock pill)
@@ -122,7 +129,7 @@ final class HomeView extends View {
     private final List<Boolean> menuDanger = new ArrayList<>();
     private final List<Runnable> menuActions = new ArrayList<>();
     private final List<Boolean> menuStays = new ArrayList<>(); // switches keep the menu open to show their new state
-    private final Drawable editIcon, infoIcon, hideIcon, onIcon, offIcon, playIcon;
+    private final Drawable editIcon, infoIcon, hideIcon, showIcon, onIcon, offIcon, playIcon;
     private int menuSel;
 
     // Clock
@@ -179,6 +186,7 @@ final class HomeView extends View {
         editIcon = menuIcon(context, R.drawable.ic_tv);
         infoIcon = menuIcon(context, R.drawable.ic_info);
         hideIcon = menuIcon(context, R.drawable.ic_hide);
+        showIcon = menuIcon(context, R.drawable.ic_show);
         onIcon = menuIcon(context, R.drawable.ic_check_on);
         offIcon = menuIcon(context, R.drawable.ic_check_off);
         playIcon = menuIcon(context, R.drawable.ic_play);
@@ -281,6 +289,8 @@ final class HomeView extends View {
         if (editing) finishEditing();
         setExpanded(false);
         cardFocused = false;
+        showHidden = false;
+        downHeld = false;
         if (!apps.isEmpty()) focus = Math.min(focus, apps.size() - 1) % COLS;
         focusChanged();
     }
@@ -401,7 +411,19 @@ final class HomeView extends View {
             case KeyEvent.KEYCODE_DPAD_LEFT: move(-1, 0); return true;
             case KeyEvent.KEYCODE_DPAD_RIGHT: move(1, 0); return true;
             case KeyEvent.KEYCODE_DPAD_UP: move(0, -1); return true;
-            case KeyEvent.KEYCODE_DPAD_DOWN: move(0, 1); return true;
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                if (swallowDown && e.getRepeatCount() > 0) return true; // still held from the reveal
+                if (canRevealHidden()) {
+                    // Held on the last row: an arrow appears, a ring fills round it, then Hidden opens.
+                    if (e.getRepeatCount() == 0) {
+                        downHeld = true;
+                        downAt = SystemClock.uptimeMillis();
+                        kick();
+                    }
+                    return true;
+                }
+                move(0, 1);
+                return true;
             case KeyEvent.KEYCODE_MENU: if (!editing) openMenu(); return true;
             case KeyEvent.KEYCODE_BACK: back(); return true;
             default: return super.onKeyDown(code, e);
@@ -429,6 +451,12 @@ final class HomeView extends View {
             longPressed = false;
             return true;
         }
+        if (code == KeyEvent.KEYCODE_DPAD_DOWN && (downHeld || swallowDown)) {
+            downHeld = false;
+            swallowDown = false;
+            kick();
+            return true;
+        }
         return code == KeyEvent.KEYCODE_BACK || super.onKeyUp(code, e);
     }
 
@@ -443,8 +471,9 @@ final class HomeView extends View {
     }
 
     /**
-     * D-pad movement over the grid. While editing, the hidden apps form a second section below the
-     * visible ones; with an app picked up, moving it between the sections hides or unhides it.
+     * D-pad movement over the grid. The hidden apps form a second section below the visible ones,
+     * shown while an app is being moved or once revealed; moving a picked-up app between the
+     * sections hides or unhides it.
      */
     private void move(int dx, int dy) {
         int v = apps.size(), total = total();
@@ -464,8 +493,8 @@ final class HomeView extends View {
                 int to = Math.min(local + COLS, n - 1);
                 if (holding) list.add(to, list.remove(local));
                 focus = base + to;
-            } else if (!inHidden && editing && (hidden.size() > 0 || holding) && !(holding && v <= 1)) {
-                // Into the hidden section (dropping a held app there hides it; keep at least one app).
+            } else if (!inHidden && (holding ? v > 1 : showHidden && !hidden.isEmpty())) {
+                // Into the hidden section (moving an app there hides it; at least one app stays).
                 int to = Math.min(col, hidden.size() - (holding ? 0 : 1));
                 if (holding) hidden.add(to, apps.remove(local));
                 focus = apps.size() + to;
@@ -485,6 +514,7 @@ final class HomeView extends View {
                 focus = to;
             } else if (v > 0) {
                 focus = Math.min(lastRow + col, v - 1);
+                showHidden = false; // leaving Hidden folds it away again
             } else {
                 return;
             }
@@ -543,8 +573,7 @@ final class HomeView extends View {
         if (e == null) return;
         playSoundEffect(SoundEffectConstants.CLICK);
         if (editing) {
-            holding = !holding; // pick up / drop
-            kick();
+            finishEditing(); // drop it here, and that's the edit done
             return;
         }
         Recommendations.Item program = backdrop != null ? backdrop.program : null;
@@ -572,12 +601,12 @@ final class HomeView extends View {
 
     private void back() {
         if (editing) {
-            if (holding) {
-                holding = false;
-                kick();
-            } else {
-                finishEditing();
-            }
+            finishEditing();
+        } else if (focus >= apps.size()) {
+            // Out of Hidden, back to the dock.
+            showHidden = false;
+            focus = Math.max(0, Math.min((focus - apps.size()) % COLS, apps.size() - 1));
+            focusChanged();
         } else if (focus >= COLS) {
             focus %= COLS;
             focusChanged();
@@ -601,10 +630,13 @@ final class HomeView extends View {
         return b.card != null ? CARD_SHELF : FULL_SHELF;
     }
 
-    /** Edit Home Screen: every app jiggles; select picks one up, the arrows move it, select drops it. */
+    /**
+     * Edit Home Screen, as on tvOS: the chosen app is picked up and wiggles, the arrows move it (into
+     * or out of Hidden too), and select (or Back) drops it and ends the edit.
+     */
     private void startEditing() {
         editing = true;
-        holding = false;
+        holding = true;
         kick();
     }
 
@@ -612,7 +644,34 @@ final class HomeView extends View {
         editing = false;
         holding = false;
         host.saveLayout(new ArrayList<>(apps), new ArrayList<>(hidden));
-        if (focus >= apps.size()) focus = Math.max(0, apps.size() - 1);
+        // Dropped among the hidden apps: stay there. Otherwise Hidden folds away.
+        showHidden = focus >= apps.size() && !hidden.isEmpty();
+        if (focus >= total()) focus = Math.max(0, apps.size() - 1);
+        focusChanged();
+    }
+
+    /** Held Down long enough on the last row: drop into the Hidden section with a little bounce. */
+    private void revealHidden() {
+        downHeld = false;
+        swallowDown = true;
+        showHidden = true;
+        focus = apps.size() + Math.min(focus % COLS, hidden.size() - 1);
+        bounceAt = SystemClock.uptimeMillis();
+        navSound(0, 1);
+        focusChanged();
+    }
+
+    private boolean canRevealHidden() {
+        int v = apps.size();
+        return !editing && !showHidden && !hidden.isEmpty() && focus < v && focus / COLS == (v - 1) / COLS;
+    }
+
+    private void unhide(Apps.Entry e) {
+        if (!hidden.remove(e)) return;
+        apps.add(e);
+        host.saveLayout(new ArrayList<>(apps), new ArrayList<>(hidden));
+        showHidden = false;
+        focus = apps.size() - 1;
         focusChanged();
     }
 
@@ -621,6 +680,7 @@ final class HomeView extends View {
         if (e == null) return;
         buildMenu(e);
         menuSel = 0;
+        menuSelAnim = 0f;
         menuOpen = true;
         kick();
     }
@@ -637,6 +697,10 @@ final class HomeView extends View {
         menuStays.clear();
         addMenu(R.string.edit_home, editIcon, false, false, this::startEditing);
         addMenu(R.string.app_info, infoIcon, false, false, () -> host.showInfo(e));
+        if (hidden.contains(e)) {
+            addMenu(R.string.unhide_app, showIcon, false, false, () -> unhide(e));
+            return;
+        }
         int sources = host.shelfSources(e);
         if ((sources & Recommendations.WATCH_NEXT) != 0) addSwitch(R.string.continue_watching, e, Recommendations.WATCH_NEXT);
         if ((sources & Recommendations.PREVIEWS) != 0) addSwitch(R.string.recommendations, e, Recommendations.PREVIEWS);
@@ -701,9 +765,9 @@ final class HomeView extends View {
         kick();
     }
 
-    /** Tiles on screen: the visible apps, plus the hidden ones while editing. */
+    /** Tiles on screen: the visible apps, plus the hidden ones while editing or revealed. */
     private int total() {
-        return apps.size() + (editing ? hidden.size() : 0);
+        return apps.size() + (editing || showHidden ? hidden.size() : 0);
     }
 
     private Apps.Entry entry(int i) {
@@ -748,13 +812,7 @@ final class HomeView extends View {
     private void step(float dt) {
         boolean dock = inDock();
         float scrollTo = 0f;
-        if (!dock && total() > 0) {
-            // A focused row comes up to the anchor, but never past where the last row (with its
-            // focused name) sits at the bottom edge, so short grids don't float mid-screen (tvOS).
-            float last = slotY(total() - 1) + TILE_H * (1f + (FOCUS_SCALE - 1f) / 2f) + 60f;
-            float max = Math.max(0f, last - height + 40f);
-            scrollTo = Math.max(0f, Math.min(slotY(focus) - ROW_ANCHOR, max));
-        }
+        if (!dock && total() > 0) scrollTo = Math.max(DOCK_ROW_Y - GRID_TOP, slotY(focus) - FOCUS_LINE);
         scroll = ease(scroll, scrollTo, 10f, dt, 0.2f);
         away = ease(away, dock ? 0f : 1f, 8f, dt, 0.002f);
         // A shelf that went away (its source switched off, say) can't stay selected.
@@ -765,7 +823,27 @@ final class HomeView extends View {
         cardAnim = ease(cardAnim, cardFocused && !pillFocused && !ccOpen ? 1f : 0f, 14f, dt, 0.002f);
         playFocus = ease(playFocus, (expanded || cardFocused) && !pillFocused && !ccOpen ? 1f : 0f, 14f, dt, 0.002f);
         chrome = ease(chrome, idle ? 0f : 1f, idle ? 2.5f : 12f, dt, 0.002f); // fades out slowly, back at once
-        editAnim = ease(editAnim, editing ? 1f : 0f, 10f, dt, 0.002f);
+        editAnim = ease(editAnim, editing || showHidden ? 1f : 0f, 10f, dt, 0.002f);
+        long now = SystemClock.uptimeMillis();
+        if (downHeld) {
+            downProgress = Math.min(1f, (now - downAt) / (float) HOLD_MS);
+            animating = true;
+            if (downProgress >= 1f) revealHidden();
+        } else {
+            downProgress = ease(downProgress, 0f, 10f, dt, 0.002f);
+        }
+        downAppear = ease(downAppear, downHeld ? 1f : 0f, 14f, dt, 0.002f);
+        bounce = 0f;
+        if (bounceAt != 0) {
+            float t = (now - bounceAt) / 1000f;
+            if (t >= 0.9f) {
+                bounceAt = 0;
+            } else {
+                bounce = 26f * (float) (Math.exp(-5.5 * t) * Math.sin(t * 2 * Math.PI * 2.2));
+                animating = true;
+            }
+        }
+        menuSelAnim = ease(menuSelAnim, menuSel, 20f, dt, 0.002f);
         boolean showHint = dock && !expanded && !cardFocused && !menuOpen && !editing && !pillFocused && shelf == FULL_SHELF;
         hint = ease(hint, showHint ? 1f : 0f, 8f, dt, 0.002f);
         menuAnim = ease(menuAnim, menuOpen ? 1f : 0f, 18f, dt, 0.002f);
@@ -794,7 +872,7 @@ final class HomeView extends View {
             e.y = ease(e.y, sy, 14f, dt, 0.2f);
             e.focus = ease(e.focus, i == focus && !expanded && !cardFocused && !pillFocused ? 1f : 0f, 14f, dt, 0.002f);
         }
-        if (editing) animating = true; // jiggle
+        if (holding) animating = true; // the picked-up app wiggles
     }
 
     /** How far the UI has slid down for the full-screen top shelf: the dock peeks in where the second row was. */
@@ -827,7 +905,7 @@ final class HomeView extends View {
         drawBackground(c);
         drawCard(c);
 
-        float offset = lift() - scroll;
+        float offset = lift() - scroll - bounce;
         // Idle on the full-screen shelf, the dock fades away with the Play button (as one layer, only while fading).
         int chromeAlpha = Math.round(255 * (expanded ? chrome : 1f));
         if (chromeAlpha > 2) {
@@ -842,6 +920,7 @@ final class HomeView extends View {
             for (int i = 0; i < n; i++) if (i != focus) drawTile(c, entry(i), i, offset);
             if (focus < n) drawTile(c, entry(focus), focus, offset);
             drawHint(c);
+            drawRevealHint(c);
             c.restore();
             drawFullScreenPlay(c);
             if (layer >= 0) c.restoreToCount(layer);
@@ -945,10 +1024,10 @@ final class HomeView extends View {
         float radius = TILE_R * s;
 
         int save = c.save();
-        if (editing && !held) {
-            // tvOS-style jiggle, each icon slightly out of phase with its neighbours.
+        if (held) {
+            // The picked-up app wiggles, as on tvOS.
             double t = SystemClock.uptimeMillis() / 1000.0;
-            c.rotate((float) Math.sin(t * Math.PI * 2 * 3.2 + i * 1.9) * 1.2f, cx, cy);
+            c.rotate((float) Math.sin(t * Math.PI * 2 * 3.2) * 1.4f, cx, cy);
         }
         if (f > 0.01f && shadowMask != null) {
             // Pre-blurred mask, scaled with the tile: no per-frame GPU blur.
@@ -1006,7 +1085,7 @@ final class HomeView extends View {
      * tvOS status row instead: time on the left, status glyphs, the Control Center button, profile.
      */
     private void drawClock(Canvas c) {
-        int alpha = Math.round(255 * Math.max(Math.max(1f - expand, pillAnim), ccAnim));
+        int alpha = Math.round(255 * Math.max(Math.max((1f - expand) * (1f - away), pillAnim), ccAnim));
         if (alpha <= 2) return;
         float h = CLOCK_H, pad = 22f, gap = 12f, size = AVATAR, cy = CLOCK_TOP + h / 2f;
 
@@ -1101,7 +1180,11 @@ final class HomeView extends View {
         c.drawText(playLabel, ix + size + 10f, y + PLAY_H / 2f + 9f, playText);
     }
 
-    /** The tvOS long-press menu: a dark glass list beside the focused icon, icons on the right. */
+    /**
+     * The long-press menu: a dark glass list beside the focused icon, icons on the right. As on tvOS,
+     * the selected option pops out of it: a white capsule a little wider than the list, lifted on a
+     * shadow, its text slightly larger, gliding from option to option.
+     */
     private void drawMenu(Canvas c, float offset) {
         Apps.Entry e = focused();
         if (e == null || menuLabels.isEmpty()) return;
@@ -1110,39 +1193,87 @@ final class HomeView extends View {
         float tcx = e.x + TILE_W / 2f, tcy = e.y + TILE_H / 2f + offset;
         float tileL = tcx - TILE_W * FOCUS_SCALE / 2f, tileR = tcx + TILE_W * FOCUS_SCALE / 2f;
         float tileT = tcy - TILE_H * FOCUS_SCALE / 2f;
-        boolean right = tileR + 14f + w <= W - 30f;
-        float left = right ? tileR + 14f : tileL - 14f - w;
+        boolean right = tileR + 12f + w <= W - 30f;
+        float left = right ? tileR + 12f : tileL - 12f - w;
         left += (1f - menuAnim) * (right ? -16f : 16f);
         float top = Math.max(30f, Math.min(tileT, height - 30f - h));
 
-        // Capsule rows in a container whose corners follow them, like the dock and Control Center.
+        // Capsule rows in frosted glass whose corners follow them, like the dock and Control Center:
+        // light over the dimmed grid, as on tvOS, and darker over a bright backdrop in the dock so
+        // the white text still reads.
         r.set(left, top, left + w, top + h);
-        drawGlass(c, r, itemH / 2f + pad, 0f, 0xB0141418, alpha);
+        int tint = Color.argb(Math.round(0x8C + (0x30 - 0x8C) * away), blendChannel(0x1C, 255, away),
+                blendChannel(0x1C, 255, away), blendChannel(0x22, 255, away));
+        drawGlass(c, r, itemH / 2f + pad, 0f, tint, alpha);
+
+        float pop = 10f, sy = top + pad + menuSelAnim * itemH;
+        r.set(left - pop, sy - pop / 2f, left + w + pop, sy + itemH + pop / 2f);
+        if (shadowMask != null) {
+            // The tile shadow mask, stretched so its shape lands on the capsule.
+            float sx = r.width() * 0.194f, sh = r.height() * 0.333f;
+            r2.set(r.left - sx, r.top - sh + 10f, r.right + sx, r.bottom + sh + 10f);
+            shadow.setAlpha(Math.round(130 * menuAnim));
+            c.drawBitmap(shadowMask, null, r2, shadow);
+        }
+        fill.setColor(Color.argb(Math.round(248 * menuAnim), 255, 255, 255));
+        c.drawRoundRect(r, r.height() / 2f, r.height() / 2f, fill);
+
         menuText.setTextAlign(Paint.Align.LEFT);
         for (int i = 0; i < menuLabels.size(); i++) {
-            float y = top + pad + i * itemH;
-            boolean sel = i == menuSel, danger = menuDanger.get(i);
-            if (sel) {
-                r.set(left + pad, y, left + w - pad, y + itemH);
-                fill.setColor(Color.argb(Math.round(245 * menuAnim), 255, 255, 255));
-                c.drawRoundRect(r, itemH / 2f, itemH / 2f, fill);
-            }
-            int ink = danger ? (sel ? DARK_RED : RED) : (sel ? INK : Color.WHITE);
+            float y = top + pad + i * itemH, cy = y + itemH / 2f;
+            float sel = Math.max(0f, 1f - Math.abs(menuSelAnim - i)); // how much of the pop-out is on this row
+            boolean danger = menuDanger.get(i);
+            int ink = danger ? blend(RED, DARK_RED, sel) : blend(Color.WHITE, INK, sel);
+            c.save();
+            float k = 1f + 0.05f * sel;
+            c.scale(k, k, left + w / 2f, cy);
             menuText.setColor(ink);
             menuText.setAlpha(alpha);
-            c.drawText(menuLabels.get(i), left + pad + 30f, y + itemH / 2f + 9f, menuText);
+            c.drawText(menuLabels.get(i), left + pad + 30f, cy + 9f, menuText);
             Drawable icon = menuIcons.get(i);
             if (icon != null) {
-                float size = 30f, ix = left + w - pad - 28f - size, iy = y + (itemH - size) / 2f;
+                float size = 30f, ix = left + w - pad - 28f - size, iy = cy - size / 2f;
                 icon.setBounds(Math.round(ix), Math.round(iy), Math.round(ix + size), Math.round(iy + size));
                 icon.setTint(ink);
                 icon.setAlpha(alpha);
                 icon.draw(c);
             }
+            c.restore();
         }
     }
 
-    /** While editing: the "Hidden" title, and a drop target when nothing is hidden yet. */
+    private static int blendChannel(int a, int b, float t) {
+        return Math.round(a + (b - a) * t);
+    }
+
+    private static int blend(int a, int b, float t) {
+        return Color.rgb(
+                Math.round(Color.red(a) + (Color.red(b) - Color.red(a)) * t),
+                Math.round(Color.green(a) + (Color.green(b) - Color.green(a)) * t),
+                Math.round(Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t));
+    }
+
+    /**
+     * Down held on the last row: an arrow below it, encircled as the hold goes on; once the ring
+     * closes, focus drops into the Hidden section.
+     */
+    private void drawRevealHint(Canvas c) {
+        if (downAppear <= 0.01f || apps.isEmpty()) return;
+        int alpha = Math.round(235 * downAppear);
+        float cx = W / 2f, cy = slotY(apps.size() - 1) + TILE_H + 110f, radius = 30f;
+        stroke.setColor(Color.argb(alpha / 4, 255, 255, 255));
+        c.drawCircle(cx, cy, radius, stroke);
+        stroke.setColor(Color.argb(alpha, 255, 255, 255));
+        r.set(cx - radius, cy - radius, cx + radius, cy + radius);
+        c.drawArc(r, -90f, 360f * downProgress, false, stroke);
+        c.save();
+        c.translate(cx, cy + 1f);
+        c.scale(0.8f, -0.8f); // the hint's up chevron, turned down
+        c.drawPath(chevron, stroke);
+        c.restore();
+    }
+
+    /** With Hidden shown: its title, and a drop target while editing when nothing is hidden yet. */
     private void drawHiddenSection(Canvas c) {
         int a = Math.round(255 * editAnim);
         if (a <= 2) return;

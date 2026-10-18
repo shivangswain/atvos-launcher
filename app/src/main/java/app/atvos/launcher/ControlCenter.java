@@ -1,4 +1,4 @@
-package app.tvhome;
+package app.atvos.launcher;
 
 import android.content.Context;
 import android.graphics.Canvas;
@@ -32,7 +32,7 @@ final class ControlCenter {
     private static final int COUNT = 11;
 
     // One grid, as on tvOS: circles as tall as the pills, two circles to a pill column.
-    private static final float ROW_H = 92f, GAP = 20f, COL_W = 2 * ROW_H + GAP, TOP = 134f, SETTINGS_D = 62f;
+    private static final float ROW_H = 92f, GAP = 20f, COL_W = 2 * ROW_H + GAP, TOP = 134f, SETTINGS_D = 50f;
     /** Width of the tile block, also the span of the top status row. */
     static final float WIDTH = 2 * COL_W + GAP;
     private static final float LINE_1 = 23f, LINE_2 = 21f, TEXT_ROOM = COL_W - 88f;
@@ -42,7 +42,7 @@ final class ControlCenter {
     private final RectF[] rects = new RectF[COUNT];
     private final float[] radii = new float[COUNT];
     private final float[] focus = new float[COUNT];
-    private final float cogSize; // the Settings cog, about as large as the profile avatar beside it
+    private final float cogSize; // the Settings cog, a little smaller than the profile avatar beside it
     private final Drawable power, wifi, ethernet, moon, bluetooth, headphones, timer, input, accessibility,
             system, search, settings;
     private final String powerOff, wifiLabel, ethernetLabel, connected, notConnected, dnd1, dnd2,
@@ -63,7 +63,7 @@ final class ControlCenter {
     /** {@code right} is the screen-space right edge to align to; {@code avatar} is where the clock draws the profile avatar. */
     ControlCenter(Context context, float right, RectF avatar) {
         float rx = right - COL_W, lx = right - WIDTH;
-        float cy = avatar.centerY(), sx = avatar.left - 14f - SETTINGS_D / 2f;
+        float cy = avatar.centerY(), sx = avatar.left - 18f - SETTINGS_D / 2f;
         rects[PROFILE] = new RectF(avatar);
         rects[SETTINGS] = new RectF(sx - SETTINGS_D / 2f, cy - SETTINGS_D / 2f, sx + SETTINGS_D / 2f, cy + SETTINGS_D / 2f);
         rects[POWER] = new RectF(lx, TOP, lx + COL_W, TOP + 2 * ROW_H + GAP);
@@ -79,7 +79,7 @@ final class ControlCenter {
         }
         for (int i = 0; i < COUNT; i++) radii[i] = rects[i].height() / 2f;
         radii[POWER] = 44f;
-        cogSize = avatar.width() * 1.1f; // its glyph (20 of the icon's 24 units) just under the avatar's size
+        cogSize = avatar.width() * 0.95f; // its glyph is 20 of the icon's 24 units, so a little smaller than the avatar
 
         power = icon(context, R.drawable.ic_power);
         wifi = icon(context, R.drawable.ic_wifi);

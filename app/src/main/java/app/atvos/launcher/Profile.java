@@ -1,4 +1,4 @@
-package app.tvhome;
+package app.atvos.launcher;
 
 import android.accounts.Account;
 import android.accounts.AccountManager;
@@ -51,7 +51,7 @@ import java.util.function.Consumer;
 final class Profile {
 
     static final int REQUEST_ACCOUNT = 7;
-    private static final String TAG = "Home";
+    private static final String TAG = "atvOS";
     private static final String GOOGLE = "com.google";
     private static final String KEY_ACCOUNT = "account", KEY_PHOTO_TRIED = "photo_tried";
     private static final String SCOPE = "oauth2:https://www.googleapis.com/auth/userinfo.profile";
@@ -90,7 +90,7 @@ final class Profile {
 
     /**
      * Fetches the account's Google photo if it's been a day since the last try, then shows it. The
-     * first time, Android may ask on screen to let Home see your basic profile info. UI thread.
+     * first time, Android may ask on screen to let atvOS Launcher see your basic profile info. UI thread.
      */
     void refresh(Consumer<Bitmap> onAvatar) {
         String name = prefs.getString(KEY_ACCOUNT, null);

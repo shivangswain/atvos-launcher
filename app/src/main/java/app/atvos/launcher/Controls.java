@@ -1,4 +1,4 @@
-package app.tvhome;
+package app.atvos.launcher;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;

@@ -1,4 +1,4 @@
-package app.tvhome;
+package app.atvos.launcher;
 
 import android.content.ContentResolver;
 import android.content.Context;

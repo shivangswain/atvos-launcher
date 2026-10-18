@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Home</string>
+    <string name="app_name">atvOS Launcher</string>
     <string name="edit_home">Edit Home Screen</string>
     <string name="app_info">App Info</string>
     <string name="hide_app">Hide App</string>
+    <string name="unhide_app">Unhide App</string>
     <string name="hidden">Hidden</string>
     <string name="hidden_empty">Move apps here to hide them</string>
     <string name="continue_watching">Continue Watching</string>
@@ -27,7 +28,7 @@
     <string name="sleep_1">Sleep</string>
     <string name="sleep_2">Timer</string>
     <string name="minutes">%d min</string>
-    <string name="dnd_needs_access">Do Not Disturb needs access: adb shell cmd notification allow_dnd app.tvhome</string>
-    <string name="power_released">Power control removed. Home can now be uninstalled.</string>
-    <string name="power_admin_description">Lets Home put the TV to sleep for Power Off and the Sleep Timer. It can\'t do anything else.</string>
+    <string name="dnd_needs_access">Do Not Disturb needs access: adb shell cmd notification allow_dnd app.atvos.launcher</string>
+    <string name="power_released">Power control removed. atvOS Launcher can now be uninstalled.</string>
+    <string name="power_admin_description">Lets atvOS Launcher put the TV to sleep for Power Off and the Sleep Timer. It can\'t do anything else.</string>
 </resources>

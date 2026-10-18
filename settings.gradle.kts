@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "tvos-home"
+rootProject.name = "atvos-launcher"
 include(":app")

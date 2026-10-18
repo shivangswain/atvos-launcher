@@ -1,4 +1,4 @@
-package app.tvhome;
+package app.atvos.launcher;
 
 import android.content.ContentResolver;
 import android.content.Context;
@@ -118,6 +118,12 @@ final class Backdrops {
     /** The card a small recommendation is shown on, in 1920-wide design units, and its corner radius. */
     static final RectF CARD = new RectF(92.5f, 172f, 828.5f, 586f);
     static final float CARD_R = 26f;
+    /**
+     * Every app's logo backdrop shows its logo at the area of a square this many design units wide,
+     * icon or banner, round badge or long wordmark: about what the smallest banners (Sony LIV's)
+     * allow at 1.5x their pixels, so all apps look the same size and none look soft.
+     */
+    private static final float LOGO_SIZE = 160f;
     // Per-app switches for the two recommendation sources (sets of packages switched off).
     private static final String NO_WATCH_NEXT = "no_watch_next", NO_PREVIEWS = "no_previews";
     private static final String REMOTE = "rec:", APP = "app:";
@@ -382,8 +388,7 @@ final class Backdrops {
             float maxCanvas = bitmap > 0 ? bitmap * 1.5f : Float.MAX_VALUE; // enlarged no more than 1.5x, so it stays sharp
             int bannerId = ai.banner != 0 ? ai.banner : ai.applicationInfo.banner;
             int brand = brandColor(bannerId != 0 ? res.getDrawable(bannerId, null) : icon);
-            // Icons are drawn a little smaller than banner logos, which carry a wordmark: the same visual weight.
-            return logoScene(fg, glyph, 220f, maxCanvas, 0.5f, brand, glyph.light < 0.25f); // a dark logo goes on a pale field
+            return logoScene(fg, glyph, LOGO_SIZE, maxCanvas, 0.5f, brand, glyph.light < 0.25f); // a dark logo goes on a pale field
         } catch (RuntimeException e) {
             return null; // another app's resources: anything can go wrong, and the banner still works
         }
@@ -422,7 +427,7 @@ final class Backdrops {
             boolean own = bg != NO_BACKGROUND;
             int brand = own ? bg : brandColor(art);
             boolean pale = own ? luminance(bg) > 0.6f : glyph.light < 0.25f;
-            Bitmap out = logoScene(new BitmapDrawable(res, work), glyph, 300f, maxCanvas, 0f, brand, pale);
+            Bitmap out = logoScene(new BitmapDrawable(res, work), glyph, LOGO_SIZE, maxCanvas, 0f, brand, pale);
             work.recycle();
             return out;
         }

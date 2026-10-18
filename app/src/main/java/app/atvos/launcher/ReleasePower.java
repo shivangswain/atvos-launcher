@@ -1,4 +1,4 @@
-package app.tvhome;
+package app.atvos.launcher;
 
 import android.app.admin.DevicePolicyManager;
 import android.content.BroadcastReceiver;
@@ -8,9 +8,9 @@ import android.content.Intent;
 import android.widget.Toast;
 
 /**
- * Gives up the force-lock admin so Home can be uninstalled (Android TV has no screen for it):
+ * Gives up the force-lock admin so atvOS Launcher can be uninstalled (Android TV has no screen for it):
  *
- *   adb shell am broadcast -n app.tvhome/.ReleasePower
+ *   adb shell am broadcast -n app.atvos.launcher/.ReleasePower
  *
  * The manifest only accepts senders holding DUMP, which the adb shell has and apps can't get.
  */

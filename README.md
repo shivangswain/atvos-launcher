@@ -1,9 +1,12 @@
-# tvOS Home
+# atvOS Launcher
 
-A replacement home screen for Google TV (built for a TCL C6K; needs Android 14 or later) that looks and moves
-like the Apple tvOS home screen. It has a liquid-glass dock for the top row and a grid of app icons
+A replacement home screen for Google TV (built for a TCL C6K; needs Android 14 or later), inspired
+by the Apple TV home screen. It has a liquid-glass dock for the top row and a grid of app icons
 below. Behind the dock sits a "top shelf" backdrop from each app's own recommendations. In the
-corner, a clock pill opens a tvOS-style Control Center.
+corner, a clock pill opens a Control Center.
+
+atvOS Launcher is an independent project, not affiliated with or endorsed by Apple. Apple TV and
+tvOS are trademarks of Apple Inc.
 
 - **Pure Java with zero dependencies.** It uses only the Android framework: no AndroidX, no Kotlin
   stdlib. The release APK is about 80 KB.
@@ -18,20 +21,22 @@ corner, a clock pill opens a tvOS-style Control Center.
 
 | Remote | Does |
 | --- | --- |
-| D-pad | Move focus. Down from the dock scrolls into the grid. |
+| D-pad | Move focus. Down from the dock fills the screen with your apps, the top row just under the clock. |
 | Select | Open the app (it zooms out of its icon). |
-| Hold select (or Menu) | Opens the tvOS menu beside the icon: **Edit Home Screen**, **App Info**, switches for the app's **Continue Watching** and **Recommendations** (when it has them), and **Hide App**. |
-| Edit Home Screen | Every icon jiggles. Select picks an app up, the arrows move it, and select drops it. Back finishes. |
+| Hold select (or Menu) | Opens the menu beside the icon: **Edit Home Screen**, **App Info**, switches for the app's **Continue Watching** and **Recommendations** (when it has them), and **Hide App** (**Unhide App** for a hidden app). The selected option pops out of the menu. |
+| Edit Home Screen | The app is picked up and wiggles. The arrows move it; select (or Back) drops it there and ends the edit. |
+| Hold Down on the last row | An arrow appears under the row and a ring fills round it; when it closes, focus drops into the greyed-out **Hidden** apps. |
 | Up on the dock | On a full-screen top shelf: the dock slides down to peek in at the bottom and a **Play** button appears. On a small one's card: the card is selected, with **Play** under its title. Select plays what's shown; Down or Back returns. |
 | Up again (or Up when there's no top shelf) | Focuses the clock pill. Select opens the **Control Center**. |
 | Back / Home | Returns to the dock row. |
 
 ### Hiding and unhiding apps
 
-**Hide App** in the long-press menu removes an app from the home screen. To bring it back, use
-**Edit Home Screen**. Hidden apps appear greyed out in a **Hidden** section below your apps. Move an
-app into that section to hide it, or move a hidden one up into your apps to unhide it. The order
-and hidden apps are saved on the TV.
+**Hide App** in the long-press menu removes an app from the home screen. Hidden apps live greyed out
+in a **Hidden** section below your apps, which stays out of the way until you hold Down on the last
+row of apps. In there, a hidden app's menu has **Unhide App**, or use **Edit Home Screen** to move
+it back up among your apps. Moving an app down into Hidden while editing hides it. Up out of the
+section (or Back) folds it away again. The order and hidden apps are saved on the TV.
 
 ### Top shelf
 
@@ -54,21 +59,22 @@ image is on disk, so a slow or missing network never blocks the UI. Local `conte
   selects the card and shows **Play** under the title, and Up again goes to the clock pill.
 - **Apps without recommendations** show their launch screen when it's a real full-screen picture
   (like Crunchyroll's). Most TV apps launch on a flat colour or a small logo on black, which would
-  look worse, so the rest show their logo over a glow in their own colour, as tvOS does:
+  look worse, so the rest show their logo over a glow in their own colour:
   - the icon's own artwork without its backdrop shape (an adaptive icon's foreground layer, or a
     legacy icon drawn on transparency), lit in the brand colour of the app's tile;
   - otherwise the banner's logo, cut out of the banner's background (flat or gradient) without a
     fringe, over a field in that background's colour, light or dark as the tile is. A banner that's
     a picture rather than a logo on a background is shown whole, as a card.
 
-  Logos are never enlarged more than 1.5x the pixels the app ships, so they stay sharp; most TV
-  apps ship small banners, so their logos are modest in size rather than soft.
+  Every app's logo is shown at the same size (the area of a 160-unit square, round badge or long
+  wordmark alike), never enlarged more than 1.5x the pixels the app ships, so they all look alike
+  and none look soft.
 
 Each app's long-press menu has a switch for its **Continue Watching** and one for its
 **Recommendations** (shown only for apps that publish them). Turn off Continue Watching to see the
 app's recommendations instead, turn off both to see just its logo. The switches are saved on the TV.
 
-Below the dock, the last top shelf stays behind the grid, blurred and dimmed, as on tvOS.
+Below the dock, the last top shelf stays behind the grid, blurred and dimmed.
 
 Text on the clock pill, the hint and the Control Center switches to dark over bright images, like
 Liquid Glass. The clock follows the TV's 12/24-hour setting, and moving around plays the TV's
@@ -78,7 +84,7 @@ navigation sounds when **System sounds** are on in Settings.
 
 | Tile | Does |
 | --- | --- |
-| Top row | As on tvOS: the time, glyphs for what's on (Bluetooth audio, Do Not Disturb, sleep timer), a **Settings** button that opens TV Settings, and your profile. |
+| Top row | The time, glyphs for what's on (Bluetooth audio, Do Not Disturb, sleep timer), a **Settings** button that opens TV Settings, and your profile. |
 | Profile (Up from the top tiles, then Right) | Pick the TV's Google account with Android's chooser. The pill then shows its Google profile photo (see below), else its letter avatar. Push `files/avatar.png` to use another picture instead. |
 | Power Off | Puts the TV to sleep, like the remote's power button. |
 | Wi-Fi / Ethernet | Shows the connection; opens network settings. |
@@ -97,16 +103,17 @@ for the app. It's free and has no secret to copy:
    **Audience**, add the TV's Google account as a test user. (Publishing would need a public home
    page and privacy policy. Testing is fine here: access to basic profile info doesn't expire after
    seven days, as it does for other scopes.)
-3. Under **Clients**, create an **Android** client with package name `app.tvhome` and the SHA-1 of
-   the key the APK is signed with:
+3. Under **Clients**, create an **Android** client with package name `app.atvos.launcher` and the
+   SHA-1 of the key the APK is signed with:
 
 ```bash
 keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android
 ```
 
-Then pick your account again in the Control Center (Profile). The TV asks once to let Home see your
-basic profile info. After that the photo is fetched over HTTPS, cached on the TV and refreshed at
-most once a day. The access token is never stored. Until the client exists, the letter avatar stays.
+Then pick your account again in the Control Center (Profile). The TV asks once to let atvOS Launcher
+see your basic profile info. After that the photo is fetched over HTTPS, cached on the TV and
+refreshed at most once a day. The access token is never stored. Until the client exists, the letter
+avatar stays.
 
 ## Permissions
 
@@ -128,7 +135,8 @@ SDK (platform 36, build-tools 36.0.0) exposed as `ANDROID_HOME`. Gradle comes fr
 nix shell nixpkgs#gradle -c gradle assembleRelease
 ```
 
-The release build is minified with R8 and signed with your local debug key (`~/.android/debug.keystore`).
+The release build is minified with R8 and signed with your local debug key
+(`~/.android/debug.keystore`).
 
 ## Installing on the TV
 
@@ -146,18 +154,18 @@ adb install -r -g app/build/outputs/apk/release/app-release.apk
 Grant the two Control Center accesses that Google TV has no settings screen for:
 
 ```bash
-adb shell cmd notification allow_dnd app.tvhome
+adb shell cmd notification allow_dnd app.atvos.launcher
 ```
 
 ```bash
-adb shell dpm set-active-admin --user 0 app.tvhome/.PowerAdmin
+adb shell dpm set-active-admin --user 0 app.atvos.launcher/.PowerAdmin
 ```
 
 To make it the home screen, set it as HOME. Google TV's own launcher and its recovery screen
 outrank any third-party HOME app, so they also have to be disabled for the main user:
 
 ```bash
-adb shell cmd package set-home-activity app.tvhome/.HomeActivity
+adb shell cmd package set-home-activity app.atvos.launcher/.HomeActivity
 ```
 
 ```bash
@@ -177,7 +185,7 @@ Release the power admin first. Android blocks uninstalling an active admin, and 
 screen to switch it off. The receiver only accepts this from the adb shell; apps can't send it.
 
 ```bash
-adb shell am broadcast -n app.tvhome/.ReleasePower
+adb shell am broadcast -n app.atvos.launcher/.ReleasePower
 ```
 
 ```bash
@@ -189,13 +197,13 @@ adb shell pm enable com.google.android.tungsten.setupwraith
 ```
 
 ```bash
-adb uninstall app.tvhome
+adb uninstall app.atvos.launcher
 ```
 
 ## Layout
 
 ```
-app/src/main/java/app/tvhome/
+app/src/main/java/app/atvos/launcher/
   HomeActivity.java      lifecycle, background loading, launching apps and programs
   HomeView.java          all home-screen drawing, animation and remote input
   ControlCenter.java     Control Center layout, focus and drawing
