@@ -55,6 +55,7 @@ final class Apps {
         float focus;
         float x = Float.NaN;
         float y;
+        String shortLabel; // the label truncated to fit under its tile, worked out when first shown
 
         Entry(String pkg, String label, ComponentName component, boolean leanback, long updated, Bitmap art) {
             this.pkg = pkg;
@@ -91,7 +92,7 @@ final class Apps {
     Apps(Context context, int screenWidth) {
         self = context.getPackageName();
         pm = context.getPackageManager();
-        prefs = context.getSharedPreferences("home", Context.MODE_PRIVATE);
+        prefs = context.getSharedPreferences(HomeActivity.PREFS, Context.MODE_PRIVATE);
         // Art is rendered at the largest on-screen size (a focused tile).
         artW = Math.round(HomeView.TILE_W * HomeView.FOCUS_SCALE * screenWidth / HomeView.W);
         artH = Math.round(artW * HomeView.TILE_H / HomeView.TILE_W);
@@ -158,11 +159,6 @@ final class Apps {
         prefs.edit().putString(KEY_ORDER, String.join(",", order)).putStringSet(KEY_HIDDEN, hiddenSet).apply();
     }
 
-    void hide(String pkg) {
-        Set<String> hidden = new HashSet<>(hidden());
-        hidden.add(pkg);
-        prefs.edit().putStringSet(KEY_HIDDEN, hidden).apply();
-    }
 
     private Set<String> hidden() {
         return prefs.getStringSet(KEY_HIDDEN, Collections.emptySet());
@@ -179,15 +175,13 @@ final class Apps {
         return i >= 0 ? i : PREFERRED.size();
     }
 
-    @SuppressWarnings("deprecation") // int-flag overloads are fine down to minSdk
     private List<ResolveInfo> query(String category) {
-        return pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(category), 0);
+        return pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(category), PackageManager.ResolveInfoFlags.of(0));
     }
 
-    @SuppressWarnings("deprecation")
     private long lastUpdate(String pkg) {
         try {
-            return pm.getPackageInfo(pkg, 0).lastUpdateTime;
+            return pm.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(0)).lastUpdateTime;
         } catch (PackageManager.NameNotFoundException e) {
             return 0;
         }

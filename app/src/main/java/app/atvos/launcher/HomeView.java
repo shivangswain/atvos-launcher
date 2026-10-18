@@ -3,7 +3,6 @@ package app.atvos.launcher;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.graphics.BitmapShader;
 import android.graphics.BlurMaskFilter;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -24,6 +23,8 @@ import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.os.SystemClock;
+import android.text.TextPaint;
+import android.text.TextUtils;
 import android.text.format.DateFormat;
 import android.view.KeyEvent;
 import android.view.SoundEffectConstants;
@@ -50,7 +51,6 @@ final class HomeView extends View {
         void onFocusChanged(Apps.Entry entry, boolean inDock);
         void launch(Apps.Entry entry, Rect from);
         void showInfo(Apps.Entry entry);
-        void hide(Apps.Entry entry);
         /** Persists the order and the hidden apps after Edit Home Screen. */
         void saveLayout(List<Apps.Entry> visible, List<Apps.Entry> hidden);
         void launchProgram(Recommendations.Item program, Rect from);
@@ -112,7 +112,7 @@ final class HomeView extends View {
             kick();
         }
     };
-    private boolean editing, holding; // Edit Home Screen: the focused app is picked up and moving
+    private boolean editing;          // Edit Home Screen: the focused app is picked up and moving
     private boolean showHidden;       // the Hidden section, revealed by holding Down on the last row
     private boolean downHeld, swallowDown; // Down held on the last row; its repeats after the reveal
     private long downAt, bounceAt;
@@ -155,13 +155,11 @@ final class HomeView extends View {
     private final Paint sheen = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint clockText = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint labelText = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint labelText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Paint hintText = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint menuText = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint playText = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint cardPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-    private BitmapShader sharpShader; // the backdrop itself, to redraw a focused card larger
-    private Bitmap sharpShaderOf;
     private final Paint bottomScrim = new Paint();
     private final Paint topScrim = new Paint();
     private final LinearGradient rimGradient, sheenGradient;
@@ -254,6 +252,11 @@ final class HomeView extends View {
         apps.addAll(visible);
         hidden.clear();
         hidden.addAll(hiddenApps);
+        if (apps.isEmpty() && !hidden.isEmpty()) {
+            // Everything hidden would leave nothing to focus, and no way back to Hidden: keep one out.
+            apps.add(hidden.remove(0));
+            host.saveLayout(new ArrayList<>(apps), new ArrayList<>(hidden));
+        }
         focus = Math.max(0, Math.min(focus, apps.size() - 1));
         if (was != null) {
             for (int i = 0; i < apps.size(); i++) {
@@ -311,6 +314,13 @@ final class HomeView extends View {
         kick();
     }
 
+    @Override
+    protected void onDetachedFromWindow() {
+        removeCallbacks(tick);
+        removeCallbacks(goIdle);
+        super.onDetachedFromWindow();
+    }
+
     void setClockRunning(boolean run) {
         removeCallbacks(tick);
         if (run) tick();
@@ -331,6 +341,7 @@ final class HomeView extends View {
 
     @Override
     public boolean onKeyDown(int code, KeyEvent e) {
+        if (downHeld && code != KeyEvent.KEYCODE_DPAD_DOWN) downHeld = false; // another key cancels the reveal
         if (expanded) {
             removeCallbacks(goIdle);
             postDelayed(goIdle, IDLE_MS);
@@ -486,29 +497,29 @@ final class HomeView extends View {
 
         if (dx != 0) {
             if (col + dx < 0 || col + dx >= COLS || local + dx >= n) return;
-            if (holding) list.add(local + dx, list.remove(local));
+            if (editing) list.add(local + dx, list.remove(local));
             focus = focus + dx;
         } else if (dy > 0) {
             if ((row + 1) * COLS < n) {
                 int to = Math.min(local + COLS, n - 1);
-                if (holding) list.add(to, list.remove(local));
+                if (editing) list.add(to, list.remove(local));
                 focus = base + to;
-            } else if (!inHidden && (holding ? v > 1 : showHidden && !hidden.isEmpty())) {
+            } else if (!inHidden && (editing ? v > 1 : showHidden && !hidden.isEmpty())) {
                 // Into the hidden section (moving an app there hides it; at least one app stays).
-                int to = Math.min(col, hidden.size() - (holding ? 0 : 1));
-                if (holding) hidden.add(to, apps.remove(local));
+                int to = Math.min(col, hidden.size() - (editing ? 0 : 1));
+                if (editing) hidden.add(to, apps.remove(local));
                 focus = apps.size() + to;
             } else {
                 return;
             }
         } else if (row > 0) {
             int to = local - COLS;
-            if (holding) list.add(to, list.remove(local));
+            if (editing) list.add(to, list.remove(local));
             focus = base + to;
         } else if (inHidden) {
             // Up out of the hidden section, into the last row of apps (unhides a held app).
             int lastRow = v == 0 ? 0 : ((v - 1) / COLS) * COLS;
-            if (holding) {
+            if (editing) {
                 int to = Math.min(lastRow + col, v);
                 apps.add(to, hidden.remove(local));
                 focus = to;
@@ -636,13 +647,11 @@ final class HomeView extends View {
      */
     private void startEditing() {
         editing = true;
-        holding = true;
         kick();
     }
 
     private void finishEditing() {
         editing = false;
-        holding = false;
         host.saveLayout(new ArrayList<>(apps), new ArrayList<>(hidden));
         // Dropped among the hidden apps: stay there. Otherwise Hidden folds away.
         showHidden = focus >= apps.size() && !hidden.isEmpty();
@@ -664,6 +673,14 @@ final class HomeView extends View {
     private boolean canRevealHidden() {
         int v = apps.size();
         return !editing && !showHidden && !hidden.isEmpty() && focus < v && focus / COLS == (v - 1) / COLS;
+    }
+
+    private void hide(Apps.Entry e) {
+        if (apps.size() <= 1 || !apps.remove(e)) return; // at least one app stays out
+        hidden.add(e);
+        host.saveLayout(new ArrayList<>(apps), new ArrayList<>(hidden));
+        focus = Math.max(0, Math.min(focus, apps.size() - 1));
+        focusChanged();
     }
 
     private void unhide(Apps.Entry e) {
@@ -704,7 +721,7 @@ final class HomeView extends View {
         int sources = host.shelfSources(e);
         if ((sources & Recommendations.WATCH_NEXT) != 0) addSwitch(R.string.continue_watching, e, Recommendations.WATCH_NEXT);
         if ((sources & Recommendations.PREVIEWS) != 0) addSwitch(R.string.recommendations, e, Recommendations.PREVIEWS);
-        addMenu(R.string.hide_app, hideIcon, true, false, () -> host.hide(e));
+        if (apps.size() > 1) addMenu(R.string.hide_app, hideIcon, true, false, () -> hide(e));
     }
 
     private void addSwitch(int label, Apps.Entry e, int source) {
@@ -872,7 +889,7 @@ final class HomeView extends View {
             e.y = ease(e.y, sy, 14f, dt, 0.2f);
             e.focus = ease(e.focus, i == focus && !expanded && !cardFocused && !pillFocused ? 1f : 0f, 14f, dt, 0.002f);
         }
-        if (holding) animating = true; // the picked-up app wiggles
+        if (editing) animating = true; // the picked-up app wiggles
     }
 
     /** How far the UI has slid down for the full-screen top shelf: the dock peeks in where the second row was. */
@@ -985,13 +1002,14 @@ final class HomeView extends View {
         if (backdrop != null) {
             glassLayer(c, backdrop, rect, radius, offsetY, previous != null ? Math.round(alpha * fade) : alpha);
         }
-        if (dim > 0) { // glass sees the same dimmed backdrop as everything else
-            fill.setColor(Color.argb(dim * alpha / 255, 0, 0, 0));
+        // The glass sees the same dimmed backdrop as everything else: the black dim and the tint over
+        // it, composited here into one fill so it's one draw instead of two.
+        int ta = Color.alpha(tint) * alpha / 255, da = dim * alpha / 255;
+        int a = ta + da * (255 - ta) / 255;
+        if (a > 0) {
+            fill.setColor(Color.argb(a, Color.red(tint) * ta / a, Color.green(tint) * ta / a, Color.blue(tint) * ta / a));
             c.drawRoundRect(rect, radius, radius, fill);
         }
-        fill.setColor(tint);
-        fill.setAlpha(Color.alpha(tint) * alpha / 255);
-        c.drawRoundRect(rect, radius, radius, fill);
         m.setScale(1f, rect.height());
         m.postTranslate(0f, rect.top);
         rimGradient.setLocalMatrix(m);
@@ -1015,7 +1033,7 @@ final class HomeView extends View {
     }
 
     private void drawTile(Canvas c, Apps.Entry e, int i, float offset) {
-        boolean held = holding && i == focus, isHidden = i >= apps.size();
+        boolean held = editing && i == focus, isHidden = i >= apps.size();
         float f = e.focus, s = 1f + (FOCUS_SCALE - 1f) * f + (held ? 0.08f : 0f);
         float w = TILE_W * s, h = TILE_H * s;
         float cx = e.x + TILE_W / 2f, cy = e.y + TILE_H / 2f;
@@ -1060,7 +1078,10 @@ final class HomeView extends View {
             int a = Math.round(240 * f);
             labelText.setColor(Color.argb(a, 255, 255, 255));
             labelText.setShadowLayer(8f, 0f, 1f, Color.argb(a / 2, 0, 0, 0));
-            c.drawText(e.label, cx, r.bottom + 38f, labelText);
+            if (e.shortLabel == null) {
+                e.shortLabel = TextUtils.ellipsize(e.label, labelText, TILE_W * FOCUS_SCALE + GAP_X, TextUtils.TruncateAt.END).toString();
+            }
+            c.drawText(e.shortLabel, cx, r.bottom + 38f, labelText);
         }
     }
 
@@ -1124,7 +1145,7 @@ final class HomeView extends View {
      */
     private void drawCard(Canvas c) {
         Backdrops.Backdrop b = backdrop;
-        if (cardAnim <= 0.01f || b == null || b.card == null) return;
+        if (cardAnim <= 0.01f || b == null || b.sharpShader == null) return;
         RectF card = b.card;
         float k = 1f + 0.06f * cardAnim, cx = card.centerX(), cy = card.centerY();
         float w = card.width() * k, h = card.height() * k, radius = Backdrops.CARD_R * k;
@@ -1135,14 +1156,10 @@ final class HomeView extends View {
             shadow.setAlpha(Math.round(190 * cardAnim));
             c.drawBitmap(shadowMask, null, r2, shadow);
         }
-        if (sharpShaderOf != b.sharp) {
-            sharpShader = new BitmapShader(b.sharp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
-            sharpShaderOf = b.sharp;
-        }
         m.setScale(W / b.sharp.getWidth() * k, height / b.sharp.getHeight() * k);
         m.postTranslate(cx * (1f - k), cy * (1f - k)); // the backdrop, enlarged about the card's centre
-        sharpShader.setLocalMatrix(m);
-        cardPaint.setShader(sharpShader);
+        b.sharpShader.setLocalMatrix(m);
+        cardPaint.setShader(b.sharpShader);
         c.drawRoundRect(r, radius, radius, cardPaint);
         m.setScale(1f, h * 0.6f);
         m.postTranslate(0f, r.top);

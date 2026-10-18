@@ -13,6 +13,10 @@ public final class SleepTimer extends BroadcastReceiver {
 
     static final String KEY_SLEEP_AT = "sleep_at";
 
+    private static void forget(Context context) {
+        context.getSharedPreferences(HomeActivity.PREFS, Context.MODE_PRIVATE).edit().remove(KEY_SLEEP_AT).apply();
+    }
+
     static PendingIntent pending(Context context) {
         return PendingIntent.getBroadcast(context, 0, new Intent(context, SleepTimer.class),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
@@ -28,12 +32,12 @@ public final class SleepTimer extends BroadcastReceiver {
         PendingIntent pi = pending(context);
         context.getSystemService(AlarmManager.class).cancel(pi);
         pi.cancel(); // so active() reports it gone
-        context.getSharedPreferences("home", Context.MODE_PRIVATE).edit().remove(KEY_SLEEP_AT).apply();
+        forget(context);
     }
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        context.getSharedPreferences("home", Context.MODE_PRIVATE).edit().remove(KEY_SLEEP_AT).apply();
+        forget(context);
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         if (dpm.isAdminActive(new ComponentName(context, PowerAdmin.class))) dpm.lockNow();
     }

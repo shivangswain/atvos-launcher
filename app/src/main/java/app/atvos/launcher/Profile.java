@@ -2,6 +2,7 @@ package app.atvos.launcher;
 
 import android.accounts.Account;
 import android.accounts.AccountManager;
+import android.accounts.AccountManagerCallback;
 import android.accounts.AuthenticatorException;
 import android.accounts.OperationCanceledException;
 import android.app.Activity;
@@ -18,7 +19,7 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Shader;
 import android.graphics.Typeface;
-import android.net.Uri;
+import android.os.Bundle;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -57,7 +58,7 @@ final class Profile {
     private static final String SCOPE = "oauth2:https://www.googleapis.com/auth/userinfo.profile";
     private static final String USERINFO = "https://www.googleapis.com/oauth2/v3/userinfo";
     private static final long REFRESH_MS = 24 * 60 * 60_000L;
-    private static final int MAX_PHOTO = 4 << 20;
+    private static final int MAX_PHOTO = 4 << 20, MAX_FILE = 16 << 20; // a download; any picture we decode
 
     private final Activity activity;
     private final Executor io;
@@ -68,7 +69,7 @@ final class Profile {
     Profile(Activity activity, Executor io, int sizePx) {
         this.activity = activity;
         this.io = io;
-        this.prefs = activity.getSharedPreferences("home", Context.MODE_PRIVATE);
+        this.prefs = activity.getSharedPreferences(HomeActivity.PREFS, Context.MODE_PRIVATE);
         File external = activity.getExternalFilesDir(null);
         this.file = new File(external != null ? external : activity.getFilesDir(), "avatar.png");
         this.photo = new File(activity.getFilesDir(), "google_photo");
@@ -85,14 +86,19 @@ final class Profile {
             Bitmap result = shown;
             if (result != null) activity.runOnUiThread(() -> onAvatar.accept(result));
         });
-        refresh(onAvatar);
     }
 
     /**
-     * Fetches the account's Google photo if it's been a day since the last try, then shows it. The
-     * first time, Android may ask on screen to let atvOS Launcher see your basic profile info. UI thread.
+     * Fetches the account's Google photo if it's been a day since the last try, then shows it,
+     * quietly: if Google still needs your consent this does nothing, so a resume never pops up its
+     * screen (picking the account asks for it). UI thread.
      */
     void refresh(Consumer<Bitmap> onAvatar) {
+        refresh(onAvatar, false);
+    }
+
+    /** With {@code ask}, Android may show its consent screen (to let the launcher see basic profile info). */
+    private void refresh(Consumer<Bitmap> onAvatar, boolean ask) {
         String name = prefs.getString(KEY_ACCOUNT, null);
         long now = System.currentTimeMillis();
         if (name == null || file.isFile() || now - prefs.getLong(KEY_PHOTO_TRIED, 0) < REFRESH_MS) return;
@@ -101,10 +107,10 @@ final class Profile {
         Account account = null;
         for (Account a : am.getAccountsByType(GOOGLE)) if (a.name.equals(name)) account = a;
         if (account == null) return;
-        am.getAuthToken(account, SCOPE, null, activity, future -> io.execute(() -> {
+        AccountManagerCallback<Bundle> done = future -> io.execute(() -> {
             try {
                 String token = future.getResult().getString(AccountManager.KEY_AUTHTOKEN);
-                if (token == null) return;
+                if (token == null) return; // consent still needed (only shown when asked)
                 if (!download(token)) {
                     am.invalidateAuthToken(GOOGLE, token); // expired: a fresh one next time
                     return;
@@ -115,7 +121,9 @@ final class Profile {
                 // Typically "UnregisteredOnApiConsole" until the app has an OAuth client.
                 Log.w(TAG, "No Google profile photo: " + e.getMessage());
             }
-        }), null);
+        });
+        if (ask) am.getAuthToken(account, SCOPE, null, activity, done, null);
+        else am.getAuthToken(account, SCOPE, null, false, done, null);
     }
 
     /**
@@ -146,14 +154,14 @@ final class Profile {
             photo.delete();
             return true;
         }
-        Uri uri = Uri.parse(picture);
-        String host = uri.getHost();
-        if (!"https".equals(uri.getScheme()) || host == null || !host.endsWith(".googleusercontent.com")) {
+        // Google serves 96px by default; ask for the size it's shown at. The address is checked on the
+        // very URL that's fetched, so no difference between two parsers can slip past it.
+        URL url = new URL(picture.replaceAll("=s\\d+(-c)?$", "") + "=s" + Math.max(128, size * 2) + "-c");
+        String host = url.getHost();
+        if (!"https".equals(url.getProtocol()) || host == null || !host.endsWith(".googleusercontent.com")) {
             throw new IOException("unexpected photo address");
         }
-        // Google serves 96px by default; ask for the size it's shown at.
-        String sized = picture.replaceAll("=s\\d+(-c)?$", "") + "=s" + Math.max(128, size * 2) + "-c";
-        http = (HttpURLConnection) new URL(sized).openConnection();
+        http = (HttpURLConnection) url.openConnection();
         File tmp = new File(photo.getPath() + ".part");
         try {
             http.setConnectTimeout(8000);
@@ -185,6 +193,7 @@ final class Profile {
 
     /** Decodes avatar.png straight to about the size it's shown at, then rounds it. */
     private static Bitmap decodeCircle(File f, int size) {
+        if (f.length() <= 0 || f.length() > MAX_FILE) return null;
         try {
             Bitmap src = ImageDecoder.decodeBitmap(ImageDecoder.createSource(f), (decoder, info, source) -> {
                 decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE); // read by a shader on a software canvas
@@ -220,9 +229,9 @@ final class Profile {
         if (resultCode != Activity.RESULT_OK || name == null) return;
         // A new pick also retries the photo now (say, after setting up the OAuth client).
         prefs.edit().putString(KEY_ACCOUNT, name).remove(KEY_PHOTO_TRIED).apply();
-        //noinspection ResultOfMethodCallIgnored
-        photo.delete();
+        io.execute(photo::delete); // before load() reads it: the executor is single-threaded
         load(onAvatar);
+        refresh(onAvatar, true);
     }
 
     /** A round, centre-cropped copy at {@code size} px. */

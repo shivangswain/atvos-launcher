@@ -77,18 +77,19 @@ final class Recommendations {
         Map<String, Item> best = found.best;
         ContentResolver cr = context.getContentResolver();
 
-        // Watch Next first (what you're in the middle of): the most recently engaged entry wins.
-        Map<String, Long> engaged = new HashMap<>();
+        // Watch Next first (what you're in the middle of): the most recently engaged entry wins, the
+        // newest row on a tie.
+        Map<String, long[]> engaged = new HashMap<>();
         try (Cursor c = cr.query(TvContract.WatchNextPrograms.CONTENT_URI, WATCH_NEXT_COLUMNS, null, null, null)) {
             while (c != null && c.moveToNext()) {
                 Item item = item(c);
                 if (item == null) continue;
                 found.watchNext.add(item.pkg);
                 if (noWatchNext.contains(item.pkg)) continue;
-                long when = c.isNull(ORDER_A) ? 0 : c.getLong(ORDER_A);
-                Long prev = engaged.get(item.pkg);
-                if (prev == null || when > prev) {
-                    engaged.put(item.pkg, when);
+                long when = c.isNull(ORDER_A) ? 0 : c.getLong(ORDER_A), id = c.isNull(ORDER_B) ? 0 : c.getLong(ORDER_B);
+                long[] prev = engaged.get(item.pkg);
+                if (prev == null || when > prev[0] || (when == prev[0] && id > prev[1])) {
+                    engaged.put(item.pkg, new long[]{when, id});
                     best.put(item.pkg, item);
                 }
             }
@@ -102,10 +103,11 @@ final class Recommendations {
             while (c != null && c.moveToNext()) {
                 String pkg = c.getString(PKG);
                 if (pkg == null) continue;
+                if (landscapeImage(c) == null) continue;
+                found.previews.add(pkg);
+                if (engaged.containsKey(pkg) || noPreviews.contains(pkg)) continue; // no Item needed
                 Item item = item(c);
                 if (item == null) continue;
-                found.previews.add(pkg);
-                if (engaged.containsKey(pkg) || noPreviews.contains(pkg)) continue;
                 long channel = c.isNull(ORDER_A) ? Long.MAX_VALUE : c.getLong(ORDER_A);
                 long weight = c.isNull(ORDER_B) ? 0 : c.getLong(ORDER_B);
                 long[] prev = rank.get(pkg);

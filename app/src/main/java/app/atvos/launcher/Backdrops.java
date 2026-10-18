@@ -1,5 +1,6 @@
 package app.atvos.launcher;
 
+import android.Manifest;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
@@ -54,6 +55,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Full-screen backgrounds. Behind the dock, for the focused app, in order of preference:
@@ -73,6 +75,8 @@ final class Backdrops {
         final Bitmap sharp;
         final Bitmap blur;
         final BitmapShader blurShader;
+        /** For a card layout: the sharp image, to redraw the focused card larger. */
+        final BitmapShader sharpShader;
         /** Set when the image is an app's recommendation. */
         final Recommendations.Item program;
         /**
@@ -92,6 +96,7 @@ final class Backdrops {
             this.sharp = sharp;
             this.blur = blur;
             this.blurShader = new BitmapShader(blur, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            this.sharpShader = card != null ? new BitmapShader(sharp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) : null;
             this.program = program;
             this.card = card;
             this.titleBottom = titleBottom;
@@ -139,7 +144,8 @@ final class Backdrops {
 
     // Written on the IO thread, read on the UI thread.
     private volatile Map<String, Recommendations.Item> recommended = Collections.emptyMap();
-    private volatile Set<String> downloaded = Collections.emptySet();
+    // Both threads: images on disk. prefetch() adds as it downloads; scan() reconciles with the disk.
+    private final Set<String> downloaded = ConcurrentHashMap.newKeySet();
     private volatile Set<String> watchNext = Collections.emptySet(), previews = Collections.emptySet();
 
     // Network thread only: when each URL last failed, so a dead network isn't hammered.
@@ -157,20 +163,22 @@ final class Backdrops {
     Backdrops(Context context, int width, int height) {
         this.resolver = context.getContentResolver();
         this.pm = context.getPackageManager();
-        this.prefs = context.getSharedPreferences("home", Context.MODE_PRIVATE);
+        this.prefs = context.getSharedPreferences(HomeActivity.PREFS, Context.MODE_PRIVATE);
         this.downloads = new File(context.getCacheDir(), "shelf");
         this.width = width;
         this.height = height;
         Bitmap aurora = aurora(640, 360);
-        this.fallback = new Backdrop(aurora, blur(aurora), null);
+        Bitmap blurred = blur(aurora);
+        this.fallback = new Backdrop(toHardware(aurora), blurred, null);
     }
 
     /** Re-reads app recommendations. Keys include the image URL, so a new image is picked up. IO thread. */
     void scan(Context context) {
         Recommendations.Found found = Recommendations.load(context, off(NO_WATCH_NEXT), off(NO_PREVIEWS));
-        Set<String> ready = new HashSet<>();
-        for (Recommendations.Item item : found.best.values()) if (cacheFile(item.image).isFile()) ready.add(item.image);
-        downloaded = ready;
+        // Add what's on disk and drop what's gone, but never clear the set: a download finishing on
+        // the net thread meanwhile must not be lost.
+        for (Recommendations.Item item : found.best.values()) if (cacheFile(item.image).isFile()) downloaded.add(item.image);
+        downloaded.removeIf(url -> !cacheFile(url).isFile());
         watchNext = found.watchNext;
         previews = found.previews;
         recommended = found.best;
@@ -214,19 +222,30 @@ final class Backdrops {
             Long failed = failedAt.get(url);
             if (failed != null && System.currentTimeMillis() - failed < RETRY_MS) continue;
             if (fetch(url, item.pkg) != null) {
-                Set<String> ready = new HashSet<>(downloaded);
-                ready.add(url);
-                downloaded = ready;
+                downloaded.add(url);
                 onReady.run();
             } else {
                 failedAt.put(url, System.currentTimeMillis());
             }
         }
+        // Trim to the most recently used images (fetch() touches a file on every use), never deleting
+        // one a current recommendation shows.
         File[] cached = downloads.listFiles();
         if (cached != null && cached.length > MAX_CACHED) {
-            Arrays.sort(cached, Comparator.comparingLong(File::lastModified));
-            for (int i = 0; i < cached.length - MAX_CACHED; i++) //noinspection ResultOfMethodCallIgnored
-                cached[i].delete();
+            Set<String> inUse = new HashSet<>();
+            for (Recommendations.Item item : recommended.values()) inUse.add(cacheFile(item.image).getName());
+            long[] used = new long[cached.length];
+            Integer[] order = new Integer[cached.length];
+            for (int i = 0; i < cached.length; i++) {
+                used[i] = cached[i].lastModified();
+                order[i] = i;
+            }
+            Arrays.sort(order, Comparator.comparingLong(i -> used[i]));
+            int excess = cached.length - MAX_CACHED;
+            for (int i = 0; i < order.length && excess > 0; i++) {
+                File f = cached[order[i]];
+                if (!inUse.contains(f.getName()) && f.delete()) excess--;
+            }
         }
     }
 
@@ -252,6 +271,7 @@ final class Backdrops {
     void put(String key, Backdrop b) {
         cache.put(key, b);
     }
+
 
     /** Prepares the backdrop behind {@code key} (images are already on disk), or null. IO thread. */
     Backdrop load(String key, Recommendations.Item program) {
@@ -353,8 +373,8 @@ final class Backdrops {
             out = splash(res, ai);
             if (out == null) out = iconScene(res, ai);
             if (out == null) out = bannerScene(res, ai);
-        } catch (PackageManager.NameNotFoundException | Resources.NotFoundException e) {
-            return null;
+        } catch (PackageManager.NameNotFoundException | RuntimeException e) {
+            return null; // another app's resources: anything can go wrong, and the aurora still works
         }
         if (out == null) return null;
         Bitmap blurred = blur(out);
@@ -364,7 +384,7 @@ final class Backdrops {
     private ActivityInfo launchActivity(String pkg) {
         Intent launch = pm.getLeanbackLaunchIntentForPackage(pkg);
         if (launch == null) launch = pm.getLaunchIntentForPackage(pkg);
-        ResolveInfo ri = launch != null ? pm.resolveActivity(launch, 0) : null;
+        ResolveInfo ri = launch != null ? pm.resolveActivity(launch, PackageManager.ResolveInfoFlags.of(0)) : null;
         return ri != null ? ri.activityInfo : null;
     }
 
@@ -387,7 +407,8 @@ final class Backdrops {
             int bitmap = bitmapWidth(fg);
             float maxCanvas = bitmap > 0 ? bitmap * 1.5f : Float.MAX_VALUE; // enlarged no more than 1.5x, so it stays sharp
             int bannerId = ai.banner != 0 ? ai.banner : ai.applicationInfo.banner;
-            int brand = brandColor(bannerId != 0 ? res.getDrawable(bannerId, null) : icon);
+            Drawable banner = bannerId != 0 ? res.getDrawable(bannerId, null) : null;
+            int brand = brandColor(banner != null ? banner : icon);
             return logoScene(fg, glyph, LOGO_SIZE, maxCanvas, 0.5f, brand, glyph.light < 0.25f); // a dark logo goes on a pale field
         } catch (RuntimeException e) {
             return null; // another app's resources: anything can go wrong, and the banner still works
@@ -411,7 +432,7 @@ final class Backdrops {
         int iw = art.getIntrinsicWidth(), ih = art.getIntrinsicHeight();
         float aspect = iw > 0 && ih > 0 ? (float) iw / ih : 16f / 9f;
         int bitmap = bitmapWidth(art);
-        int w = Math.max(64, Math.min(bitmap > 0 ? bitmap : 960, 1600));
+        int w = Math.max(64, Math.min(bitmap > 0 ? bitmap : 640, 720)); // plenty for a LOGO_SIZE logo
         int h = Math.max(36, Math.round(w / aspect));
         Bitmap work = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         art.setBounds(0, 0, w, h);
@@ -522,6 +543,7 @@ final class Backdrops {
         if (valid == 0) return;
         while (valid < cells) { // fill the gaps from their neighbours
             int[] next = grid.clone();
+            int before = valid;
             for (int k = 0; k < cells; k++) {
                 if (grid[k] != 0) continue;
                 int cx = k % gx, cy = k / gx, sr = 0, sg = 0, sb = 0, m = 0;
@@ -542,6 +564,7 @@ final class Backdrops {
                 }
             }
             grid = next;
+            if (valid == before) break;
         }
         for (int y = 0; y < h; y++) {
             float fy = Math.max(0f, Math.min(gy - 1f, (y + 0.5f) * gy / h - 0.5f));
@@ -915,15 +938,27 @@ final class Backdrops {
      * app that published the recommendation (so it can't make us read another app's data).
      */
     private File fetch(String url, String owner) {
-        File out = cacheFile(url);
-        if (out.isFile()) return out;
         Uri uri = Uri.parse(url);
         String scheme = uri.getScheme() == null ? "" : uri.getScheme();
+        boolean https = scheme.equalsIgnoreCase("https");
+        boolean local = scheme.equals(ContentResolver.SCHEME_CONTENT) || scheme.equals(ContentResolver.SCHEME_ANDROID_RESOURCE);
+        // Checked before the cache too: another app naming the same URI mustn't get it from there.
+        if (local && !ownedBy(uri, scheme, owner)) return null;
+        // An app without network access can't use us to reach the network for it.
+        if (https && (owner == null || pm.checkPermission(Manifest.permission.INTERNET, owner) != PackageManager.PERMISSION_GRANTED)) {
+            return null;
+        }
+        File out = cacheFile(url);
+        if (out.isFile()) {
+            //noinspection ResultOfMethodCallIgnored
+            out.setLastModified(System.currentTimeMillis()); // recently used, for the cache trim
+            return out;
+        }
         HttpURLConnection http = null;
         File tmp = null;
         try {
             InputStream in;
-            if (scheme.equalsIgnoreCase("https")) {
+            if (https) {
                 http = (HttpURLConnection) new URL(url).openConnection();
                 http.setConnectTimeout(8000);
                 http.setReadTimeout(15000);
@@ -931,8 +966,7 @@ final class Backdrops {
                 http.setRequestProperty("Accept", "image/*");
                 if (http.getResponseCode() != HttpURLConnection.HTTP_OK) return null;
                 in = http.getInputStream();
-            } else if (scheme.equals(ContentResolver.SCHEME_CONTENT) || scheme.equals(ContentResolver.SCHEME_ANDROID_RESOURCE)) {
-                if (!ownedBy(uri, scheme, owner)) return null;
+            } else if (local) {
                 in = resolver.openInputStream(uri);
                 if (in == null) return null;
             } else {
@@ -958,7 +992,7 @@ final class Backdrops {
         String authority = uri.getAuthority();
         if (authority == null || owner == null) return false;
         if (scheme.equals(ContentResolver.SCHEME_ANDROID_RESOURCE)) return authority.equals(owner);
-        ProviderInfo provider = pm.resolveContentProvider(authority, 0);
+        ProviderInfo provider = pm.resolveContentProvider(authority, PackageManager.ComponentInfoFlags.of(0));
         return provider != null && provider.exported && owner.equals(provider.packageName);
     }
 

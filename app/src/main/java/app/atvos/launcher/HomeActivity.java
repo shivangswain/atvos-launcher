@@ -28,6 +28,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** The home activity: owns the view, loads apps and backdrops off the UI thread, launches apps. */
 public final class HomeActivity extends Activity implements HomeView.Host {
 
+    /** The one SharedPreferences file every part of the launcher keeps its settings in. */
+    static final String PREFS = "home";
     private static final String TV_LISTINGS = "android.permission.READ_TV_LISTINGS";
     private static final String KEY_ASKED = "asked_tv_listings";
     private static final int REQUEST_LISTINGS = 8;
@@ -80,7 +82,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         registerReceiver(packages, changes); // protected system broadcasts only, so no export flag needed
 
         // Ask once for app recommendations; without it the top shelf just uses your own images.
-        SharedPreferences prefs = getSharedPreferences("home", MODE_PRIVATE);
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         if (checkSelfPermission(TV_LISTINGS) != PackageManager.PERMISSION_GRANTED && !prefs.getBoolean(KEY_ASKED, false)) {
             prefs.edit().putBoolean(KEY_ASKED, true).apply();
             requestPermissions(new String[]{TV_LISTINGS}, REQUEST_LISTINGS);
@@ -226,10 +228,11 @@ public final class HomeActivity extends Activity implements HomeView.Host {
      */
     @Override
     public void launchProgram(Recommendations.Item program, Rect from) {
+        if (getPackageName().equals(program.pkg)) return; // never aim another app's intent at ourselves
         Intent intent;
         try {
             intent = Intent.parseUri(program.intentUri, Intent.URI_INTENT_SCHEME);
-        } catch (URISyntaxException e) {
+        } catch (URISyntaxException | RuntimeException e) { // malformed extras can throw too
             Toast.makeText(this, getString(R.string.cannot_open, program.title), Toast.LENGTH_SHORT).show();
             return;
         }
@@ -248,13 +251,6 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     public void showInfo(Apps.Entry entry) {
         start(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", entry.pkg, null))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), null, entry.label);
-    }
-
-    @Override
-    public void hide(Apps.Entry entry) {
-        apps.hide(entry.pkg);
-        appsDirty = true;
-        refresh();
     }
 
     @Override

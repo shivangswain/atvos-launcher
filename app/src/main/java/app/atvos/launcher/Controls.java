@@ -29,7 +29,7 @@ final class Controls {
     static final class State {
         boolean online, ethernet, dnd, bluetoothOn;
         String bluetoothDevice; // connected Bluetooth audio output, or null
-        long sleepAt;           // System.currentTimeMillis() deadline, 0 = off
+        long sleepAt;           // SystemClock.elapsedRealtime() deadline (the alarm's clock), 0 = off
     }
 
     private static final int[] SLEEP_MINUTES = {15, 30, 60, 90, 120};
@@ -45,7 +45,7 @@ final class Controls {
 
     Controls(Activity activity) {
         this.activity = activity;
-        this.prefs = activity.getSharedPreferences("home", Context.MODE_PRIVATE);
+        this.prefs = activity.getSharedPreferences(HomeActivity.PREFS, Context.MODE_PRIVATE);
         this.dpm = activity.getSystemService(DevicePolicyManager.class);
         this.admin = new ComponentName(activity, PowerAdmin.class);
     }
@@ -84,7 +84,7 @@ final class Controls {
 
         // A reboot drops the alarm but not the saved deadline: only trust it while the alarm exists.
         long at = prefs.getLong(SleepTimer.KEY_SLEEP_AT, 0);
-        if (at > System.currentTimeMillis() && SleepTimer.active(activity)) {
+        if (at > SystemClock.elapsedRealtime() && SleepTimer.active(activity)) {
             s.sleepAt = at;
         } else if (at != 0) {
             prefs.edit().remove(SleepTimer.KEY_SLEEP_AT).apply();
@@ -108,7 +108,7 @@ final class Controls {
             requestAdmin();
             return;
         }
-        long now = System.currentTimeMillis(), at = prefs.getLong(SleepTimer.KEY_SLEEP_AT, 0);
+        long now = SystemClock.elapsedRealtime(), at = prefs.getLong(SleepTimer.KEY_SLEEP_AT, 0);
         long left = at > now ? at - now : 0;
         // The next step up from what's left; after the longest, the timer turns off.
         int next = 0;
@@ -125,13 +125,13 @@ final class Controls {
         AlarmManager alarms = activity.getSystemService(AlarmManager.class);
         PendingIntent pi = SleepTimer.pending(activity);
         long delay = next * 60_000L;
-        long trigger = SystemClock.elapsedRealtime() + delay;
+        long trigger = now + delay;
         if (alarms.canScheduleExactAlarms()) {
             alarms.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, pi);
         } else {
             alarms.setWindow(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, 60_000, pi);
         }
-        prefs.edit().putLong(SleepTimer.KEY_SLEEP_AT, now + delay).apply();
+        prefs.edit().putLong(SleepTimer.KEY_SLEEP_AT, trigger).apply(); // same clock as the alarm, so a clock change can't skew it
     }
 
     /** Needs Do Not Disturb access, granted once with adb (Google TV has no screen for it). */
@@ -167,7 +167,7 @@ final class Controls {
             activity.startActivity(new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
                     .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
                     .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, activity.getString(R.string.power_admin_description)));
-        } catch (ActivityNotFoundException e) {
+        } catch (ActivityNotFoundException | SecurityException e) {
             Toast.makeText(activity, R.string.not_available, Toast.LENGTH_SHORT).show();
         }
     }

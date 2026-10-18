@@ -7,8 +7,11 @@ import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.os.SystemClock;
 import android.text.TextPaint;
 import android.text.TextUtils;
+
+import java.util.Locale;
 
 /**
  * The tvOS-style Control Center: glass tiles that drop down under the status row. This class owns
@@ -132,7 +135,7 @@ final class ControlCenter {
         bt1 = fit(bluetoothLabel, LINE_1);
         bt2 = fit(s.bluetoothDevice != null ? s.bluetoothDevice : s.bluetoothOn ? on : off, LINE_2);
         sleepLine = s.sleepAt > 0
-                ? String.format(minutes, Math.max(1, (s.sleepAt - System.currentTimeMillis() + 59_999) / 60_000))
+                ? String.format(Locale.getDefault(), minutes, Math.max(1, (s.sleepAt - SystemClock.elapsedRealtime() + 59_999) / 60_000))
                 : sleep2;
     }
 
