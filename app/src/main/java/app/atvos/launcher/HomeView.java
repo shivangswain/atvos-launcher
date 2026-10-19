@@ -874,14 +874,22 @@ final class HomeView extends View {
 
         float width = SHEET_W - 2 * SHEET_PAD, inBox = width - 2 * BOX_PAD;
         setupTitle = fit(c.getString(setupFirstRun ? R.string.setup_welcome : R.string.setup_and_support), headerText, width);
-        setupStatus = fit(c.getString(setup.homeActive ? R.string.setup_home_active
-                : setup.googleTvHome ? R.string.setup_home_google_tv : R.string.setup_home_other), sheetText, width - 24f);
+        String status = setup.homeActive ? c.getString(R.string.setup_home_active)
+                : setup.currentHome != null ? c.getString(R.string.setup_home_named, setup.currentHome)
+                : c.getString(R.string.setup_home_other);
+        setupStatus = fit(status, sheetText, width - 24f);
         String intro = c.getString(R.string.setup_intro);
         setupIntro = wrap(intro, sheetText, width);
-        // Only Google TV needs the adb steps: elsewhere, Android's own home picker does it.
-        boolean guide = setup.googleTvHome;
-        String steps = c.getString(R.string.setup_google_tv_steps), commands = c.getString(R.string.setup_google_tv_commands),
-                undo = c.getString(R.string.setup_google_tv_undo);
+        // The adb steps, for this TV's own locked home apps (Google TV's, Android TV's): only
+        // turning them off hands the Home button over.
+        boolean guide = !setup.homeActive && !setup.lockedHomes.isEmpty();
+        StringBuilder lines = new StringBuilder();
+        for (String pkg : setup.lockedHomes) {
+            if (lines.length() > 0) lines.append('\n');
+            lines.append(c.getString(R.string.setup_adb_command, pkg));
+        }
+        String steps = c.getString(R.string.setup_adb_steps), commands = lines.toString(),
+                undo = c.getString(R.string.setup_adb_undo);
         setupSteps = guide ? wrap(steps, sheetText, inBox) : null;
         setupCommands = guide ? wrap(commands, sheetCode, inBox) : null;
         setupUndo = guide ? wrap(undo, sheetText, inBox) : null;
@@ -1456,7 +1464,7 @@ final class HomeView extends View {
 
     /**
      * The Setup & Support sheet: frosted glass over the dimmed home screen saying whether atvOS is
-     * the home screen (on Google TV, with the adb steps that make it so), then capsule buttons with
+     * the home screen (where the TV's own home keeps the button, with the adb steps), then buttons with
      * the white selection gliding between them, as in the long-press menu.
      */
     private void drawSetup(Canvas c) {
@@ -1480,7 +1488,9 @@ final class HomeView extends View {
             shadow.setAlpha(Math.round(150 * setupAnim));
             c.drawBitmap(shadowMask, null, r2, shadow);
         }
-        drawGlass(c, r, 42f, 0f, 0x8C18181E, alpha);
+        // A darker tint than the menu's: the glass shows the backdrop undimmed, and the sheet's text
+        // must stay readable over bright ones.
+        drawGlass(c, r, 42f, 0f, 0xBE141418, alpha);
 
         float x = left + SHEET_PAD, y = top + SHEET_PAD, width = SHEET_W - 2 * SHEET_PAD;
         headerText.setColor(Color.argb(alpha, 255, 255, 255));

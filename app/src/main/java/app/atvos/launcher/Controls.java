@@ -26,6 +26,9 @@ import android.os.SystemClock;
 import android.provider.Settings;
 import android.widget.Toast;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /** The system state and actions behind the Control Center tiles. UI thread. */
 final class Controls {
 
@@ -41,17 +44,18 @@ final class Controls {
     static final String ACCESSORIES = "com.android.tv.settings.ACCESSORIES_CONNECTED_DEVICES";
     static final String SYSTEM = "com.android.tv.settings.DEVICES";
     static final String INPUTS = "com.android.tv.action.VIEW_INPUTS";
-    /** Google TV's own home screen: while it's on, it takes the Home button whatever app is chosen. */
-    static final String GOOGLE_TV_HOME = "com.google.android.apps.tv.launcherx";
-
     /** How the TV's home screen is set up, for the Setup & Support sheet. */
     static final class Setup {
         boolean homeActive;   // the Home button opens atvOS Launcher
-        boolean googleTvHome; // Google TV's home screen is on, so it keeps the Home button
-        boolean canPickHome;  // atvOS isn't the chosen home app, and Android can ask for it
+        String currentHome;   // what it opens instead (the app's name), or null if unknown
+        /**
+         * Home apps that keep the Home button whatever is chosen in Android's dialog: the TV's own
+         * (Google TV's, Android TV's), which declare a raised priority. Only adb can turn them off.
+         */
+        final List<String> lockedHomes = new ArrayList<>();
+        boolean canPickHome;  // Android's home-app dialog can make atvOS the home screen
         boolean holdsPower;   // the device admin is active
     }
-
     private final Activity activity;
     private final SharedPreferences prefs;
     private final DevicePolicyManager dpm;
@@ -185,24 +189,32 @@ final class Controls {
     }
 
     /**
-     * Reads the home-screen setup. Being Android's chosen home app isn't enough on Google TV: its
-     * home screen keeps the Home button until it's turned off (adb only), so that's checked too.
+     * Reads the home-screen setup from where the Home button actually goes, not from Android's
+     * home-app role: on Google TV and Android TV the TV's own home declares a raised priority and
+     * keeps the button even after atvOS is chosen in the dialog (checked on both, Android 12).
      */
     @SuppressWarnings("deprecation") // int-flag overloads work on every version
     Setup setup() {
         Setup s = new Setup();
         PackageManager pm = activity.getPackageManager();
+        String self = activity.getPackageName();
         Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
+        ResolveInfo current = pm.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY);
+        String currentPkg = current != null ? current.activityInfo.packageName : null;
+        s.homeActive = self.equals(currentPkg);
+        if (!s.homeActive && currentPkg != null && !"android".equals(currentPkg)) { // "android": Android's chooser
+            s.currentHome = current.loadLabel(pm).toString();
+        }
         for (ResolveInfo ri : pm.queryIntentActivities(home, 0)) {
-            if (GOOGLE_TV_HOME.equals(ri.activityInfo.packageName)) s.googleTvHome = true;
+            String pkg = ri.activityInfo.packageName;
+            if (ri.priority > 0 && !self.equals(pkg) && !s.lockedHomes.contains(pkg)) s.lockedHomes.add(pkg);
         }
         RoleManager roles = activity.getSystemService(RoleManager.class);
         boolean roleAvailable = roles != null && roles.isRoleAvailable(RoleManager.ROLE_HOME);
         boolean chosen = roleAvailable && roles.isRoleHeld(RoleManager.ROLE_HOME);
-        ResolveInfo current = pm.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY);
-        if (current != null && activity.getPackageName().equals(current.activityInfo.packageName)) chosen = true;
-        s.homeActive = chosen && !s.googleTvHome;
-        s.canPickHome = !chosen && (roleAvailable || resolves(Settings.ACTION_HOME_SETTINGS));
+        // The dialog only helps against an ordinary home app; a locked one wins regardless.
+        s.canPickHome = !s.homeActive && s.lockedHomes.isEmpty() && !chosen
+                && (roleAvailable || resolves(Settings.ACTION_HOME_SETTINGS));
         s.holdsPower = dpm.isAdminActive(admin);
         return s;
     }

@@ -16,11 +16,11 @@
     <string name="setup_welcome">Welcome to atvOS Launcher</string>
     <string name="setup_intro">A fast, minimal home screen for Android TV and Google TV.</string>
     <string name="setup_home_active">atvOS Launcher is your home screen</string>
-    <string name="setup_home_google_tv">Google TV\'s home screen still opens when you press Home</string>
+    <string name="setup_home_named">%s opens when you press Home</string>
     <string name="setup_home_other">Another app is your home screen</string>
-    <string name="setup_google_tv_steps">Google TV keeps its own home screen until it\'s turned off, which only adb can do:\n1. In Settings &gt; System &gt; About, select Android TV OS build 7 times to turn on Developer options.\n2. In Developer options, turn on USB debugging (or Wireless debugging).\n3. From a computer, or an adb app on your phone, connect to the TV and run:</string>
-    <string name="setup_google_tv_commands" translatable="false">adb shell pm disable-user --user 0 com.google.android.apps.tv.launcherx\nadb shell pm disable-user --user 0 com.google.android.tungsten.setupwraith</string>
-    <string name="setup_google_tv_undo">To go back, run the same commands with pm enable.</string>
+    <string name="setup_adb_steps">This TV\'s own home screen keeps the Home button until it\'s turned off, which only adb can do:\n1. In Settings, open About and select the build number 7 times to turn on Developer options.\n2. In Developer options, turn on USB debugging (or Wireless debugging).\n3. From a computer, or an adb app on your phone, connect to the TV and run:</string>
+    <string name="setup_adb_command" translatable="false">adb shell pm disable-user --user 0 %s</string>
+    <string name="setup_adb_undo">To go back, run the same commands with pm enable.</string>
     <string name="setup_set_home">Set as Default Home App</string>
     <string name="setup_release_power">Remove Power Control</string>
     <string name="setup_continue">Continue to Home Screen</string>

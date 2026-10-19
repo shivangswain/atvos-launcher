@@ -56,6 +56,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         public void onReceive(Context context, Intent intent) {
             appsDirty = true;
             if (resumed) refresh();
+            view.refreshSetup(); // turning off the TV's own home (adb) shows on the sheet at once
         }
     };
 

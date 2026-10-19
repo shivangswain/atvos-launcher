@@ -39,9 +39,13 @@ tvOS are trademarks of Apple Inc.
 On first run, a sheet says whether atvOS Launcher is the home screen and how to make it so. It
 opens again from **Setup & Support** in any app's long-press menu.
 
-- **Android TV:** **Set as Default Home App** opens Android's own home-app dialog.
-- **Google TV:** its own home screen keeps the Home button whichever app is chosen, until it's
-  turned off with adb, so the sheet shows the steps and the commands (see Installing below).
+- The status comes from where the Home button actually goes, not from Android's home-app setting.
+- **Google TV and Android TV:** their own home screens (`launcherx`, `tvlauncher`) declare a raised
+  priority and keep the Home button even after another app is chosen in Android's dialog (checked
+  on both, Android 12). Only turning them off with adb gets past them, so the sheet shows the
+  steps and the exact commands for the TV's own home apps. It turns green as soon as they run.
+- **Other TVs:** where an ordinary home app has the button, **Set as Default Home App** opens
+  Android's home-app dialog.
 - **Remove Power Control** appears while the app holds the device admin, so it can be uninstalled.
 
 Closing the sheet the first time brings up the prompt for app recommendations.
