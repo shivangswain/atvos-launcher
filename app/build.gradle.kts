@@ -1,19 +1,37 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
+}
+
+// Release signing comes from keystore.properties (never committed): storeFile, storePassword,
+// keyAlias, keyPassword. Without it, release builds are signed with the local debug key, for
+// sideloading.
+val keystore = rootProject.file("keystore.properties").takeIf { it.isFile }?.let { file ->
+    Properties().apply { file.inputStream().use { load(it) } }
 }
 
 android {
     namespace = "app.atvos.launcher"
     compileSdk = 36
-    // Pinned to what the Nix-managed SDK ships (the SDK is read-only, Gradle can't fetch others)
-    buildToolsVersion = "36.0.0"
 
     defaultConfig {
         applicationId = "app.atvos.launcher"
-        minSdk = 34 // Android 14, the TCL C6K
+        minSdk = 31 // Android 12+
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+    }
+
+    signingConfigs {
+        if (keystore != null) {
+            create("release") {
+                storeFile = rootProject.file(keystore.getProperty("storeFile"))
+                storePassword = keystore.getProperty("storePassword")
+                keyAlias = keystore.getProperty("keyAlias")
+                keyPassword = keystore.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
@@ -21,8 +39,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
-            // Personal sideload build: sign with the local debug key
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 
@@ -35,10 +52,11 @@ android {
         buildConfig = false
     }
 
-    // Don't embed the Google-encrypted dependency metadata block
+    // The Google-encrypted dependency report: in the Play bundle (so Play can flag outdated SDKs),
+    // not in sideloaded APKs.
     dependenciesInfo {
         includeInApk = false
-        includeInBundle = false
+        includeInBundle = true
     }
 }
 

@@ -1,6 +1,7 @@
 package app.atvos.launcher;
 
 import android.Manifest;
+import android.app.ActivityManager;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
@@ -20,8 +21,6 @@ import android.graphics.LightingColorFilter;
 import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Paint;
-import android.graphics.PorterDuff;
-import android.graphics.PorterDuffXfermode;
 import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
@@ -152,11 +151,12 @@ final class Backdrops {
     private final Map<String, Long> failedAt = new HashMap<>();
     private static final long RETRY_MS = 15 * 60_000L;
 
-    // UI thread only. Screen-size bitmaps are ~8 MB each, so keep just a few.
+    // UI thread only. Backdrops are ~8 MB each (1080p), so keep just a few: fewer on low-RAM TVs.
+    private final int cacheSize;
     private final Map<String, Backdrop> cache = new LinkedHashMap<String, Backdrop>(8, 0.75f, true) {
         @Override
         protected boolean removeEldestEntry(Map.Entry<String, Backdrop> eldest) {
-            return size() > 6;
+            return size() > cacheSize;
         }
     };
 
@@ -165,8 +165,13 @@ final class Backdrops {
         this.pm = context.getPackageManager();
         this.prefs = context.getSharedPreferences(HomeActivity.PREFS, Context.MODE_PRIVATE);
         this.downloads = new File(context.getCacheDir(), "shelf");
-        this.width = width;
-        this.height = height;
+        // Rendered at no more than 1080p: some TVs draw their UI at 4K, where each backdrop would be
+        // 33 MB of texture for no visible gain behind the UI.
+        float k = Math.min(1f, 1920f / Math.max(1, width));
+        this.width = Math.max(1, Math.round(width * k));
+        this.height = Math.max(1, Math.round(height * k));
+        ActivityManager am = context.getSystemService(ActivityManager.class);
+        this.cacheSize = am != null && am.isLowRamDevice() ? 3 : 6;
         Bitmap aurora = aurora(640, 360);
         Bitmap blurred = blur(aurora);
         this.fallback = new Backdrop(toHardware(aurora), blurred, null);
@@ -273,8 +278,19 @@ final class Backdrops {
     }
 
 
-    /** Prepares the backdrop behind {@code key} (images are already on disk), or null. IO thread. */
+    /**
+     * Prepares the backdrop behind {@code key} (images are already on disk), or null. Running out
+     * of memory (a huge image, a low-RAM TV) just means no backdrop this time. IO thread.
+     */
     Backdrop load(String key, Recommendations.Item program) {
+        try {
+            return prepare(key, program);
+        } catch (OutOfMemoryError e) {
+            return null;
+        }
+    }
+
+    private Backdrop prepare(String key, Recommendations.Item program) {
         if (DEFAULT.equals(key)) return fallback;
         if (key.startsWith(APP)) return appLogo(key.substring(APP.length()));
         if (!key.startsWith(REMOTE)) return null;
@@ -384,7 +400,7 @@ final class Backdrops {
     private ActivityInfo launchActivity(String pkg) {
         Intent launch = pm.getLeanbackLaunchIntentForPackage(pkg);
         if (launch == null) launch = pm.getLaunchIntentForPackage(pkg);
-        ResolveInfo ri = launch != null ? pm.resolveActivity(launch, PackageManager.ResolveInfoFlags.of(0)) : null;
+        ResolveInfo ri = launch != null ? pm.resolveActivity(launch, 0) : null;
         return ri != null ? ri.activityInfo : null;
     }
 
@@ -992,7 +1008,7 @@ final class Backdrops {
         String authority = uri.getAuthority();
         if (authority == null || owner == null) return false;
         if (scheme.equals(ContentResolver.SCHEME_ANDROID_RESOURCE)) return authority.equals(owner);
-        ProviderInfo provider = pm.resolveContentProvider(authority, PackageManager.ComponentInfoFlags.of(0));
+        ProviderInfo provider = pm.resolveContentProvider(authority, 0);
         return provider != null && provider.exported && owner.equals(provider.packageName);
     }
 

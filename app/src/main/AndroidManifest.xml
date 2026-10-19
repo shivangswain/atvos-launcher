@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-feature android:name="android.software.leanback" android:required="true" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
@@ -13,8 +14,10 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Control Center: Do Not Disturb (the user still has to grant access). -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
-    <!-- Control Center: the sleep timer fires on time. -->
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- Control Center: the sleep timer fires on time. Play allows this one for any app (unlike
+         USE_EXACT_ALARM, which it reserves for alarm clocks and calendars); from Android 14 the user
+         grants it once, in Settings > Apps > Special app access > Alarms & reminders. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <!-- Package visibility: apps that can be launched from a home screen, and the TV provider. -->
     <queries>
@@ -34,6 +37,7 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:banner="@drawable/banner"
         android:enableOnBackInvokedCallback="false"
+        tools:targetApi="33"
         android:hasFragileUserData="false"
         android:icon="@drawable/icon"
         android:label="@string/app_name"

@@ -61,6 +61,8 @@ final class HomeView extends View {
         Controls.State controlState();
         /** Runs a Control Center action; returns true to keep the Control Center open. */
         boolean control(int id);
+        /** Gives up power control (the device admin), so the app can be uninstalled. */
+        void releasePower();
     }
 
     // Layout in design units, measured from the tvOS home screen.
@@ -131,13 +133,11 @@ final class HomeView extends View {
     private final List<Boolean> menuStays = new ArrayList<>(); // switches keep the menu open to show their new state
     private final Drawable editIcon, infoIcon, hideIcon, showIcon, onIcon, offIcon, playIcon;
     private int menuSel;
+    private float menuWidth = 440f;
 
     // Clock
     private String time = "";
     private float timeWidth;
-    // "9:41 AM" as on tvOS, or "21:41" when the TV is set to 24-hour time.
-    private final SimpleDateFormat clock12 = new SimpleDateFormat("h:mm a", Locale.US);
-    private final SimpleDateFormat clock24 = new SimpleDateFormat("H:mm", Locale.US);
     private final Runnable tick = this::tick;
 
     // Drawing objects, allocated once
@@ -327,7 +327,10 @@ final class HomeView extends View {
     }
 
     private void tick() {
-        SimpleDateFormat format = DateFormat.is24HourFormat(getContext()) ? clock24 : clock12;
+        // "9:41 AM" as on tvOS, in the TV's own language and conventions and its 12/24-hour setting.
+        Locale locale = Locale.getDefault();
+        String pattern = DateFormat.getBestDateTimePattern(locale, DateFormat.is24HourFormat(getContext()) ? "Hm" : "hm");
+        SimpleDateFormat format = new SimpleDateFormat(pattern, locale); // once a minute: cheap
         format.setTimeZone(TimeZone.getDefault()); // follow time-zone changes
         time = format.format(new Date());
         timeWidth = clockText.measureText(time);
@@ -443,6 +446,12 @@ final class HomeView extends View {
 
     @Override
     public boolean onKeyLongPress(int code, KeyEvent e) {
+        if (isSelect(code) && ccOpen && cc.selected == ControlCenter.POWER) {
+            longPressed = true; // so the release doesn't also power off
+            playSoundEffect(SoundEffectConstants.CLICK);
+            host.releasePower();
+            return true;
+        }
         if (isSelect(code) && !editing && !expanded && !cardFocused && !menuOpen && !pillFocused && !ccOpen) {
             longPressed = true;
             openMenu();
@@ -707,6 +716,7 @@ final class HomeView extends View {
      * so the top shelf can show either, both, or neither (then just the app's logo).
      */
     private void buildMenu(Apps.Entry e) {
+        menuWidth = 440f;
         menuLabels.clear();
         menuIcons.clear();
         menuDanger.clear();
@@ -730,7 +740,10 @@ final class HomeView extends View {
     }
 
     private void addMenu(int label, Drawable icon, boolean danger, boolean stays, Runnable action) {
-        menuLabels.add(getContext().getString(label));
+        String text = getContext().getString(label);
+        // Wide enough for the longest option in any language: text (popped out 5%), icon and insets.
+        menuWidth = Math.max(menuWidth, Math.min(760f, menuText.measureText(text) * 1.05f + 124f));
+        menuLabels.add(text);
         menuIcons.add(icon);
         menuDanger.add(danger);
         menuActions.add(action);
@@ -1206,7 +1219,7 @@ final class HomeView extends View {
         Apps.Entry e = focused();
         if (e == null || menuLabels.isEmpty()) return;
         int alpha = Math.round(255 * menuAnim);
-        float itemH = 68f, pad = 8f, w = 440f, h = pad * 2 + itemH * menuLabels.size();
+        float itemH = 68f, pad = 8f, w = menuWidth, h = pad * 2 + itemH * menuLabels.size();
         float tcx = e.x + TILE_W / 2f, tcy = e.y + TILE_H / 2f + offset;
         float tileL = tcx - TILE_W * FOCUS_SCALE / 2f, tileR = tcx + TILE_W * FOCUS_SCALE / 2f;
         float tileT = tcy - TILE_H * FOCUS_SCALE / 2f;

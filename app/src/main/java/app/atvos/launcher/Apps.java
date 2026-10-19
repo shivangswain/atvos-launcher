@@ -175,13 +175,15 @@ final class Apps {
         return i >= 0 ? i : PREFERRED.size();
     }
 
+    @SuppressWarnings("deprecation")
     private List<ResolveInfo> query(String category) {
-        return pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(category), PackageManager.ResolveInfoFlags.of(0));
+        return pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(category), 0);
     }
 
+    @SuppressWarnings("deprecation")
     private long lastUpdate(String pkg) {
         try {
-            return pm.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(0)).lastUpdateTime;
+            return pm.getPackageInfo(pkg, 0).lastUpdateTime;
         } catch (PackageManager.NameNotFoundException e) {
             return 0;
         }

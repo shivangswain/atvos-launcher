@@ -18,6 +18,7 @@ import android.media.AudioManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.Uri;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.widget.Toast;
@@ -102,7 +103,7 @@ final class Controls {
     }
 
     /** Off → 15 → 30 → 60 → 90 → 120 min → off. */
-    @SuppressLint("MissingPermission") // USE_EXACT_ALARM grants it; canScheduleExactAlarms() guards it anyway
+    @SuppressLint("MissingPermission") // canScheduleExactAlarms() guards the exact alarm
     void cycleSleepTimer() {
         if (!dpm.isAdminActive(admin)) {
             requestAdmin();
@@ -129,7 +130,15 @@ final class Controls {
         if (alarms.canScheduleExactAlarms()) {
             alarms.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, pi);
         } else {
-            alarms.setWindow(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, 60_000, pi);
+            // An inexact alarm can be as much as 10 minutes late, so first ask for exact alarms
+            // (Android 14+ doesn't grant them by default), where the TV has the screen for it.
+            Intent ask = new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.fromParts("package", activity.getPackageName(), null));
+            try {
+                activity.startActivity(ask.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                return;
+            } catch (ActivityNotFoundException | SecurityException e) {
+                alarms.setWindow(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, 60_000, pi);
+            }
         }
         prefs.edit().putLong(SleepTimer.KEY_SLEEP_AT, trigger).apply(); // same clock as the alarm, so a clock change can't skew it
     }
@@ -138,11 +147,28 @@ final class Controls {
     void toggleDnd() {
         NotificationManager nm = activity.getSystemService(NotificationManager.class);
         if (!nm.isNotificationPolicyAccessGranted()) {
-            Toast.makeText(activity, R.string.dnd_needs_access, Toast.LENGTH_LONG).show();
+            // Android's own screen for granting it, where the TV has one; otherwise say where to look.
+            if (!open(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) {
+                Toast.makeText(activity, R.string.dnd_needs_access, Toast.LENGTH_LONG).show();
+            }
             return;
         }
         boolean on = nm.getCurrentInterruptionFilter() > NotificationManager.INTERRUPTION_FILTER_ALL;
         nm.setInterruptionFilter(on ? NotificationManager.INTERRUPTION_FILTER_ALL : NotificationManager.INTERRUPTION_FILTER_PRIORITY);
+    }
+
+    /**
+     * Gives up the force-lock device admin (holding select on Power Off), so the app can be
+     * uninstalled without adb: Android TV has no settings screen for device admins.
+     */
+    void releasePower() {
+        if (!dpm.isAdminActive(admin)) {
+            Toast.makeText(activity, R.string.power_not_held, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        SleepTimer.cancel(activity);
+        dpm.removeActiveAdmin(admin);
+        Toast.makeText(activity, R.string.power_released, Toast.LENGTH_LONG).show();
     }
 
     /** Opens a screen by intent action; false if this TV has nothing for it. */

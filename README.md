@@ -1,6 +1,6 @@
 # atvOS Launcher
 
-A replacement home screen for Google TV (built for a TCL C6K; needs Android 14 or later), inspired
+A replacement home screen for Google TV and Android TV (Android 12 or later), inspired
 by the Apple TV home screen. It has a liquid-glass dock for the top row and a grid of app icons
 below. Behind the dock sits a "top shelf" backdrop from each app's own recommendations. In the
 corner, a clock pill opens a Control Center.
@@ -9,7 +9,7 @@ atvOS Launcher is an independent project, not affiliated with or endorsed by App
 tvOS are trademarks of Apple Inc.
 
 - **Pure Java with zero dependencies.** It uses only the Android framework: no AndroidX, no Kotlin
-  stdlib. The release APK is about 80 KB.
+  stdlib. The release APK is about 115 KB.
 - **One custom `View`.** It draws everything on a single canvas in 1920×1080 design units. The
   animations are interruptible exponential eases, and the view only redraws while something is
   moving. It runs at 60 fps on the TV's MT5896, with about 1 ms of UI-thread work per frame.
@@ -86,9 +86,9 @@ navigation sounds when **System sounds** are on in Settings.
 | --- | --- |
 | Top row | The time, glyphs for what's on (Bluetooth audio, Do Not Disturb, sleep timer), a **Settings** button that opens TV Settings, and your profile. |
 | Profile (Up from the top tiles, then Right) | Pick the TV's Google account with Android's chooser. The pill then shows its Google profile photo (see below), else its letter avatar. Push `files/avatar.png` to use another picture instead. |
-| Power Off | Puts the TV to sleep, like the remote's power button. |
+| Power Off | Puts the TV to sleep, like the remote's power button. Hold select on it to give up power control (so the app can be uninstalled). |
 | Wi-Fi / Ethernet | Shows the connection; opens network settings. |
-| Do Not Disturb | Toggles priority-only notifications. |
+| Do Not Disturb | Toggles priority-only notifications. Needs Do Not Disturb access: Android's screen for it opens if the TV has one (Google TV doesn't; there, only adb can grant it, see below). |
 | Bluetooth | Shows whether Bluetooth is on, or the connected headphones; opens Remotes & Accessories. |
 | Sleep Timer | Each press cycles Off → 15 → 30 → 60 → 90 → 120 min. |
 | Inputs, Accessibility, System, Search | Open TCL's input picker, accessibility settings, Settings > System, and Google search (the Assistant). |
@@ -123,20 +123,31 @@ avatar stays.
 | `INTERNET` | Downloads recommendation images and your profile photo (HTTPS only; cleartext is disabled). | Install. |
 | `ACCESS_NETWORK_STATE` | The Wi-Fi/Ethernet tile. | Install. |
 | `ACCESS_NOTIFICATION_POLICY` | The Do Not Disturb tile. | adb (below). |
-| `USE_EXACT_ALARM` | The sleep timer fires on time. | Install. |
-| Device admin, `force-lock` only | Power Off and the sleep timer. It can't wipe, reset or read anything. Only adb can release it (see below). | adb (below), or a consent screen on the first Power Off. |
+| `SCHEDULE_EXACT_ALARM` | The sleep timer fires on time (an inexact alarm can be 10 minutes late). | Granted at install up to Android 13. From Android 14, the first Sleep Timer press opens **Alarms & reminders** to allow it. |
+| Device admin, `force-lock` only | Power Off and the sleep timer. It can't wipe, reset or read anything. Hold select on Power Off to release it, or use adb (below). | A consent screen on the first Power Off, or adb (below). |
 
 ## Building
 
-The toolchain comes from the nix-darwin config (`~/.config/nix#macos`): `jdk21`, plus the Android
-SDK (platform 36, build-tools 36.0.0) exposed as `ANDROID_HOME`. Gradle comes from nixpkgs.
+Open the project in Android Studio, or build from the command line with the Gradle wrapper (JDK 17
+or later; the Android SDK location comes from `local.properties`, which Android Studio writes):
 
 ```bash
-nix shell nixpkgs#gradle -c gradle assembleRelease
+./gradlew assembleRelease
 ```
 
-The release build is minified with R8 and signed with your local debug key
-(`~/.android/debug.keystore`).
+The release build is minified with R8. It's signed with the key in `keystore.properties` if that
+file exists (it's never committed):
+
+```properties
+storeFile=release.jks
+storePassword=…
+keyAlias=…
+keyPassword=…
+```
+
+Without it, release builds are signed with your local debug key (`~/.android/debug.keystore`),
+for sideloading. For Google Play, build a bundle with `./gradlew bundleRelease`; it includes
+Google's encrypted dependency report so Play can flag outdated SDKs.
 
 ## Installing on the TV
 
@@ -181,8 +192,9 @@ commands again.
 
 ### Going back to Google TV's home screen
 
-Release the power admin first. Android blocks uninstalling an active admin, and Android TV has no
-screen to switch it off. The receiver only accepts this from the adb shell; apps can't send it.
+Release the power admin first: Android blocks uninstalling an active admin, and Android TV has no
+screen to switch it off. Hold select on **Power Off** in the Control Center, or use adb (the
+receiver only accepts this from senders holding `DUMP`, such as the adb shell):
 
 ```bash
 adb shell am broadcast -n app.atvos.launcher/.ReleasePower

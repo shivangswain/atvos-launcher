@@ -48,8 +48,8 @@ final class ControlCenter {
     private final float cogSize; // the Settings cog, a little smaller than the profile avatar beside it
     private final Drawable power, wifi, ethernet, moon, bluetooth, headphones, timer, input, accessibility,
             system, search, settings;
-    private final String powerOff, wifiLabel, ethernetLabel, connected, notConnected, dnd1, dnd2,
-            bluetoothLabel, on, off, sleep1, sleep2, minutes;
+    private final String powerOff, wifiLabel, ethernetLabel, connected, notConnected, dndLabel,
+            bluetoothLabel, on, off, sleepTimerLabel, sleepLabel, minutes;
 
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -58,7 +58,7 @@ final class ControlCenter {
 
     // Derived from the state once per change (not per frame): tile text already fitted to its width.
     private Controls.State state = new Controls.State();
-    private String wifi1 = "", wifi2 = "", bt1 = "", bt2 = "", sleepLine = "";
+    private String wifi1 = "", wifi2 = "", bt1 = "", bt2 = "", dnd1 = "", dnd2 = "", sleep1 = "", sleep2 = "";
     private int idleInk = WHITE;
 
     int selected = POWER;
@@ -102,13 +102,12 @@ final class ControlCenter {
         ethernetLabel = context.getString(R.string.ethernet);
         connected = context.getString(R.string.connected);
         notConnected = context.getString(R.string.not_connected);
-        dnd1 = context.getString(R.string.dnd_1);
-        dnd2 = context.getString(R.string.dnd_2);
+        dndLabel = context.getString(R.string.dnd);
         bluetoothLabel = context.getString(R.string.bluetooth);
         on = context.getString(R.string.on);
         off = context.getString(R.string.off);
-        sleep1 = context.getString(R.string.sleep_1);
-        sleep2 = context.getString(R.string.sleep_2);
+        sleepTimerLabel = context.getString(R.string.sleep_timer);
+        sleepLabel = context.getString(R.string.sleep);
         minutes = context.getString(R.string.minutes);
 
         text.setTypeface(Typeface.create(Typeface.DEFAULT, 500, false));
@@ -134,9 +133,35 @@ final class ControlCenter {
         wifi2 = fit(s.online ? connected : notConnected, LINE_2);
         bt1 = fit(bluetoothLabel, LINE_1);
         bt2 = fit(s.bluetoothDevice != null ? s.bluetoothDevice : s.bluetoothOn ? on : off, LINE_2);
-        sleepLine = s.sleepAt > 0
-                ? String.format(Locale.getDefault(), minutes, Math.max(1, (s.sleepAt - SystemClock.elapsedRealtime() + 59_999) / 60_000))
-                : sleep2;
+        String[] dnd = wrap(dndLabel, LINE_1, LINE_1);
+        dnd1 = dnd[0];
+        dnd2 = dnd[1];
+        if (s.sleepAt > 0) {
+            sleep1 = fit(sleepLabel, LINE_1);
+            sleep2 = fit(String.format(Locale.getDefault(), minutes,
+                    Math.max(1, (s.sleepAt - SystemClock.elapsedRealtime() + 59_999) / 60_000)), LINE_2);
+        } else {
+            String[] timer = wrap(sleepTimerLabel, LINE_1, LINE_2);
+            sleep1 = timer[0];
+            sleep2 = timer[1];
+        }
+    }
+
+    /**
+     * A title over a tile's two lines: whole on the first if it fits, else broken at the last space
+     * that fits ("Do Not" / "Disturb"), so any language reads naturally. Text without spaces that
+     * doesn't fit is shortened instead.
+     */
+    private String[] wrap(String s, float size1, float size2) {
+        text.setTextSize(size1);
+        if (text.measureText(s) <= TEXT_ROOM) return new String[]{s, ""};
+        int cut = -1;
+        for (int i = s.indexOf(' '); i > 0; i = s.indexOf(' ', i + 1)) {
+            if (text.measureText(s, 0, i) > TEXT_ROOM) break;
+            cut = i;
+        }
+        if (cut < 0) return new String[]{fit(s, size1), ""};
+        return new String[]{s.substring(0, cut), fit(s.substring(cut + 1).trim(), size2)};
     }
 
     private String fit(String s, float size) {
@@ -213,7 +238,7 @@ final class ControlCenter {
         tile(c, glass, DND, alpha, moon, s.dnd ? INDIGO : 0, dnd1, dnd2);
         tile(c, glass, BLUETOOTH, alpha, s.bluetoothDevice != null ? headphones : bluetooth,
                 s.bluetoothOn ? CYAN : 0, bt1, bt2);
-        tile(c, glass, SLEEP, alpha, timer, s.sleepAt > 0 ? ORANGE : 0, sleep1, sleepLine);
+        tile(c, glass, SLEEP, alpha, timer, s.sleepAt > 0 ? ORANGE : 0, sleep1, sleep2);
         tile(c, glass, INPUTS, alpha, input, 0, null, null);
         tile(c, glass, ACCESSIBILITY, alpha, accessibility, 0, null, null);
         tile(c, glass, SYSTEM, alpha, system, 0, null, null);
@@ -275,6 +300,10 @@ final class ControlCenter {
             text.setTextSize(LINE_1 * grow);
             text.setColor(ink);
             text.setAlpha(alpha);
+            if (line2.isEmpty()) { // a title that fit on one line sits in the middle
+                c.drawText(line1, tx, r.centerY() + 8f * grow, text);
+                return;
+            }
             c.drawText(line1, tx, r.centerY() - 4f * grow, text);
             text.setTextSize((id == DND ? LINE_1 : LINE_2) * grow);
             text.setColor(ink);

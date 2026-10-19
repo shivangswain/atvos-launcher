@@ -292,6 +292,11 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         }
     }
 
+    @Override
+    public void releasePower() {
+        controls.releasePower();
+    }
+
     private Bundle zoomFrom(Rect from) {
         return ActivityOptions.makeScaleUpAnimation(view, from.left, from.top, from.width(), from.height()).toBundle();
     }
