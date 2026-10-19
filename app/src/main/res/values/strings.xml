@@ -15,6 +15,20 @@
     <string name="not_available">Not available on this TV</string>
 
     <!-- Control Center -->
+    <!-- What a screen reader (TalkBack) says for things that are only icons on screen. -->
+    <string name="a11y_control_center">Control Center</string>
+    <string name="a11y_profile">Profile</string>
+    <string name="a11y_settings">Settings</string>
+    <string name="a11y_inputs">Inputs</string>
+    <string name="a11y_accessibility">Accessibility</string>
+    <string name="a11y_system">System</string>
+    <string name="a11y_search">Search</string>
+    <string name="a11y_play">Play %s</string>
+    <string name="a11y_shelf_hint">Press up to see %s</string>
+    <string name="a11y_hidden">Hidden</string>
+    <string name="a11y_moving">Moving</string>
+    <string name="a11y_moving_hint">Use the arrows to move it, then press select to drop it</string>
+    <string name="a11y_reveal_hint">Hold down to show hidden apps</string>
     <string name="power_off">Power Off</string>
     <string name="wifi">Wi‑Fi</string>
     <string name="ethernet">Ethernet</string>

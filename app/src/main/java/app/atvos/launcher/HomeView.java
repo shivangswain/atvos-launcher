@@ -121,6 +121,10 @@ final class HomeView extends View {
     private float downAppear, downProgress, bounce, menuSelAnim;
     private Backdrops.Backdrop backdrop, previous;
 
+    // Screen readers: a tree of virtual items, since everything is drawn on this one view
+    private final A11y a11y;
+    private static final int A11Y_PILL = 1, A11Y_PLAY = 2, A11Y_CC = 100, A11Y_MENU = 200, A11Y_APP = 1000;
+
     // Control Center (opened from the clock pill)
     private final ControlCenter cc;
     private final ControlCenter.Glass ccGlass = (c, rect, radius, tint, alpha) -> drawGlass(c, rect, radius, 0f, tint, alpha);
@@ -131,6 +135,9 @@ final class HomeView extends View {
     private final List<Boolean> menuDanger = new ArrayList<>();
     private final List<Runnable> menuActions = new ArrayList<>();
     private final List<Boolean> menuStays = new ArrayList<>(); // switches keep the menu open to show their new state
+    private final List<Boolean> menuChecked = new ArrayList<>(); // a switch's state, null for other options
+    private static final float MENU_ITEM_H = 68f, MENU_PAD = 8f;
+    private final RectF menuBox = new RectF(); // where the menu was last drawn, for screen readers
     private final Drawable editIcon, infoIcon, hideIcon, showIcon, onIcon, offIcon, playIcon;
     private int menuSel;
     private float menuWidth = 440f;
@@ -240,6 +247,7 @@ final class HomeView extends View {
         chevron.moveTo(-17f, 5f);
         chevron.lineTo(0f, -4f);
         chevron.lineTo(17f, 5f);
+        a11y = new A11y(this, new Accessible());
     }
 
     // ---- State from the activity -------------------------------------------------------------
@@ -267,6 +275,7 @@ final class HomeView extends View {
             }
         }
         focusChanged();
+        a11y.sync();
         return true;
     }
 
@@ -341,6 +350,25 @@ final class HomeView extends View {
     }
 
     // ---- Input -------------------------------------------------------------------------------
+
+    /** Every key can move focus or change what's on screen, so screen readers hear about it after each. */
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent e) {
+        boolean handled = super.dispatchKeyEvent(e);
+        a11y.sync();
+        return handled;
+    }
+
+    @Override
+    protected void onFocusChanged(boolean gainFocus, int direction, Rect previouslyFocused) {
+        super.onFocusChanged(gainFocus, direction, previouslyFocused);
+        if (gainFocus) a11y.sync();
+    }
+
+    @Override
+    public android.view.accessibility.AccessibilityNodeProvider getAccessibilityNodeProvider() {
+        return a11y;
+    }
 
     @Override
     public boolean onKeyDown(int code, KeyEvent e) {
@@ -677,6 +705,7 @@ final class HomeView extends View {
         bounceAt = SystemClock.uptimeMillis();
         navSound(0, 1);
         focusChanged();
+        a11y.sync(); // the hold finishes between key events
     }
 
     private boolean canRevealHidden() {
@@ -722,6 +751,7 @@ final class HomeView extends View {
         menuDanger.clear();
         menuActions.clear();
         menuStays.clear();
+        menuChecked.clear();
         addMenu(R.string.edit_home, editIcon, false, false, this::startEditing);
         addMenu(R.string.app_info, infoIcon, false, false, () -> host.showInfo(e));
         if (hidden.contains(e)) {
@@ -737,6 +767,7 @@ final class HomeView extends View {
     private void addSwitch(int label, Apps.Entry e, int source) {
         boolean on = host.shelfSourceOn(e, source);
         addMenu(label, on ? onIcon : offIcon, false, true, () -> host.setShelfSource(e, source, !on));
+        menuChecked.set(menuChecked.size() - 1, on);
     }
 
     private void addMenu(int label, Drawable icon, boolean danger, boolean stays, Runnable action) {
@@ -748,6 +779,7 @@ final class HomeView extends View {
         menuDanger.add(danger);
         menuActions.add(action);
         menuStays.add(stays);
+        menuChecked.add(null);
     }
 
     private void activateMenu() {
@@ -1219,7 +1251,7 @@ final class HomeView extends View {
         Apps.Entry e = focused();
         if (e == null || menuLabels.isEmpty()) return;
         int alpha = Math.round(255 * menuAnim);
-        float itemH = 68f, pad = 8f, w = menuWidth, h = pad * 2 + itemH * menuLabels.size();
+        float itemH = MENU_ITEM_H, pad = MENU_PAD, w = menuWidth, h = pad * 2 + itemH * menuLabels.size();
         float tcx = e.x + TILE_W / 2f, tcy = e.y + TILE_H / 2f + offset;
         float tileL = tcx - TILE_W * FOCUS_SCALE / 2f, tileR = tcx + TILE_W * FOCUS_SCALE / 2f;
         float tileT = tcy - TILE_H * FOCUS_SCALE / 2f;
@@ -1227,6 +1259,7 @@ final class HomeView extends View {
         float left = right ? tileR + 12f : tileL - 12f - w;
         left += (1f - menuAnim) * (right ? -16f : 16f);
         float top = Math.max(30f, Math.min(tileT, height - 30f - h));
+        menuBox.set(left, top, left + w, top + h);
 
         // Capsule rows in frosted glass whose corners follow them, like the dock and Control Center:
         // light over the dimmed grid, as on tvOS, and darker over a bright backdrop in the dock so
@@ -1347,5 +1380,100 @@ final class HomeView extends View {
         c.drawCircle(size / 2f, size * 0.39f, size * 0.19f, p);
         c.drawOval(new RectF(size * 0.17f, size * 0.66f, size * 0.83f, size * 1.30f), p);
         return b;
+    }
+
+    // ---- Screen readers ----------------------------------------------------------------------
+
+    /**
+     * What TalkBack can reach: the open menu or Control Center on its own (they take all input),
+     * otherwise the clock pill, the Play button when a shelf shows one, and the app tiles.
+     */
+    private final class Accessible implements A11y.Source {
+        @Override
+        public void items(List<A11y.Item> out) {
+            Context c = getContext();
+            if (menuOpen) {
+                for (int i = 0; i < menuLabels.size(); i++) {
+                    Boolean on = menuChecked.get(i);
+                    float top = menuBox.top + MENU_PAD + i * MENU_ITEM_H;
+                    out.add(new A11y.Item(A11Y_MENU + i, menuLabels.get(i), on == null ? null : c.getString(on ? R.string.on : R.string.off),
+                            null, new RectF(menuBox.left, top, menuBox.right, top + MENU_ITEM_H), i == menuSel));
+                }
+                return;
+            }
+            if (ccOpen) {
+                for (int id = 0; id < ControlCenter.COUNT; id++) {
+                    out.add(new A11y.Item(A11Y_CC + id, cc.label(id), cc.state(id), null, new RectF(cc.bounds(id)), id == cc.selected));
+                }
+                return;
+            }
+            if (inDock() || pillFocused || expanded || cardFocused) {
+                float w = 22f + timeWidth + 12f + AVATAR + 8f;
+                out.add(new A11y.Item(A11Y_PILL, c.getString(R.string.a11y_control_center), time, null,
+                        new RectF(EDGE - w, CLOCK_TOP, EDGE, CLOCK_TOP + CLOCK_H), pillFocused));
+            }
+            Recommendations.Item program = backdrop != null ? backdrop.program : null;
+            if ((expanded || cardFocused) && program != null) {
+                out.add(new A11y.Item(A11Y_PLAY, c.getString(R.string.a11y_play, program.title == null ? "" : program.title),
+                        null, null, new RectF(playRect), !pillFocused));
+            }
+            float offset = lift() - scroll - bounce;
+            boolean onApps = !pillFocused && !expanded && !cardFocused;
+            for (int i = 0, n = total(); i < n; i++) {
+                Apps.Entry e = entry(i);
+                boolean current = onApps && i == focus, isHidden = i >= apps.size();
+                String state = isHidden ? c.getString(R.string.a11y_hidden) : editing && current ? c.getString(R.string.a11y_moving) : null;
+                String hint = null;
+                if (current && editing) {
+                    hint = c.getString(R.string.a11y_moving_hint);
+                } else if (current && shelf() != NO_SHELF && program != null && program.title != null) {
+                    hint = c.getString(R.string.a11y_shelf_hint, program.title);
+                } else if (current && canRevealHidden()) {
+                    hint = c.getString(R.string.a11y_reveal_hint);
+                }
+                out.add(new A11y.Item(A11Y_APP + i, e.label, state, hint,
+                        new RectF(e.x, e.y + offset, e.x + TILE_W, e.y + offset + TILE_H), current));
+            }
+        }
+
+        @Override
+        public boolean focus(int id) {
+            if (id >= A11Y_APP) {
+                int i = id - A11Y_APP;
+                if (menuOpen || ccOpen || i >= total()) return false;
+                pillFocused = false;
+                cardFocused = false;
+                if (expanded) setExpanded(false);
+                focus = i;
+                focusChanged();
+            } else if (id >= A11Y_MENU) {
+                if (!menuOpen || id - A11Y_MENU >= menuLabels.size()) return false;
+                menuSel = id - A11Y_MENU;
+            } else if (id >= A11Y_CC) {
+                if (!ccOpen || id - A11Y_CC >= ControlCenter.COUNT) return false;
+                cc.selected = id - A11Y_CC;
+            } else if (id == A11Y_PILL) {
+                if (menuOpen || ccOpen) return false;
+                focusPill();
+            } else if (id != A11Y_PLAY || !(expanded || cardFocused)) {
+                return false;
+            }
+            kick();
+            a11y.sync();
+            return true;
+        }
+
+        @Override
+        public boolean click(int id) {
+            if (!focus(id)) return false;
+            if (id >= A11Y_MENU && id < A11Y_APP) activateMenu(); else select();
+            a11y.sync();
+            return true;
+        }
+
+        @Override
+        public float scale() {
+            return scale;
+        }
     }
 }

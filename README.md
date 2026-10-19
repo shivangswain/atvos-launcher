@@ -13,6 +13,10 @@ tvOS are trademarks of Apple Inc.
 - **One custom `View`.** It draws everything on a single canvas in 1920×1080 design units. The
   animations are interruptible exponential eases, and the view only redraws while something is
   moving. It runs at 60 fps on the TV's MT5896, with about 1 ms of UI-thread work per frame.
+- **Works with TalkBack.** The view gives screen readers a tree of virtual items (app tiles, the
+  clock pill, Control Center tiles with their states, menu options, Play) and moves their focus
+  with the remote's, so each item is read as it's reached. With no screen reader on, this costs a
+  single check per key press.
 - **Small, explained permission set.** Each permission is listed with its reason below. Only the
   launcher activity and the system-only device admin receiver are exported. Network access is
   HTTPS-only and used just for recommendation artwork and your Google profile photo.
@@ -218,6 +222,7 @@ adb uninstall app.atvos.launcher
 app/src/main/java/app/atvos/launcher/
   HomeActivity.java      lifecycle, background loading, launching apps and programs
   HomeView.java          all home-screen drawing, animation and remote input
+  A11y.java              the screen-reader tree for HomeView (TalkBack)
   ControlCenter.java     Control Center layout, focus and drawing
   Controls.java          what the Control Center tiles read and do
   Apps.java              launchable apps, tile artwork, order and hidden apps

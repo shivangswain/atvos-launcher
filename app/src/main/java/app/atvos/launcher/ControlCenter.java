@@ -32,7 +32,7 @@ final class ControlCenter {
 
     static final int PROFILE = 0, SETTINGS = 1, POWER = 2, WIFI = 3, DND = 4, BLUETOOTH = 5, SLEEP = 6,
             INPUTS = 7, ACCESSIBILITY = 8, SYSTEM = 9, SEARCH = 10;
-    private static final int COUNT = 11;
+    static final int COUNT = 11;
 
     // One grid, as on tvOS: circles as tall as the pills, two circles to a pill column.
     private static final float ROW_H = 92f, GAP = 20f, COL_W = 2 * ROW_H + GAP, TOP = 134f, SETTINGS_D = 50f;
@@ -49,7 +49,8 @@ final class ControlCenter {
     private final Drawable power, wifi, ethernet, moon, bluetooth, headphones, timer, input, accessibility,
             system, search, settings;
     private final String powerOff, wifiLabel, ethernetLabel, connected, notConnected, dndLabel,
-            bluetoothLabel, on, off, sleepTimerLabel, sleepLabel, minutes;
+            bluetoothLabel, on, off, sleepTimerLabel, sleepLabel, minutes, profileLabel, settingsLabel, inputsLabel,
+            accessibilityLabel, systemLabel, searchLabel;
 
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -108,6 +109,12 @@ final class ControlCenter {
         off = context.getString(R.string.off);
         sleepTimerLabel = context.getString(R.string.sleep_timer);
         sleepLabel = context.getString(R.string.sleep);
+        profileLabel = context.getString(R.string.a11y_profile);
+        settingsLabel = context.getString(R.string.a11y_settings);
+        inputsLabel = context.getString(R.string.a11y_inputs);
+        accessibilityLabel = context.getString(R.string.a11y_accessibility);
+        systemLabel = context.getString(R.string.a11y_system);
+        searchLabel = context.getString(R.string.a11y_search);
         minutes = context.getString(R.string.minutes);
 
         text.setTypeface(Typeface.create(Typeface.DEFAULT, 500, false));
@@ -197,6 +204,40 @@ final class ControlCenter {
         if (best < 0) return false;
         selected = best;
         return true;
+    }
+
+    /** Where a tile is, in design units. */
+    RectF bounds(int id) {
+        return rects[id];
+    }
+
+    /** A tile's name, as a screen reader says it. */
+    String label(int id) {
+        switch (id) {
+            case PROFILE: return profileLabel;
+            case SETTINGS: return settingsLabel;
+            case POWER: return powerOff;
+            case WIFI: return state.ethernet ? ethernetLabel : wifiLabel;
+            case DND: return dndLabel;
+            case BLUETOOTH: return bluetoothLabel;
+            case SLEEP: return sleepTimerLabel;
+            case INPUTS: return inputsLabel;
+            case ACCESSIBILITY: return accessibilityLabel;
+            case SYSTEM: return systemLabel;
+            default: return searchLabel;
+        }
+    }
+
+    /** A tile's state (Connected, On, 15 min…), or null for tiles that are just buttons. */
+    String state(int id) {
+        Controls.State s = state;
+        switch (id) {
+            case WIFI: return s.online ? connected : notConnected;
+            case DND: return s.dnd ? on : off;
+            case BLUETOOTH: return s.bluetoothDevice != null ? s.bluetoothDevice : s.bluetoothOn ? on : off;
+            case SLEEP: return s.sleepAt > 0 ? sleep2 : off;
+            default: return null;
+        }
     }
 
     /** Advances focus highlights; returns true while anything is still moving. */
