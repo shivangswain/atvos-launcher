@@ -43,7 +43,7 @@ import java.util.function.Consumer;
  * The profile picture in the clock pill: the Google account's profile photo, else its letter avatar
  * (what Google shows for accounts without one); files/avatar.png, if you push one, beats both. The
  * account is picked once with Android's own chooser.
- *
+ * <p>
  * Google gives profile photos only to apps it knows: this one needs an Android OAuth client in a
  * Google Cloud project (see README). Until then the token request fails and the letter stays. The
  * token is only ever sent to Google over HTTPS and never stored; the photo is cached privately and

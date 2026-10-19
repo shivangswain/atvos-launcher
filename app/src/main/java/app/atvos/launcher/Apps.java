@@ -33,13 +33,7 @@ import java.util.Set;
 final class Apps {
 
     /** Visible apps in display order, and hidden apps (shown greyed out while editing). */
-    static final class Layout {
-        final List<Entry> visible, hidden;
-
-        Layout(List<Entry> visible, List<Entry> hidden) {
-            this.visible = visible;
-            this.hidden = hidden;
-        }
+    record Layout(List<Entry> visible, List<Entry> hidden) {
     }
 
     /** One app tile. Art fields are immutable; animation fields belong to the UI thread. */
@@ -175,7 +169,7 @@ final class Apps {
         return i >= 0 ? i : PREFERRED.size();
     }
 
-    @SuppressWarnings("deprecation")
+    @SuppressWarnings("deprecation") // the int-flag overloads work on every version from Android 12
     private List<ResolveInfo> query(String category) {
         return pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(category), 0);
     }

@@ -136,7 +136,7 @@ final class Controls {
                 break;
             }
         }
-        if (next <= 0) {
+        if (next == 0) {
             SleepTimer.cancel(activity);
             return;
         }
@@ -193,7 +193,7 @@ final class Controls {
      * home-app role: on Google TV and Android TV the TV's own home declares a raised priority and
      * keeps the button even after atvOS is chosen in the dialog (checked on both, Android 12).
      */
-    @SuppressWarnings("deprecation") // int-flag overloads work on every version
+    @SuppressWarnings("deprecation") // the int-flag overloads work on every version from Android 12
     Setup setup() {
         Setup s = new Setup();
         PackageManager pm = activity.getPackageManager();
@@ -214,7 +214,7 @@ final class Controls {
         boolean chosen = roleAvailable && roles.isRoleHeld(RoleManager.ROLE_HOME);
         // The dialog only helps against an ordinary home app; a locked one wins regardless.
         s.canPickHome = !s.homeActive && s.lockedHomes.isEmpty() && !chosen
-                && (roleAvailable || resolves(Settings.ACTION_HOME_SETTINGS));
+                && (roleAvailable || hasHomeSettings());
         s.holdsPower = dpm.isAdminActive(admin);
         return s;
     }
@@ -237,8 +237,8 @@ final class Controls {
     }
 
     @SuppressWarnings("deprecation")
-    private boolean resolves(String action) {
-        return activity.getPackageManager().resolveActivity(new Intent(action), PackageManager.MATCH_DEFAULT_ONLY) != null;
+    private boolean hasHomeSettings() {
+        return activity.getPackageManager().resolveActivity(new Intent(Settings.ACTION_HOME_SETTINGS), PackageManager.MATCH_DEFAULT_ONLY) != null;
     }
 
     /** Opens a screen by intent action; false if this TV has nothing for it. */

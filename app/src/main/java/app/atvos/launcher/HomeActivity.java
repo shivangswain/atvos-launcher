@@ -153,7 +153,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
             runOnUiThread(() -> {
                 if (isDestroyed()) return;
                 if (layout != null) {
-                    if (view.setApps(layout.visible, layout.hidden)) current = all(layout.visible, layout.hidden);
+                    if (view.setApps(layout.visible(), layout.hidden())) current = all(layout.visible(), layout.hidden());
                     else appsDirty = true; // mid-edit: apply on the next refresh instead
                 }
                 updateBackdrop();
@@ -185,13 +185,12 @@ public final class HomeActivity extends Activity implements HomeView.Host {
             view.setBackdrop(cached);
             return;
         }
-        String k = key;
         io.execute(() -> {
-            if (!k.equals(wantedBackdrop)) return; // focus already moved on
-            Backdrops.Backdrop loaded = backdrops.load(k, program);
+            if (!key.equals(wantedBackdrop)) return; // focus already moved on
+            Backdrops.Backdrop loaded = backdrops.load(key, program);
             runOnUiThread(() -> {
-                if (loaded != null) backdrops.put(k, loaded);
-                if (k.equals(wantedBackdrop)) view.setBackdrop(loaded != null ? loaded : backdrops.cached(Backdrops.DEFAULT));
+                if (loaded != null) backdrops.put(key, loaded);
+                if (key.equals(wantedBackdrop)) view.setBackdrop(loaded != null ? loaded : backdrops.cached(Backdrops.DEFAULT));
             });
         });
     }
@@ -237,12 +236,12 @@ public final class HomeActivity extends Activity implements HomeView.Host {
      */
     @Override
     public void launchProgram(Recommendations.Item program, Rect from) {
-        if (getPackageName().equals(program.pkg)) return; // never aim another app's intent at ourselves
+        if (getPackageName().equals(program.pkg())) return; // never aim another app's intent at ourselves
         Intent intent;
         try {
-            intent = Intent.parseUri(program.intentUri, Intent.URI_INTENT_SCHEME);
+            intent = Intent.parseUri(program.intentUri(), Intent.URI_INTENT_SCHEME);
         } catch (URISyntaxException | RuntimeException e) { // malformed extras can throw too
-            Toast.makeText(this, getString(R.string.cannot_open, program.title), Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, getString(R.string.cannot_open, program.title()), Toast.LENGTH_SHORT).show();
             return;
         }
         intent.setSelector(null);
@@ -250,10 +249,10 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         intent.removeFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
         ComponentName target = intent.getComponent();
-        if (target != null && !target.getPackageName().equals(program.pkg)) intent.setComponent(null);
-        intent.setPackage(program.pkg);
+        if (target != null && !target.getPackageName().equals(program.pkg())) intent.setComponent(null);
+        intent.setPackage(program.pkg());
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        start(intent, zoomFrom(from), program.title);
+        start(intent, zoomFrom(from), program.title());
     }
 
     @Override
@@ -281,24 +280,51 @@ public final class HomeActivity extends Activity implements HomeView.Host {
 
     @Override
     public boolean control(int id) {
-        switch (id) {
-            case ControlCenter.PROFILE: profile.choose(); return false;
-            case ControlCenter.SETTINGS: controls.openSettings(Settings.ACTION_SETTINGS); return false;
-            case ControlCenter.POWER: controls.powerOff(); return false;
-            case ControlCenter.WIFI: controls.openSettings(Settings.ACTION_WIFI_SETTINGS); return false;
-            case ControlCenter.DND: controls.toggleDnd(); return true;
-            case ControlCenter.BLUETOOTH: controls.openSettings(Controls.ACCESSORIES); return false;
-            case ControlCenter.SLEEP: controls.cycleSleepTimer(); return true;
-            case ControlCenter.ACCESSIBILITY: controls.openSettings(Settings.ACTION_ACCESSIBILITY_SETTINGS); return false;
-            case ControlCenter.SYSTEM: controls.openSettings(Controls.SYSTEM); return false;
-            case ControlCenter.INPUTS:
-            case ControlCenter.SEARCH:
+        return switch (id) {
+            case ControlCenter.PROFILE -> {
+                profile.choose();
+                yield false;
+            }
+            case ControlCenter.SETTINGS -> {
+                controls.openSettings(Settings.ACTION_SETTINGS);
+                yield false;
+            }
+            case ControlCenter.POWER -> {
+                controls.powerOff();
+                yield false;
+            }
+            case ControlCenter.WIFI -> {
+                controls.openSettings(Settings.ACTION_WIFI_SETTINGS);
+                yield false;
+            }
+            case ControlCenter.DND -> {
+                controls.toggleDnd();
+                yield true;
+            }
+            case ControlCenter.BLUETOOTH -> {
+                controls.openSettings(Controls.ACCESSORIES);
+                yield false;
+            }
+            case ControlCenter.SLEEP -> {
+                controls.cycleSleepTimer();
+                yield true;
+            }
+            case ControlCenter.ACCESSIBILITY -> {
+                controls.openSettings(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+                yield false;
+            }
+            case ControlCenter.SYSTEM -> {
+                controls.openSettings(Controls.SYSTEM);
+                yield false;
+            }
+            case ControlCenter.INPUTS, ControlCenter.SEARCH -> {
                 if (!controls.open(id == ControlCenter.INPUTS ? Controls.INPUTS : Intent.ACTION_ASSIST)) {
                     Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
                 }
-                return false;
-            default: return true;
-        }
+                yield false;
+            }
+            default -> true;
+        };
     }
 
     @Override

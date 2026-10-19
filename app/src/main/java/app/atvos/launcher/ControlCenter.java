@@ -17,12 +17,13 @@ import java.util.Locale;
  * The tvOS-style Control Center: glass tiles that drop down under the status row. This class owns
  * the layout, focus movement and drawing; {@link HomeView} owns input routing and {@link Controls}
  * does the actual work.
- *
+ * <pre>
  *   9:41 AM               ☾ ⏱  (⚙) (S)
  *   [ Power ]  [ Wi-Fi     ]
  *   [  Off  ]  [ DND       ]
  *   [ Bluetooth ] [ Sleep  ]
  *   (In) (Acc) (System) (Find)
+ * </pre>
  */
 final class ControlCenter {
 
@@ -140,7 +141,7 @@ final class ControlCenter {
         wifi2 = fit(s.online ? connected : notConnected, LINE_2);
         bt1 = fit(bluetoothLabel, LINE_1);
         bt2 = fit(s.bluetoothDevice != null ? s.bluetoothDevice : s.bluetoothOn ? on : off, LINE_2);
-        String[] dnd = wrap(dndLabel, LINE_1, LINE_1);
+        String[] dnd = wrap(dndLabel, LINE_1);
         dnd1 = dnd[0];
         dnd2 = dnd[1];
         if (s.sleepAt > 0) {
@@ -148,7 +149,7 @@ final class ControlCenter {
             sleep2 = fit(String.format(Locale.getDefault(), minutes,
                     Math.max(1, (s.sleepAt - SystemClock.elapsedRealtime() + 59_999) / 60_000)), LINE_2);
         } else {
-            String[] timer = wrap(sleepTimerLabel, LINE_1, LINE_2);
+            String[] timer = wrap(sleepTimerLabel, LINE_2);
             sleep1 = timer[0];
             sleep2 = timer[1];
         }
@@ -159,16 +160,16 @@ final class ControlCenter {
      * that fits ("Do Not" / "Disturb"), so any language reads naturally. Text without spaces that
      * doesn't fit is shortened instead.
      */
-    private String[] wrap(String s, float size1, float size2) {
-        text.setTextSize(size1);
+    private String[] wrap(String s, float secondLineSize) {
+        text.setTextSize(LINE_1);
         if (text.measureText(s) <= TEXT_ROOM) return new String[]{s, ""};
         int cut = -1;
         for (int i = s.indexOf(' '); i > 0; i = s.indexOf(' ', i + 1)) {
             if (text.measureText(s, 0, i) > TEXT_ROOM) break;
             cut = i;
         }
-        if (cut < 0) return new String[]{fit(s, size1), ""};
-        return new String[]{s.substring(0, cut), fit(s.substring(cut + 1).trim(), size2)};
+        if (cut < 0) return new String[]{fit(s, LINE_1), ""};
+        return new String[]{s.substring(0, cut), fit(s.substring(cut + 1).trim(), secondLineSize)};
     }
 
     private String fit(String s, float size) {
@@ -213,31 +214,32 @@ final class ControlCenter {
 
     /** A tile's name, as a screen reader says it. */
     String label(int id) {
-        switch (id) {
-            case PROFILE: return profileLabel;
-            case SETTINGS: return settingsLabel;
-            case POWER: return powerOff;
-            case WIFI: return state.ethernet ? ethernetLabel : wifiLabel;
-            case DND: return dndLabel;
-            case BLUETOOTH: return bluetoothLabel;
-            case SLEEP: return sleepTimerLabel;
-            case INPUTS: return inputsLabel;
-            case ACCESSIBILITY: return accessibilityLabel;
-            case SYSTEM: return systemLabel;
-            default: return searchLabel;
-        }
+        return switch (id) {
+            case PROFILE -> profileLabel;
+            case SETTINGS -> settingsLabel;
+            case POWER -> powerOff;
+            case WIFI -> state.ethernet ? ethernetLabel : wifiLabel;
+            case DND -> dndLabel;
+            case BLUETOOTH -> bluetoothLabel;
+            case SLEEP -> sleepTimerLabel;
+            case INPUTS -> inputsLabel;
+            case ACCESSIBILITY -> accessibilityLabel;
+            case SYSTEM -> systemLabel;
+            default -> searchLabel;
+        };
     }
 
     /** A tile's state (Connected, On, 15 min…), or null for tiles that are just buttons. */
     String state(int id) {
         Controls.State s = state;
-        switch (id) {
-            case WIFI: return s.online ? connected : notConnected;
-            case DND: return s.dnd ? on : off;
-            case BLUETOOTH: return s.bluetoothDevice != null ? s.bluetoothDevice : s.bluetoothOn ? on : off;
-            case SLEEP: return s.sleepAt > 0 ? sleep2 : off;
-            default: return null;
-        }
+        return switch (id) {
+            case WIFI -> s.online ? connected : notConnected;
+            case DND -> s.dnd ? on : off;
+            case BLUETOOTH ->
+                    s.bluetoothDevice != null ? s.bluetoothDevice : s.bluetoothOn ? on : off;
+            case SLEEP -> s.sleepAt > 0 ? sleep2 : off;
+            default -> null;
+        };
     }
 
     /** Advances focus highlights; returns true while anything is still moving. */
@@ -260,7 +262,7 @@ final class ControlCenter {
     void draw(Canvas c, Glass glass, float appear, float ink) {
         int alpha = Math.round(255 * appear);
         if (alpha <= 0) return;
-        idleInk = blend(WHITE, DARK, ink);
+        idleInk = towardDark(WHITE, ink);
 
         // The profile avatar is drawn by the clock; when focused it gets a ring, as on tvOS.
         if (focus[PROFILE] > 0.01f) {
@@ -319,7 +321,7 @@ final class ControlCenter {
             fill.setColor(Color.argb(Math.round(alpha * f * 0.96f), 255, 255, 255));
             c.drawRoundRect(r, radius, radius, fill);
         }
-        int ink = blend(idleInk, DARK, f);
+        int ink = towardDark(idleInk, f);
         int iconColor = accent != 0 ? accent : ink;
 
         if (id == POWER) {
@@ -361,10 +363,11 @@ final class ControlCenter {
         d.draw(c);
     }
 
-    private static int blend(int a, int b, float t) {
+    /** {@code a} moved a fraction {@code t} of the way to the focused tiles' dark ink. */
+    private static int towardDark(int a, float t) {
         return Color.rgb(
-                Math.round(Color.red(a) + (Color.red(b) - Color.red(a)) * t),
-                Math.round(Color.green(a) + (Color.green(b) - Color.green(a)) * t),
-                Math.round(Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t));
+                Math.round(Color.red(a) + (Color.red(DARK) - Color.red(a)) * t),
+                Math.round(Color.green(a) + (Color.green(DARK) - Color.green(a)) * t),
+                Math.round(Color.blue(a) + (Color.blue(DARK) - Color.blue(a)) * t));
     }
 }

@@ -13,7 +13,7 @@ val keystore = rootProject.file("keystore.properties").takeIf { it.isFile }?.let
 
 android {
     namespace = "app.atvos.launcher"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "app.atvos.launcher"

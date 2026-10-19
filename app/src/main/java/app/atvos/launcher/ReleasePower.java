@@ -9,9 +9,9 @@ import android.widget.Toast;
 
 /**
  * Gives up the force-lock admin so atvOS Launcher can be uninstalled (Android TV has no screen for it):
- *
+ * <pre>
  *   adb shell am broadcast -n app.atvos.launcher/.ReleasePower
- *
+ * </pre>
  * The manifest only accepts senders holding DUMP, which the adb shell has and apps can't get.
  */
 public final class ReleasePower extends BroadcastReceiver {

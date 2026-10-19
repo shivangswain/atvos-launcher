@@ -19,26 +19,13 @@ import java.util.List;
  * would be a single blank node. This gives them a tree of virtual items instead (app tiles, the
  * clock pill, Control Center tiles, menu options, the Play button) and tells them which one has
  * focus as the remote moves it, so TalkBack reads each item as it's reached, as on any TV app.
- *
+ * <p>
  * Costs nothing while no accessibility service is on: {@link #sync} returns at once.
  */
 final class A11y extends AccessibilityNodeProvider {
 
     /** One focusable thing on screen. Bounds are in 1920-wide design units. */
-    static final class Item {
-        final int id;
-        final String label, state, hint;
-        final RectF bounds;
-        final boolean focused;
-
-        Item(int id, String label, String state, String hint, RectF bounds, boolean focused) {
-            this.id = id;
-            this.label = label;
-            this.state = state;
-            this.hint = hint;
-            this.bounds = bounds;
-            this.focused = focused;
-        }
+    record Item(int id, String label, String state, String hint, RectF bounds, boolean focused) {
     }
 
     /** What the home screen tells this class. */

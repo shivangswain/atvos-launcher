@@ -14,7 +14,7 @@ import java.util.Set;
  * What apps recommend on the TV home screen, read from the system TV provider: each app's
  * "Watch Next" entries and the programs in its preview channels. One landscape image per app is
  * kept, so the top shelf stays a still picture (preview videos are ignored).
- *
+ * <p>
  * READ_TV_LISTINGS lets a launcher read every app's searchable programs; the provider forbids
  * selections, so rows are filtered here.
  */
@@ -30,15 +30,7 @@ final class Recommendations {
     }
 
     /** One program to show behind the dock. */
-    static final class Item {
-        final String pkg, title, image, intentUri;
-
-        Item(String pkg, String title, String image, String intentUri) {
-            this.pkg = pkg;
-            this.title = title;
-            this.image = image;
-            this.intentUri = intentUri;
-        }
+    record Item(String pkg, String title, String image, String intentUri) {
     }
 
     // Columns shared by preview and Watch Next programs, in this order.

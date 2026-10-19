@@ -58,13 +58,13 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Full-screen backgrounds. Behind the dock, for the focused app, in order of preference:
- *
+ * <pre>
  *   the app's TV recommendation      see {@link Recommendations}, downloaded once and cached;
  *                                    under 720p it's shown as a card with its title instead
  *   the app's splash image           when its launch screen is a real picture of 720p or more
  *   the app's own logo               large, as tvOS does: its icon's artwork, or its banner's
  *                                    logo cut from its background, over a glow in its colour
- *
+ * </pre>
  * A built-in aurora covers the moment before apps load. Each backdrop is kept sharp at screen size
  * plus a tiny blurred copy for the glass and the grid's blur.
  */
@@ -153,7 +153,7 @@ final class Backdrops {
 
     // UI thread only. Backdrops are ~8 MB each (1080p), so keep just a few: fewer on low-RAM TVs.
     private final int cacheSize;
-    private final Map<String, Backdrop> cache = new LinkedHashMap<String, Backdrop>(8, 0.75f, true) {
+    private final Map<String, Backdrop> cache = new LinkedHashMap<>(8, 0.75f, true) {
         @Override
         protected boolean removeEldestEntry(Map.Entry<String, Backdrop> eldest) {
             return size() > cacheSize;
@@ -172,7 +172,7 @@ final class Backdrops {
         this.height = Math.max(1, Math.round(height * k));
         ActivityManager am = context.getSystemService(ActivityManager.class);
         this.cacheSize = am != null && am.isLowRamDevice() ? 3 : 6;
-        Bitmap aurora = aurora(640, 360);
+        Bitmap aurora = aurora();
         Bitmap blurred = blur(aurora);
         this.fallback = new Backdrop(toHardware(aurora), blurred, null);
     }
@@ -182,7 +182,7 @@ final class Backdrops {
         Recommendations.Found found = Recommendations.load(context, off(NO_WATCH_NEXT), off(NO_PREVIEWS));
         // Add what's on disk and drop what's gone, but never clear the set: a download finishing on
         // the net thread meanwhile must not be lost.
-        for (Recommendations.Item item : found.best.values()) if (cacheFile(item.image).isFile()) downloaded.add(item.image);
+        for (Recommendations.Item item : found.best.values()) if (cacheFile(item.image()).isFile()) downloaded.add(item.image());
         downloaded.removeIf(url -> !cacheFile(url).isFile());
         watchNext = found.watchNext;
         previews = found.previews;
@@ -222,11 +222,11 @@ final class Backdrops {
      */
     void prefetch(Runnable onReady) {
         for (Recommendations.Item item : recommended.values()) {
-            String url = item.image;
+            String url = item.image();
             if (downloaded.contains(url)) continue;
             Long failed = failedAt.get(url);
             if (failed != null && System.currentTimeMillis() - failed < RETRY_MS) continue;
-            if (fetch(url, item.pkg) != null) {
+            if (fetch(url, item.pkg()) != null) {
                 downloaded.add(url);
                 onReady.run();
             } else {
@@ -238,7 +238,7 @@ final class Backdrops {
         File[] cached = downloads.listFiles();
         if (cached != null && cached.length > MAX_CACHED) {
             Set<String> inUse = new HashSet<>();
-            for (Recommendations.Item item : recommended.values()) inUse.add(cacheFile(item.image).getName());
+            for (Recommendations.Item item : recommended.values()) inUse.add(cacheFile(item.image()).getName());
             long[] used = new long[cached.length];
             Integer[] order = new Integer[cached.length];
             for (int i = 0; i < cached.length; i++) {
@@ -256,7 +256,7 @@ final class Backdrops {
 
     private String shelfKey(String pkg) {
         Recommendations.Item item = recommended.get(pkg);
-        return item != null && downloaded.contains(item.image) ? REMOTE + item.image : null;
+        return item != null && downloaded.contains(item.image()) ? REMOTE + item.image() : null;
     }
 
     /** What sits behind the dock for an app: its top shelf, else its splash picture or logo. */
@@ -328,7 +328,7 @@ final class Backdrops {
      * name beside it, over a blurred, darkened copy of the picture.
      */
     private Backdrop poster(Bitmap src, Recommendations.Item program) {
-        String title = program != null ? program.title : null;
+        String title = program != null ? program.title() : null;
         Bitmap out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(out);
         float s = width / 1920f;
@@ -745,24 +745,19 @@ final class Backdrops {
         return out;
     }
 
-    /** Where a logo sits on its canvas, and how bright it is. */
-    private static final class Glyph {
+    /**
+     * Where a logo sits on its canvas, and how bright it is.
+     *
+     * @param bounds The visible pixels' bounds, as fractions of the canvas.
+     * @param aspect The canvas's width over its height.
+     * @param light  The visible pixels' mean luminance, 0–1.
+     */
+    private record Glyph(RectF bounds, float aspect, float light) {
         private static final int N = 216; // measuring size for icons
 
-        /** The visible pixels' bounds, as fractions of the canvas. */
-        final RectF bounds;
-        /** The canvas's width over its height. */
-        final float aspect;
-        /** The visible pixels' mean luminance, 0–1. */
-        final float light;
-
-        Glyph(RectF bounds, float aspect, float light) {
-            this.bounds = bounds;
-            this.aspect = aspect;
-            this.light = light;
-        }
-
-        /** An icon layer's logo, or null unless it's a stand-alone one covering at most {@code maxCover} of the canvas. */
+        /**
+         * An icon layer's logo, or null unless it's a stand-alone one covering at most {@code maxCover} of the canvas.
+         */
         static Glyph measure(Drawable fg, float maxCover) {
             Bitmap b = Bitmap.createBitmap(N, N, Bitmap.Config.ARGB_8888);
             fg.setBounds(0, 0, N, N);
@@ -774,7 +769,7 @@ final class Backdrops {
         }
 
         /**
-         * The logo in w×h pixels, or null if there's nothing there or it covers more than
+         * The logo in w×h pixels, or null if there's nothing there, or it covers more than
          * {@code maxCover} (a whole picture). With {@code noCards}, a large solid shape filling its
          * bounds is refused too: a logo with its own background.
          */
@@ -1066,17 +1061,19 @@ final class Backdrops {
         int[] px = new int[w * h], tmp = new int[w * h];
         small.getPixels(px, 0, w, 0, 0, w, h);
         for (int pass = 0; pass < 3; pass++) {
-            boxBlurTransposed(px, tmp, w, h, 3);
-            boxBlurTransposed(tmp, px, h, w, 3);
+            boxBlurTransposed(px, tmp, w, h);
+            boxBlurTransposed(tmp, px, h, w);
         }
         Bitmap out = small.isMutable() ? small : Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         out.setPixels(px, 0, w, 0, 0, w, h);
         return out;
     }
 
-    /** Box-blurs each row of {@code src} (w×h) with radius r, writing the result transposed into {@code dst} (h×w). */
-    private static void boxBlurTransposed(int[] src, int[] dst, int w, int h, int r) {
-        int div = 2 * r + 1;
+    private static final int BLUR_RADIUS = 3;
+
+    /** Box-blurs each row of {@code src} (w×h) by {@link #BLUR_RADIUS}, writing the result transposed into {@code dst} (h×w). */
+    private static void boxBlurTransposed(int[] src, int[] dst, int w, int h) {
+        int r = BLUR_RADIUS, div = 2 * r + 1;
         for (int y = 0; y < h; y++) {
             int row = y * w;
             int sa = 0, sr = 0, sg = 0, sb = 0;
@@ -1100,7 +1097,8 @@ final class Backdrops {
     }
 
     /** The built-in wallpaper: soft blue / violet / teal light over near-black, in the spirit of tvOS. */
-    private static Bitmap aurora(int w, int h) {
+    private static Bitmap aurora() {
+        int w = 640, h = 360; // small: it's blurred and drawn full screen anyway
         Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(b);
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);

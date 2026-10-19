@@ -428,18 +428,29 @@ final class HomeView extends View {
             return true;
         }
         if (ccOpen) {
-            switch (code) {
-                case KeyEvent.KEYCODE_DPAD_LEFT: ccMove(-1, 0); return true;
-                case KeyEvent.KEYCODE_DPAD_RIGHT: ccMove(1, 0); return true;
-                case KeyEvent.KEYCODE_DPAD_UP: ccMove(0, -1); return true;
-                case KeyEvent.KEYCODE_DPAD_DOWN: ccMove(0, 1); return true;
-                case KeyEvent.KEYCODE_BACK:
-                case KeyEvent.KEYCODE_MENU:
+            return switch (code) {
+                case KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    ccMove(-1, 0);
+                    yield true;
+                }
+                case KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    ccMove(1, 0);
+                    yield true;
+                }
+                case KeyEvent.KEYCODE_DPAD_UP -> {
+                    ccMove(0, -1);
+                    yield true;
+                }
+                case KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    ccMove(0, 1);
+                    yield true;
+                }
+                case KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_MENU -> {
                     closeControlCenter();
-                    return true;
-                default:
-                    return super.onKeyDown(code, e);
-            }
+                    yield true;
+                }
+                default -> super.onKeyDown(code, e);
+            };
         }
         if (pillFocused) {
             switch (code) {
@@ -658,11 +669,11 @@ final class HomeView extends View {
             return;
         }
         Recommendations.Item program = backdrop != null ? backdrop.program : null;
-        if ((expanded || cardFocused) && program != null && program.pkg.equals(e.pkg)) {
+        if ((expanded || cardFocused) && program != null && program.pkg().equals(e.pkg)) {
             // Play on the top shelf: what's shown (as on tvOS), zooming out of the Play button.
             Rect from = new Rect(Math.round(playRect.left * scale), Math.round(playRect.top * scale),
                     Math.round(playRect.right * scale), Math.round(playRect.bottom * scale));
-            if (program.intentUri != null) host.launchProgram(program, from); else host.launch(e, from);
+            if (program.intentUri() != null) host.launchProgram(program, from); else host.launch(e, from);
             setExpanded(false);
             cardFocused = false;
             return;
@@ -707,7 +718,7 @@ final class HomeView extends View {
     private int shelf() {
         Apps.Entry e = focused();
         Backdrops.Backdrop b = backdrop;
-        if (e == null || b == null || b.program == null || !inDock() || !b.program.pkg.equals(e.pkg)) return NO_SHELF;
+        if (e == null || b == null || b.program == null || !inDock() || !b.program.pkg().equals(e.pkg)) return NO_SHELF;
         return b.card != null ? CARD_SHELF : FULL_SHELF;
     }
 
@@ -723,7 +734,7 @@ final class HomeView extends View {
     private void finishEditing() {
         editing = false;
         host.saveLayout(new ArrayList<>(apps), new ArrayList<>(hidden));
-        // Dropped among the hidden apps: stay there. Otherwise Hidden folds away.
+        // Dropped among the hidden apps: stay there. Otherwise, Hidden folds away.
         showHidden = focus >= apps.size() && !hidden.isEmpty();
         if (focus >= total()) focus = Math.max(0, apps.size() - 1);
         focusChanged();
@@ -989,6 +1000,7 @@ final class HomeView extends View {
     }
 
     private float slotY(int i) {
+        // Whole rows: the integer division is the row number.
         if (i < apps.size()) return DOCK_ROW_Y + (i / COLS) * ROW_PITCH;
         return hiddenTop() + ((i - apps.size()) / COLS) * ROW_PITCH;
     }
@@ -1411,8 +1423,8 @@ final class HomeView extends View {
         // light over the dimmed grid, as on tvOS, and darker over a bright backdrop in the dock so
         // the white text still reads.
         r.set(left, top, left + w, top + h);
-        int tint = Color.argb(Math.round(0x8C + (0x30 - 0x8C) * away), blendChannel(0x1C, 255, away),
-                blendChannel(0x1C, 255, away), blendChannel(0x22, 255, away));
+        int tint = Color.argb(Math.round(0x8C + (0x30 - 0x8C) * away), towardWhite(0x1C, away),
+                towardWhite(0x1C, away), towardWhite(0x22, away));
         drawGlass(c, r, itemH / 2f + pad, 0f, tint, alpha);
 
         float pop = 10f, sy = top + pad + menuSelAnim * itemH;
@@ -1451,8 +1463,9 @@ final class HomeView extends View {
         }
     }
 
-    private static int blendChannel(int a, int b, float t) {
-        return Math.round(a + (b - a) * t);
+    /** A colour channel moved a fraction {@code t} of the way to white. */
+    private static int towardWhite(int a, float t) {
+        return Math.round(a + (255 - a) * t);
     }
 
     private static int blend(int a, int b, float t) {
@@ -1671,7 +1684,7 @@ final class HomeView extends View {
             }
             Recommendations.Item program = backdrop != null ? backdrop.program : null;
             if ((expanded || cardFocused) && program != null) {
-                out.add(new A11y.Item(A11Y_PLAY, c.getString(R.string.a11y_play, program.title == null ? "" : program.title),
+                out.add(new A11y.Item(A11Y_PLAY, c.getString(R.string.a11y_play, program.title() == null ? "" : program.title()),
                         null, null, new RectF(playRect), !pillFocused));
             }
             float offset = lift() - scroll - bounce;
@@ -1683,8 +1696,8 @@ final class HomeView extends View {
                 String hint = null;
                 if (current && editing) {
                     hint = c.getString(R.string.a11y_moving_hint);
-                } else if (current && shelf() != NO_SHELF && program != null && program.title != null) {
-                    hint = c.getString(R.string.a11y_shelf_hint, program.title);
+                } else if (current && shelf() != NO_SHELF && program != null && program.title() != null) {
+                    hint = c.getString(R.string.a11y_shelf_hint, program.title());
                 } else if (current && canRevealHidden()) {
                     hint = c.getString(R.string.a11y_reveal_hint);
                 }
