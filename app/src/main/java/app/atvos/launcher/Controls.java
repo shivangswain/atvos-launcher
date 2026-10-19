@@ -6,6 +6,7 @@ import android.app.AlarmManager;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.admin.DevicePolicyManager;
+import android.app.role.RoleManager;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothManager;
 import android.content.ActivityNotFoundException;
@@ -13,6 +14,8 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.net.ConnectivityManager;
@@ -38,6 +41,16 @@ final class Controls {
     static final String ACCESSORIES = "com.android.tv.settings.ACCESSORIES_CONNECTED_DEVICES";
     static final String SYSTEM = "com.android.tv.settings.DEVICES";
     static final String INPUTS = "com.android.tv.action.VIEW_INPUTS";
+    /** Google TV's own home screen: while it's on, it takes the Home button whatever app is chosen. */
+    static final String GOOGLE_TV_HOME = "com.google.android.apps.tv.launcherx";
+
+    /** How the TV's home screen is set up, for the Setup & Support sheet. */
+    static final class Setup {
+        boolean homeActive;   // the Home button opens atvOS Launcher
+        boolean googleTvHome; // Google TV's home screen is on, so it keeps the Home button
+        boolean canPickHome;  // atvOS isn't the chosen home app, and Android can ask for it
+        boolean holdsPower;   // the device admin is active
+    }
 
     private final Activity activity;
     private final SharedPreferences prefs;
@@ -169,6 +182,51 @@ final class Controls {
         SleepTimer.cancel(activity);
         dpm.removeActiveAdmin(admin);
         Toast.makeText(activity, R.string.power_released, Toast.LENGTH_LONG).show();
+    }
+
+    /**
+     * Reads the home-screen setup. Being Android's chosen home app isn't enough on Google TV: its
+     * home screen keeps the Home button until it's turned off (adb only), so that's checked too.
+     */
+    @SuppressWarnings("deprecation") // int-flag overloads work on every version
+    Setup setup() {
+        Setup s = new Setup();
+        PackageManager pm = activity.getPackageManager();
+        Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
+        for (ResolveInfo ri : pm.queryIntentActivities(home, 0)) {
+            if (GOOGLE_TV_HOME.equals(ri.activityInfo.packageName)) s.googleTvHome = true;
+        }
+        RoleManager roles = activity.getSystemService(RoleManager.class);
+        boolean roleAvailable = roles != null && roles.isRoleAvailable(RoleManager.ROLE_HOME);
+        boolean chosen = roleAvailable && roles.isRoleHeld(RoleManager.ROLE_HOME);
+        ResolveInfo current = pm.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY);
+        if (current != null && activity.getPackageName().equals(current.activityInfo.packageName)) chosen = true;
+        s.homeActive = chosen && !s.googleTvHome;
+        s.canPickHome = !chosen && (roleAvailable || resolves(Settings.ACTION_HOME_SETTINGS));
+        s.holdsPower = dpm.isAdminActive(admin);
+        return s;
+    }
+
+    /**
+     * Asks Android to make atvOS the home app: its "Default home app" dialog, else the Settings
+     * screen for it. False if this TV has neither.
+     */
+    boolean requestDefaultHome(int requestCode) {
+        RoleManager roles = activity.getSystemService(RoleManager.class);
+        if (roles != null && roles.isRoleAvailable(RoleManager.ROLE_HOME) && !roles.isRoleHeld(RoleManager.ROLE_HOME)) {
+            try {
+                activity.startActivityForResult(roles.createRequestRoleIntent(RoleManager.ROLE_HOME), requestCode);
+                return true;
+            } catch (ActivityNotFoundException | SecurityException ignored) {
+                // fall through to Settings
+            }
+        }
+        return open(Settings.ACTION_HOME_SETTINGS);
+    }
+
+    @SuppressWarnings("deprecation")
+    private boolean resolves(String action) {
+        return activity.getPackageManager().resolveActivity(new Intent(action), PackageManager.MATCH_DEFAULT_ONLY) != null;
     }
 
     /** Opens a screen by intent action; false if this TV has nothing for it. */

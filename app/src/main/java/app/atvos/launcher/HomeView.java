@@ -23,6 +23,7 @@ import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.os.SystemClock;
+import android.text.StaticLayout;
 import android.text.TextPaint;
 import android.text.TextUtils;
 import android.text.format.DateFormat;
@@ -63,6 +64,12 @@ final class HomeView extends View {
         boolean control(int id);
         /** Gives up power control (the device admin), so the app can be uninstalled. */
         void releasePower();
+        /** How the home screen is set up: system calls, so read when the sheet opens, not per frame. */
+        Controls.Setup setupState();
+        /** Asks Android to make this the home app. */
+        void requestDefaultHome();
+        /** The Setup & Support sheet closed; the first time, that ends first-run setup. */
+        void setupDone();
     }
 
     // Layout in design units, measured from the tvOS home screen.
@@ -123,7 +130,7 @@ final class HomeView extends View {
 
     // Screen readers: a tree of virtual items, since everything is drawn on this one view
     private final A11y a11y;
-    private static final int A11Y_PILL = 1, A11Y_PLAY = 2, A11Y_CC = 100, A11Y_MENU = 200, A11Y_APP = 1000;
+    private static final int A11Y_PILL = 1, A11Y_PLAY = 2, A11Y_CC = 100, A11Y_MENU = 200, A11Y_SETUP = 300, A11Y_APP = 1000;
 
     // Control Center (opened from the clock pill)
     private final ControlCenter cc;
@@ -138,9 +145,23 @@ final class HomeView extends View {
     private final List<Boolean> menuChecked = new ArrayList<>(); // a switch's state, null for other options
     private static final float MENU_ITEM_H = 68f, MENU_PAD = 8f;
     private final RectF menuBox = new RectF(); // where the menu was last drawn, for screen readers
-    private final Drawable editIcon, infoIcon, hideIcon, showIcon, onIcon, offIcon, playIcon;
+    private final Drawable editIcon, infoIcon, hideIcon, showIcon, onIcon, offIcon, playIcon, setupIcon;
     private int menuSel;
     private float menuWidth = 440f;
+
+    // Setup & Support sheet: on first run, and from any app's long-press menu
+    private static final float SHEET_W = 1040f, SHEET_PAD = 48f, SHEET_ROW_H = 64f, SHEET_ROW_GAP = 10f, BOX_PAD = 24f;
+    private boolean setupOpen, setupFirstRun;
+    private float setupAnim, setupSelAnim;
+    private int setupSel;
+    private Controls.Setup setup; // read when the sheet opens or comes back into view
+    private final List<String> setupRows = new ArrayList<>();
+    private final List<Runnable> setupActions = new ArrayList<>();
+    // Laid out (wrapped and shortened to fit, in any language) once per refresh, never per frame.
+    private String setupTitle = "", setupStatus = "", setupSummary = "";
+    private StaticLayout setupIntro, setupSteps, setupCommands, setupUndo;
+    private final TextPaint sheetText = new TextPaint(Paint.ANTI_ALIAS_FLAG), sheetCode = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final RectF setupButtons = new RectF(); // where the buttons were last drawn, for screen readers
 
     // Clock
     private String time = "";
@@ -153,7 +174,7 @@ final class HomeView extends View {
     private final LightingColorFilter[] dimFilters = new LightingColorFilter[26];
     private final Paint art = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint hiddenArt = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG); // greyscale
-    private final Paint headerText = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint headerText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Paint dashed = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint glass = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -164,7 +185,7 @@ final class HomeView extends View {
     private final Paint clockText = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint labelText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Paint hintText = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint menuText = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint menuText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Paint playText = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint cardPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint bottomScrim = new Paint();
@@ -189,6 +210,7 @@ final class HomeView extends View {
         hiddenTitle = context.getString(R.string.hidden);
         hiddenEmpty = context.getString(R.string.hidden_empty);
         editIcon = menuIcon(context, R.drawable.ic_tv);
+        setupIcon = menuIcon(context, R.drawable.ic_settings);
         infoIcon = menuIcon(context, R.drawable.ic_info);
         hideIcon = menuIcon(context, R.drawable.ic_hide);
         showIcon = menuIcon(context, R.drawable.ic_show);
@@ -213,6 +235,10 @@ final class HomeView extends View {
         playText.setTextSize(26f);
         playWidth = 26f + 30f + 10f + playText.measureText(playLabel) + 34f;
         headerText.setTypeface(semibold);
+        sheetText.setTypeface(medium);
+        sheetText.setTextSize(21f);
+        sheetCode.setTypeface(Typeface.MONOSPACE);
+        sheetCode.setTextSize(18f);
         headerText.setTextSize(30f);
         ColorMatrix grey = new ColorMatrix();
         grey.setSaturation(0f);
@@ -295,6 +321,7 @@ final class HomeView extends View {
 
     /** Home pressed while already home: back to the top row, everything closed. */
     void goHome() {
+        if (setupOpen) closeSetup();
         menuOpen = false;
         ccOpen = false;
         pillFocused = false;
@@ -382,6 +409,10 @@ final class HomeView extends View {
             idle = false;
             kick();
             if (isSelect(code) || isArrow(code) || code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_MENU) return true;
+        }
+        if (setupOpen) {
+            if (isSelect(code)) return true; // acts on release, like the menu
+            return setupKey(code) || super.onKeyDown(code, e);
         }
         if (menuOpen) {
             // Select acts on release (see onKeyUp): a held remote key repeats, and those repeats
@@ -480,7 +511,7 @@ final class HomeView extends View {
             host.releasePower();
             return true;
         }
-        if (isSelect(code) && !editing && !expanded && !cardFocused && !menuOpen && !pillFocused && !ccOpen) {
+        if (isSelect(code) && !editing && !expanded && !cardFocused && !menuOpen && !setupOpen && !pillFocused && !ccOpen) {
             longPressed = true;
             openMenu();
             return true;
@@ -491,7 +522,9 @@ final class HomeView extends View {
     @Override
     public boolean onKeyUp(int code, KeyEvent e) {
         if (isSelect(code)) {
-            if (menuOpen) {
+            if (setupOpen) {
+                if (!longPressed) activateSetup();
+            } else if (menuOpen) {
                 if (!longPressed) activateMenu(); // the release of the opening long press picks nothing
             } else if (e.isTracking() && !e.isCanceled() && !longPressed) {
                 select();
@@ -761,6 +794,7 @@ final class HomeView extends View {
         int sources = host.shelfSources(e);
         if ((sources & Recommendations.WATCH_NEXT) != 0) addSwitch(R.string.continue_watching, e, Recommendations.WATCH_NEXT);
         if ((sources & Recommendations.PREVIEWS) != 0) addSwitch(R.string.recommendations, e, Recommendations.PREVIEWS);
+        addMenu(R.string.setup_and_support, setupIcon, false, false, () -> openSetup(false));
         if (apps.size() > 1) addMenu(R.string.hide_app, hideIcon, true, false, () -> hide(e));
     }
 
@@ -794,6 +828,107 @@ final class HomeView extends View {
             menuOpen = false;
         }
         kick();
+    }
+
+    // ---- Setup & Support ---------------------------------------------------------------------
+
+    /** Opens the Setup & Support sheet: on first run, or from an app's long-press menu. */
+    void openSetup(boolean firstRun) {
+        menuOpen = false;
+        ccOpen = false;
+        pillFocused = false;
+        if (editing) finishEditing();
+        setupFirstRun = firstRun;
+        setupOpen = true;
+        setupSel = 0;
+        setupSelAnim = 0f;
+        refreshSetup();
+    }
+
+    /**
+     * Re-reads the TV's setup (on opening, and after Android's home picker, Settings or removing
+     * power control) and lays the sheet out again: the system calls and text layout happen here,
+     * so drawing it allocates and asks nothing.
+     */
+    void refreshSetup() {
+        if (!setupOpen) return;
+        setup = host.setupState();
+        layOutSetup();
+    }
+
+    /** Builds the sheet's buttons and text from {@link #setup}. */
+    private void layOutSetup() {
+        Context c = getContext();
+        setupRows.clear();
+        setupActions.clear();
+        if (setup.canPickHome) addSetupRow(R.string.setup_set_home, host::requestDefaultHome);
+        if (setup.holdsPower) addSetupRow(R.string.setup_release_power, () -> {
+            host.releasePower();
+            // Android removes a device admin asynchronously, so asking now would still say it's
+            // active: the button just goes.
+            setup.holdsPower = false;
+            layOutSetup();
+        });
+        addSetupRow(R.string.setup_continue, this::closeSetup);
+        setupSel = Math.min(setupSel, setupRows.size() - 1);
+
+        float width = SHEET_W - 2 * SHEET_PAD, inBox = width - 2 * BOX_PAD;
+        setupTitle = fit(c.getString(setupFirstRun ? R.string.setup_welcome : R.string.setup_and_support), headerText, width);
+        setupStatus = fit(c.getString(setup.homeActive ? R.string.setup_home_active
+                : setup.googleTvHome ? R.string.setup_home_google_tv : R.string.setup_home_other), sheetText, width - 24f);
+        String intro = c.getString(R.string.setup_intro);
+        setupIntro = wrap(intro, sheetText, width);
+        // Only Google TV needs the adb steps: elsewhere, Android's own home picker does it.
+        boolean guide = setup.googleTvHome;
+        String steps = c.getString(R.string.setup_google_tv_steps), commands = c.getString(R.string.setup_google_tv_commands),
+                undo = c.getString(R.string.setup_google_tv_undo);
+        setupSteps = guide ? wrap(steps, sheetText, inBox) : null;
+        setupCommands = guide ? wrap(commands, sheetCode, inBox) : null;
+        setupUndo = guide ? wrap(undo, sheetText, inBox) : null;
+        setupSummary = setupStatus + ". " + (guide ? steps + " " + commands + " " + undo : intro);
+        kick();
+        a11y.sync();
+    }
+
+    private void addSetupRow(int label, Runnable action) {
+        setupRows.add(fit(getContext().getString(label), menuText, SHEET_W - 2 * SHEET_PAD - 48f));
+        setupActions.add(action);
+    }
+
+    private void closeSetup() {
+        setupOpen = false;
+        host.setupDone();
+        kick();
+    }
+
+    private void activateSetup() {
+        playSoundEffect(SoundEffectConstants.CLICK);
+        setupActions.get(setupSel).run();
+        kick();
+    }
+
+    /** Keys while the sheet is open: up and down choose, back closes; false lets anything else through. */
+    private boolean setupKey(int code) {
+        if (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN) {
+            int dy = code == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1;
+            int to = Math.max(0, Math.min(setupRows.size() - 1, setupSel + dy));
+            if (to != setupSel) navSound(0, dy);
+            setupSel = to;
+        } else if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_MENU) {
+            closeSetup();
+        } else if (!isArrow(code)) {
+            return false;
+        }
+        kick();
+        return true;
+    }
+
+    private static String fit(String text, TextPaint paint, float width) {
+        return TextUtils.ellipsize(text, paint, width, TextUtils.TruncateAt.END).toString();
+    }
+
+    private static StaticLayout wrap(String text, TextPaint paint, float width) {
+        return StaticLayout.Builder.obtain(text, 0, text.length(), paint, Math.round(width)).setLineSpacing(4f, 1f).build();
     }
 
     private static Drawable menuIcon(Context c, int res) {
@@ -906,9 +1041,11 @@ final class HomeView extends View {
             }
         }
         menuSelAnim = ease(menuSelAnim, menuSel, 20f, dt, 0.002f);
-        boolean showHint = dock && !expanded && !cardFocused && !menuOpen && !editing && !pillFocused && shelf == FULL_SHELF;
+        boolean showHint = dock && !expanded && !cardFocused && !menuOpen && !setupOpen && !editing && !pillFocused && shelf == FULL_SHELF;
         hint = ease(hint, showHint ? 1f : 0f, 8f, dt, 0.002f);
         menuAnim = ease(menuAnim, menuOpen ? 1f : 0f, 18f, dt, 0.002f);
+        setupAnim = ease(setupAnim, setupOpen ? 1f : 0f, 16f, dt, 0.002f);
+        setupSelAnim = ease(setupSelAnim, setupSel, 20f, dt, 0.002f);
         pillAnim = ease(pillAnim, pillFocused ? 1f : 0f, 16f, dt, 0.002f);
         ccAnim = ease(ccAnim, ccOpen ? 1f : 0f, 14f, dt, 0.002f);
         if (ccAnim > 0f && cc.step(dt)) animating = true;
@@ -992,6 +1129,7 @@ final class HomeView extends View {
         drawClock(c);
         if (ccAnim > 0f) cc.draw(c, ccGlass, ccAnim, ccInk);
         if (menuAnim > 0f) drawMenu(c, offset);
+        if (setupAnim > 0f) drawSetup(c);
         c.restore();
 
         if (animating) postInvalidateOnAnimation();
@@ -1317,6 +1455,107 @@ final class HomeView extends View {
     }
 
     /**
+     * The Setup & Support sheet: frosted glass over the dimmed home screen saying whether atvOS is
+     * the home screen (on Google TV, with the adb steps that make it so), then capsule buttons with
+     * the white selection gliding between them, as in the long-press menu.
+     */
+    private void drawSetup(Canvas c) {
+        int alpha = Math.round(255 * setupAnim);
+        if (alpha <= 2 || setup == null) return;
+        c.drawColor(Color.argb(Math.round(150 * setupAnim), 0, 0, 0));
+        int rows = setupRows.size();
+        float boxH = setupSteps == null ? 0f
+                : BOX_PAD + setupSteps.getHeight() + 14f + setupCommands.getHeight() + 14f + setupUndo.getHeight() + BOX_PAD;
+        float h = SHEET_PAD + 48f + setupIntro.getHeight() + 22f + 28f + (boxH > 0f ? 24f + boxH : 0f)
+                + 34f + rows * SHEET_ROW_H + (rows - 1) * SHEET_ROW_GAP + SHEET_PAD;
+        float left = (W - SHEET_W) / 2f, top = Math.max(24f, (height - h) / 2f);
+        c.save();
+        float k = 0.94f + 0.06f * setupAnim;
+        c.scale(k, k, W / 2f, height / 2f);
+
+        r.set(left, top, left + SHEET_W, top + h);
+        if (shadowMask != null) {
+            float sx = r.width() * 0.12f, sh = r.height() * 0.16f;
+            r2.set(r.left - sx, r.top - sh + 24f, r.right + sx, r.bottom + sh + 24f);
+            shadow.setAlpha(Math.round(150 * setupAnim));
+            c.drawBitmap(shadowMask, null, r2, shadow);
+        }
+        drawGlass(c, r, 42f, 0f, 0x8C18181E, alpha);
+
+        float x = left + SHEET_PAD, y = top + SHEET_PAD, width = SHEET_W - 2 * SHEET_PAD;
+        headerText.setColor(Color.argb(alpha, 255, 255, 255));
+        c.drawText(setupTitle, x, y + 28f, headerText);
+        y += 48f;
+        sheetText.setColor(Color.argb(Math.round(alpha * 0.72f), 255, 255, 255));
+        drawLayout(c, setupIntro, x, y);
+        y += setupIntro.getHeight() + 22f;
+
+        // The status: a green or amber dot and what it means.
+        fill.setColor(setup.homeActive ? Color.argb(alpha, 0x30, 0xD1, 0x58) : Color.argb(alpha, 0xFF, 0x9F, 0x0A));
+        c.drawCircle(x + 7f, y + 13f, 7f, fill);
+        sheetText.setColor(Color.argb(alpha, 255, 255, 255));
+        c.drawText(setupStatus, x + 24f, y + 20f, sheetText);
+        y += 28f;
+
+        if (boxH > 0f) {
+            y += 24f;
+            r.set(x, y, x + width, y + boxH);
+            fill.setColor(Color.argb(Math.round(alpha * 0.28f), 0, 0, 0));
+            c.drawRoundRect(r, 24f, 24f, fill);
+            float bx = x + BOX_PAD, by = y + BOX_PAD;
+            sheetText.setColor(Color.argb(Math.round(alpha * 0.85f), 255, 255, 255));
+            drawLayout(c, setupSteps, bx, by);
+            by += setupSteps.getHeight() + 14f;
+            sheetCode.setColor(Color.argb(alpha, 0x64, 0xD2, 0xFF));
+            drawLayout(c, setupCommands, bx, by);
+            by += setupCommands.getHeight() + 14f;
+            sheetText.setColor(Color.argb(Math.round(alpha * 0.6f), 255, 255, 255));
+            drawLayout(c, setupUndo, bx, by);
+            y += boxH;
+        }
+
+        // The buttons: faint capsules, with the white selection gliding between them.
+        y += 34f;
+        setupButtons.set(x, y, x + width, y + rows * (SHEET_ROW_H + SHEET_ROW_GAP) - SHEET_ROW_GAP);
+        fill.setColor(Color.argb(Math.round(alpha * 0.12f), 255, 255, 255));
+        for (int i = 0; i < rows; i++) {
+            float by = y + i * (SHEET_ROW_H + SHEET_ROW_GAP);
+            r.set(x, by, x + width, by + SHEET_ROW_H);
+            c.drawRoundRect(r, SHEET_ROW_H / 2f, SHEET_ROW_H / 2f, fill);
+        }
+        float pop = 8f, sy = y + setupSelAnim * (SHEET_ROW_H + SHEET_ROW_GAP);
+        r.set(x - pop, sy - pop / 2f, x + width + pop, sy + SHEET_ROW_H + pop / 2f);
+        if (shadowMask != null) {
+            float sx = r.width() * 0.08f, sh = r.height() * 0.33f;
+            r2.set(r.left - sx, r.top - sh + 10f, r.right + sx, r.bottom + sh + 10f);
+            shadow.setAlpha(Math.round(130 * setupAnim));
+            c.drawBitmap(shadowMask, null, r2, shadow);
+        }
+        fill.setColor(Color.argb(Math.round(248 * setupAnim), 255, 255, 255));
+        c.drawRoundRect(r, r.height() / 2f, r.height() / 2f, fill);
+        menuText.setTextAlign(Paint.Align.CENTER);
+        for (int i = 0; i < rows; i++) {
+            float sel = Math.max(0f, 1f - Math.abs(setupSelAnim - i)), cy = y + i * (SHEET_ROW_H + SHEET_ROW_GAP) + SHEET_ROW_H / 2f;
+            menuText.setColor(blend(Color.WHITE, INK, sel));
+            menuText.setAlpha(alpha);
+            c.save();
+            float grow = 1f + 0.03f * sel;
+            c.scale(grow, grow, W / 2f, cy);
+            c.drawText(setupRows.get(i), W / 2f, cy + 9f, menuText);
+            c.restore();
+        }
+        menuText.setTextAlign(Paint.Align.LEFT);
+        c.restore();
+    }
+
+    private static void drawLayout(Canvas c, StaticLayout layout, float x, float y) {
+        c.save();
+        c.translate(x, y);
+        layout.draw(c);
+        c.restore();
+    }
+
+    /**
      * Down held on the last row: an arrow below it, encircled as the hold goes on; once the ring
      * closes, focus drops into the Hidden section.
      */
@@ -1392,6 +1631,14 @@ final class HomeView extends View {
         @Override
         public void items(List<A11y.Item> out) {
             Context c = getContext();
+            if (setupOpen) { // the sheet's buttons; the first also reads out what the sheet says
+                for (int i = 0; i < setupRows.size(); i++) {
+                    float top = setupButtons.top + i * (SHEET_ROW_H + SHEET_ROW_GAP);
+                    out.add(new A11y.Item(A11Y_SETUP + i, setupRows.get(i), null, i == 0 ? setupSummary : null,
+                            new RectF(setupButtons.left, top, setupButtons.right, top + SHEET_ROW_H), i == setupSel));
+                }
+                return;
+            }
             if (menuOpen) {
                 for (int i = 0; i < menuLabels.size(); i++) {
                     Boolean on = menuChecked.get(i);
@@ -1440,12 +1687,15 @@ final class HomeView extends View {
         public boolean focus(int id) {
             if (id >= A11Y_APP) {
                 int i = id - A11Y_APP;
-                if (menuOpen || ccOpen || i >= total()) return false;
+                if (setupOpen || menuOpen || ccOpen || i >= total()) return false;
                 pillFocused = false;
                 cardFocused = false;
                 if (expanded) setExpanded(false);
                 focus = i;
                 focusChanged();
+            } else if (id >= A11Y_SETUP) {
+                if (!setupOpen || id - A11Y_SETUP >= setupRows.size()) return false;
+                setupSel = id - A11Y_SETUP;
             } else if (id >= A11Y_MENU) {
                 if (!menuOpen || id - A11Y_MENU >= menuLabels.size()) return false;
                 menuSel = id - A11Y_MENU;
@@ -1453,7 +1703,7 @@ final class HomeView extends View {
                 if (!ccOpen || id - A11Y_CC >= ControlCenter.COUNT) return false;
                 cc.selected = id - A11Y_CC;
             } else if (id == A11Y_PILL) {
-                if (menuOpen || ccOpen) return false;
+                if (setupOpen || menuOpen || ccOpen) return false;
                 focusPill();
             } else if (id != A11Y_PLAY || !(expanded || cardFocused)) {
                 return false;
@@ -1466,7 +1716,9 @@ final class HomeView extends View {
         @Override
         public boolean click(int id) {
             if (!focus(id)) return false;
-            if (id >= A11Y_MENU && id < A11Y_APP) activateMenu(); else select();
+            if (id >= A11Y_SETUP && id < A11Y_APP) activateSetup();
+            else if (id >= A11Y_MENU && id < A11Y_APP) activateMenu();
+            else select();
             a11y.sync();
             return true;
         }

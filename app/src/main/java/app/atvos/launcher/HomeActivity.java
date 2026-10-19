@@ -31,8 +31,8 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     /** The one SharedPreferences file every part of the launcher keeps its settings in. */
     static final String PREFS = "home";
     private static final String TV_LISTINGS = "android.permission.READ_TV_LISTINGS";
-    private static final String KEY_ASKED = "asked_tv_listings";
-    private static final int REQUEST_LISTINGS = 8;
+    private static final String KEY_ASKED = "asked_tv_listings", KEY_SET_UP = "set_up";
+    private static final int REQUEST_LISTINGS = 8, REQUEST_HOME = 9;
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final ExecutorService net = Executors.newSingleThreadExecutor(); // recommendation prefetch
@@ -81,7 +81,13 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         changes.addDataScheme("package");
         registerReceiver(packages, changes); // protected system broadcasts only, so no export flag needed
 
-        // Ask once for app recommendations; without it the top shelf just uses your own images.
+        // First run: the Setup & Support sheet, then (as it closes) the recommendations prompt.
+        if (getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_SET_UP, false)) askForListings();
+        else view.openSetup(true);
+    }
+
+    /** Asks once for app recommendations; without them the top shelf shows apps' own art. */
+    private void askForListings() {
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         if (checkSelfPermission(TV_LISTINGS) != PackageManager.PERMISSION_GRANTED && !prefs.getBoolean(KEY_ASKED, false)) {
             prefs.edit().putBoolean(KEY_ASKED, true).apply();
@@ -101,6 +107,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         refresh();
         profile.refresh(view::setAvatar); // at most once a day
         view.setClockRunning(true);
+        view.refreshSetup(); // back from Android's home picker or Settings
     }
 
     @Override
@@ -120,6 +127,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == Profile.REQUEST_ACCOUNT) profile.onActivityResult(resultCode, data, view::setAvatar);
+        if (requestCode == REQUEST_HOME) view.refreshSetup();
     }
 
     @Override
@@ -295,6 +303,26 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     @Override
     public void releasePower() {
         controls.releasePower();
+    }
+
+    @Override
+    public Controls.Setup setupState() {
+        return controls.setup();
+    }
+
+    @Override
+    public void requestDefaultHome() {
+        if (!controls.requestDefaultHome(REQUEST_HOME)) {
+            Toast.makeText(this, R.string.setup_home_unavailable, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    public void setupDone() {
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (prefs.getBoolean(KEY_SET_UP, false)) return;
+        prefs.edit().putBoolean(KEY_SET_UP, true).apply();
+        askForListings();
     }
 
     private Bundle zoomFrom(Rect from) {

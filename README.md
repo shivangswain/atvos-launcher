@@ -27,12 +27,24 @@ tvOS are trademarks of Apple Inc.
 | --- | --- |
 | D-pad | Move focus. Down from the dock fills the screen with your apps, the top row just under the clock. |
 | Select | Open the app (it zooms out of its icon). |
-| Hold select (or Menu) | Opens the menu beside the icon: **Edit Home Screen**, **App Info**, switches for the app's **Continue Watching** and **Recommendations** (when it has them), and **Hide App** (**Unhide App** for a hidden app). The selected option pops out of the menu. |
+| Hold select (or Menu) | Opens the menu beside the icon: **Edit Home Screen**, **App Info**, switches for the app's **Continue Watching** and **Recommendations** (when it has them), **Setup & Support**, and **Hide App** (**Unhide App** for a hidden app). The selected option pops out of the menu. |
 | Edit Home Screen | The app is picked up and wiggles. The arrows move it; select (or Back) drops it there and ends the edit. |
 | Hold Down on the last row | An arrow appears under the row and a ring fills round it; when it closes, focus drops into the greyed-out **Hidden** apps. |
 | Up on the dock | On a full-screen top shelf: the dock slides down to peek in at the bottom and a **Play** button appears. On a small one's card: the card is selected, with **Play** under its title. Select plays what's shown; Down or Back returns. |
 | Up again (or Up when there's no top shelf) | Focuses the clock pill. Select opens the **Control Center**. |
 | Back / Home | Returns to the dock row. |
+
+### Setup & Support
+
+On first run, a sheet says whether atvOS Launcher is the home screen and how to make it so. It
+opens again from **Setup & Support** in any app's long-press menu.
+
+- **Android TV:** **Set as Default Home App** opens Android's own home-app dialog.
+- **Google TV:** its own home screen keeps the Home button whichever app is chosen, until it's
+  turned off with adb, so the sheet shows the steps and the commands (see Installing below).
+- **Remove Power Control** appears while the app holds the device admin, so it can be uninstalled.
+
+Closing the sheet the first time brings up the prompt for app recommendations.
 
 ### Hiding and unhiding apps
 

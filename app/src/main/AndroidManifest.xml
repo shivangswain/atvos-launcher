@@ -19,7 +19,7 @@
          grants it once, in Settings > Apps > Special app access > Alarms & reminders. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
-    <!-- Package visibility: apps that can be launched from a home screen, and the TV provider. -->
+    <!-- Package visibility: apps that can be launched from a home screen, home apps, and the TV provider. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -28,6 +28,11 @@
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <!-- Home apps: to tell whether Google TV's own home screen is still on. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
         </intent>
         <provider android:authorities="android.media.tv" />
     </queries>
