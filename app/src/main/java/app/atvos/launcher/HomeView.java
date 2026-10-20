@@ -98,6 +98,8 @@ final class HomeView extends View {
         /** Settings > Time Format: the clock in 24-hour time (by default, as the TV has it). */
         boolean use24Hour();
         void setUse24Hour(boolean on);
+        /** An app just moved to Hidden: a toast on how to get back to it. */
+        void showHiddenHint();
         /** Settings > Support: opens {@link SettingsScreen#WEBSITE}, {@link SettingsScreen#STORE} or {@link SettingsScreen#APP_INFO}. */
         boolean openFromSettings(int what);
         /** Whether the TV has an app for it (many TVs have no web browser). */
@@ -157,17 +159,13 @@ final class HomeView extends View {
             PAGER_DOTS_H = 26f, PAGER_DOTS_BOTTOM = 24f;
     private static final long PAGER_SHOWN_MS = 1600;
     // A row shelf (programs under Full HD), laid out as tvOS lays out a Continue Watching row
-    private static final float ROW_X = 90f, ROW_TOP = 180.5f, ROW_STEP = 900f, ROW_FOCUS_SCALE = 1.048f,
+    private static final float ROW_X = 90f, ROW_TOP = 180.5f, ROW_GAP = 60f, ROW_FOCUS_SCALE = 1.048f,
             ROW_HEADER_Y = 157f, ROW_HEADER_LIFT = 21f, ROW_BAR_INSET = 41f, ROW_BAR_BOTTOM = 28f, ROW_BAR_H = 6f;
     // A focused card's title too long for it scrolls in place, as tvOS's does (measured): a second
     // after focus arrives, at 45 units a second, a copy following 44 units behind, both edges faded,
     // then two seconds' rest at the start each time round.
     private static final float MARQUEE_SPEED = 45f, MARQUEE_GAP = 44f, MARQUEE_FADE = 24f;
     private static final long MARQUEE_DELAY_MS = 1000, MARQUEE_REST_MS = 2000;
-    // After an app moves to Hidden, a note at the bottom right says how to get back to it: a pill
-    // the clock pill's height, as far from the bottom right corner as the clock is from the top right.
-    private static final long TOAST_MS = 4000;
-    private static final float TOAST_PAD = 24f, TOAST_KEY = 30f, TOAST_KEY_GAP = 9f; // the Down key's icon, and the space either side
     // The full-screen shelf's details at the bottom left: title, a line of facts, the description, Play
     private static final float DETAILS_X = 92f, DETAILS_W = 820f, DETAILS_BOTTOM = 104f;
     /** What the focused app's top shelf is: nothing, a full-screen picture, or a smaller one on a card. */
@@ -197,18 +195,13 @@ final class HomeView extends View {
     private float[] rowFocus = new float[0]; // each card's focus, easing
     private String[] rowHeaders = new String[0]; // the section title over each card that starts one, else null
     private float[] rowHeaderWidths = new float[0];
+    private float[] rowLefts = new float[0]; // each card's left edge before scrolling: cards are 16:9 or square
     private String[] rowTitles = new String[0]; // each card's title
     private float[] rowTitleWidths = new float[0];
     private int marqueeCard = -1;  // the focused card whose title is too long for it, scrolling
     private long marqueeSince;     // when focus came to it
     private float marqueeOffset;   // how far its title has scrolled
     private final Runnable marqueeWake = this::kick; // the end of a rest: scroll again
-    private boolean toastShown;    // "Long press ↓…", after an app moved to Hidden
-    private float toastAnim, toastWidth;
-    private final Runnable hideToast = () -> {
-        toastShown = false;
-        kick();
-    };
     private List<Backdrops.Card> rowCards = Collections.emptyList(); // the row shown
     // The full-screen shelf's details, laid out when the program shown changes (not per frame)
     private Recommendations.Item detailsFor;
@@ -320,7 +313,7 @@ final class HomeView extends View {
     private final TextPaint detailsTitleText = new TextPaint(Paint.ANTI_ALIAS_FLAG), detailsLineText = new TextPaint(Paint.ANTI_ALIAS_FLAG),
             detailsBodyText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Paint detailsScrim = new Paint();
-    private final TextPaint rowMarqueeText = new TextPaint(Paint.ANTI_ALIAS_FLAG), toastText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint rowMarqueeText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Path playTriangle = new Path();
     private final Paint cardPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     // Darker at the bottom for the dock, at the top for the clock. (Multiplying them into the
@@ -328,14 +321,15 @@ final class HomeView extends View {
     // shader loses the fast path. Plain passes it is.)
     private final Paint bottomScrim = new Paint();
     private final Paint topScrim = new Paint();
-    private final LinearGradient rimGradient, sheenGradient, marqueeFade;
-    private final Path chevron = new Path(), hintChevron = new Path(), pagerChevron = new Path(), downChevron = new Path();
+    private final LinearGradient rimGradient, sheenGradient;
+    private LinearGradient marqueeFade;  // the edges' fade, made for the focused card's width
+    private float marqueeFadeFor;
+    private final Path chevron = new Path(), hintChevron = new Path(), pagerChevron = new Path();
     private final RectF r = new RectF(), r2 = new RectF(), playRect = new RectF();
     private final Matrix m = new Matrix();
     private Bitmap defaultAvatar, avatar, shadowMask;
 
     private final String fullScreenHint, hiddenTitle, hiddenEmpty, playLabel;
-    private final String toastBefore, toastAfter, toastSpoken; // either side of the Down key's icon, and as read aloud
 
     HomeView(Context context, Host host) {
         super(context);
@@ -347,11 +341,6 @@ final class HomeView extends View {
         playLabel = context.getString(R.string.play);
         hiddenTitle = context.getString(R.string.hidden);
         hiddenEmpty = context.getString(R.string.hidden_empty);
-        String toast = context.getString(R.string.hidden_toast), key = "%1$s";
-        int at = Math.max(0, toast.indexOf(key));
-        toastBefore = toast.substring(0, at).trim();
-        toastAfter = toast.indexOf(key) < 0 ? "" : toast.substring(at + key.length()).trim();
-        toastSpoken = context.getString(R.string.hidden_toast, context.getString(R.string.a11y_down));
         editIcon = menuIcon(context, R.drawable.ic_tv);
         newFolderIcon = menuIcon(context, R.drawable.ic_add_circle);
         deleteIcon = menuIcon(context, R.drawable.ic_remove_circle);
@@ -392,13 +381,6 @@ final class HomeView extends View {
         rowTitleText.setTextAlign(Paint.Align.CENTER);
         rowMarqueeText.setTypeface(medium);
         rowMarqueeText.setTextSize(28f);
-        float edge = MARQUEE_FADE / (Backdrops.ROW_CARD_W * ROW_FOCUS_SCALE); // across a focused card, 0 to 1
-        marqueeFade = new LinearGradient(0, 0, 1, 0, new int[]{0x00FFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x00FFFFFF},
-                new float[]{0f, edge, 1f - edge, 1f}, Shader.TileMode.CLAMP);
-        rowMarqueeText.setShader(marqueeFade);
-        toastText.setTypeface(medium);
-        toastText.setTextSize(26f);
-        toastText.setColor(Color.WHITE);
         detailsTitleText.setTypeface(Typeface.create(Typeface.DEFAULT, 800, false));
         detailsTitleText.setTextSize(64f);
         detailsLineText.setTypeface(semibold);
@@ -444,9 +426,6 @@ final class HomeView extends View {
         hintChevron.moveTo(-24.5f, 4f); // tvOS's: wide and shallow
         hintChevron.lineTo(0f, -4f);
         hintChevron.lineTo(24.5f, 4f);
-        downChevron.moveTo(-6f, -3f);
-        downChevron.lineTo(0f, 3f);
-        downChevron.lineTo(6f, -3f);
         pagerChevron.moveTo(-5f, -10f); // pointing right; mirrored for left
         pagerChevron.lineTo(5f, 0f);
         pagerChevron.lineTo(-5f, 10f);
@@ -583,6 +562,8 @@ final class HomeView extends View {
         rowFocus = new float[cards.size()];
         rowHeaders = new String[cards.size()];
         rowHeaderWidths = new float[cards.size()];
+        rowLefts = new float[cards.size()];
+        for (int i = 0, n = cards.size(); i < n; i++) rowLefts[i] = i == 0 ? ROW_X : rowLefts[i - 1] + cards.get(i - 1).width() + ROW_GAP;
         int at = 0;
         for (int i = 0; i < cards.size(); i++) {
             Recommendations.Item item = cards.get(i).item();
@@ -601,8 +582,8 @@ final class HomeView extends View {
             rowTitles[i] = title == null ? "" : title.replace('\n', ' ');
             rowTitleWidths[i] = rowTitleText.measureText(rowTitles[i]);
         }
-        marqueeCard = -1;
         if (!same) {
+            marqueeCard = -1; // more cards arriving for the same row leave a scrolling title alone
             rowIndex = 0;
             rowScroll = 0f;
         } else {
@@ -694,7 +675,6 @@ final class HomeView extends View {
         removeCallbacks(tick);
         removeCallbacks(hidePager);
         removeCallbacks(marqueeWake);
-        removeCallbacks(hideToast);
         super.onDetachedFromWindow();
     }
 
@@ -1155,14 +1135,13 @@ final class HomeView extends View {
         }
         // Dropped among the hidden apps: stay there. Otherwise, Hidden folds away.
         showHidden = focus >= apps.size() && !hidden.isEmpty();
-        if (showHidden && !editFromHidden) showHiddenToast();
+        if (showHidden && !editFromHidden) host.showHiddenHint();
         if (focus >= total()) focus = Math.max(0, apps.size() - 1);
         focusChanged();
     }
 
     /** Held Down long enough on the last row: drop into the Hidden section with a little bounce. */
     private void revealHidden() {
-        toastShown = false;
         downHeld = false;
         swallowDown = true;
         showHidden = true;
@@ -1375,7 +1354,7 @@ final class HomeView extends View {
         detach(e);
         hidden.add(e);
         saveLayout();
-        showHiddenToast();
+        host.showHiddenHint();
         if (folder != null) {
             if (!apps.contains(folder)) {
                 openFolder = null; // that was its last app
@@ -1424,6 +1403,8 @@ final class HomeView extends View {
         menuSelAnim = 0f;
         subOf = -1;
         subAnim = 0f;
+        menuBox.setEmpty(); // placed when first drawn: till then screen readers wait (see A11y.drawn)
+        subBox.setEmpty();
         menuOpen = true;
         kick();
     }
@@ -1502,6 +1483,7 @@ final class HomeView extends View {
         subOf = subFrom = menuSel;
         subSel = 0;
         subSelAnim = 0f;
+        subBox.setEmpty();
         kick();
     }
 
@@ -1574,6 +1556,7 @@ final class HomeView extends View {
         alertEntry = e;
         alertSel = 0;
         alertSelAnim = 0f;
+        alertBox.setEmpty();
         float inner = ALERT_W - 2 * ALERT_PAD;
         alertTitle = fit(getContext().getString(R.string.delete_title, e.label), titleText, inner);
         String message = getContext().getString(R.string.delete_message);
@@ -1747,9 +1730,9 @@ final class HomeView extends View {
             rowFocus[i] = ease(rowFocus[i], rowFocused && i == rowIndex && !pillFocused && !ccOpen ? 1f : 0f, 14f, dt, 0.002f);
         }
         // tvOS keeps the focused card in the second place (the first, for the first card).
-        if (rowFocused) rowScroll = ease(rowScroll, Math.max(0, rowIndex - 1) * ROW_STEP, 10f, dt, 0.2f);
+        // (and finishes getting there after focus goes back down to the dock)
+        if (rowIndex < rowLefts.length) rowScroll = ease(rowScroll, rowLefts[Math.max(0, rowIndex - 1)] - ROW_X, 10f, dt, 0.2f);
         stepMarquee();
-        toastAnim = ease(toastAnim, toastShown && !settingsOpen && !setupOpen ? 1f : 0f, 10f, dt, 0.002f);
         boolean pager = expanded && pagerShown && pages.size() > 1 && !pillFocused && !ccOpen && !menuOpen && !setupOpen;
         pagerAnim = ease(pagerAnim, pager ? 1f : 0f, pager ? 14f : 5f, dt, 0.002f); // fades away slowly
         editAnim = ease(editAnim, editing || showHidden ? 1f : 0f, 10f, dt, 0.002f);
@@ -1839,7 +1822,7 @@ final class HomeView extends View {
      */
     private void stepMarquee() {
         int card = rowFocused && !pillFocused && !ccOpen && rowIndex < rowTitles.length
-                && rowTitleWidths[rowIndex] > Backdrops.ROW_CARD_W * ROW_FOCUS_SCALE ? rowIndex : -1;
+                && rowTitleWidths[rowIndex] > rowCards.get(rowIndex).width() * ROW_FOCUS_SCALE ? rowIndex : -1;
         long now = SystemClock.uptimeMillis();
         if (card != marqueeCard) {
             marqueeCard = card;
@@ -1936,7 +1919,6 @@ final class HomeView extends View {
         if (folderAnim > 0f) drawFolder(c);
         if (menuAnim > 0f) drawMenu(c);
         if (alertAnim > 0f) drawAlert(c);
-        if (toastAnim > 0.01f) drawToast(c);
         if (setupAnim > 0f) setupFlow.draw(c, ccGlass, setupAnim, height);
         if (settingsAnim > 0f) settings.draw(c, settingsAnim, height);
         c.restore();
@@ -2283,14 +2265,14 @@ final class HomeView extends View {
 
     /** Where card {@code i} of the row is, scaled by {@code k} about its centre (before the dock's offset). */
     private RectF rowCardRect(int i, float k, RectF out) {
-        float x = ROW_X + i * ROW_STEP - rowScroll, w = Backdrops.ROW_CARD_W, h = Backdrops.ROW_CARD_H;
+        float x = rowLefts[i] - rowScroll, w = rowCards.get(i).width(), h = Backdrops.ROW_CARD_H;
         float cx = x + w / 2f, cy = ROW_TOP + h / 2f;
         out.set(cx - w * k / 2f, cy - h * k / 2f, cx + w * k / 2f, cy + h * k / 2f);
         return out;
     }
 
     /**
-     * The row shelf, as tvOS draws a Continue Watching row: 16:9 cards over the plain background,
+     * The row shelf, as tvOS draws a Continue Watching row: 16:9 (or square) cards over the plain background,
      * each section's title above its first card (held at the left while its cards scroll by), a
      * progress bar on what's partly watched, and the focused card a little larger with its title
      * under it. It moves up with the dock as focus goes into the grid.
@@ -2307,10 +2289,10 @@ final class HomeView extends View {
         rowHeaderText.setAlpha(alpha);
         for (int i = 0; i < rowCards.size(); i++) {
             if (rowHeaders[i] == null) continue;
-            float x = Math.max(ROW_X + 2f, ROW_X + 2f + i * ROW_STEP - rowScroll);
+            float x = Math.max(ROW_X + 2f, rowLefts[i] + 2f - rowScroll);
             for (int j = i + 1; j < rowCards.size(); j++) {
                 if (rowHeaders[j] == null) continue;
-                x = Math.min(x, ROW_X + j * ROW_STEP - rowScroll - rowHeaderWidths[i] - 48f); // the next section pushes it off
+                x = Math.min(x, rowLefts[j] - rowScroll - rowHeaderWidths[i] - 48f); // the next section pushes it off
                 break;
             }
             if (x + rowHeaderWidths[i] > 0f && x < W) c.drawText(rowHeaders[i], x, headerY, rowHeaderText);
@@ -2325,10 +2307,12 @@ final class HomeView extends View {
         float f = rowFocus[i];
         RectF rect = rowCardRect(i, 1f + (ROW_FOCUS_SCALE - 1f) * f, r);
         if (rect.right < 0f || rect.left > W) return;
-        float k = rect.width() / Backdrops.ROW_CARD_W;
+        float k = rect.height() / Backdrops.ROW_CARD_H; // by height: a square card's bar and corners match a wide one's
         if (f > 0.01f && shadowMask != null) { // the focused card lifts on a soft drop shadow
-            float pad = SHADOW_PAD * rect.width() / (TILE_W * FOCUS_SCALE), dy = SHADOW_DY * 2f * f;
-            r2.set(rect.left - pad, rect.top - pad + dy, rect.right + pad, rect.bottom + pad + dy);
+            // The mask's soft edge is sized for a focused tile, so scale it to the card on each axis.
+            float padX = SHADOW_PAD * rect.width() / (TILE_W * FOCUS_SCALE), padY = SHADOW_PAD * rect.height() / (TILE_H * FOCUS_SCALE);
+            float dy = SHADOW_DY * 2f * f;
+            r2.set(rect.left - padX, rect.top - padY + dy, rect.right + padX, rect.bottom + padY + dy);
             shadow.setAlpha(Math.round(alpha * (light ? 0.55f : 0.85f) * f));
             c.drawBitmap(shadowMask, null, r2, shadow);
         }
@@ -2363,6 +2347,7 @@ final class HomeView extends View {
                 c.drawText(rowTitles[i], rect.centerX(), y, rowTitleText);
             } else { // too long: from the card's left edge, faded out at its right, and scrolling while focused
                 float off = i == marqueeCard ? marqueeOffset : 0f;
+                fitMarqueeFade(card.width() * ROW_FOCUS_SCALE);
                 float left = rect.left - MARQUEE_FADE * (1f - Math.min(1f, off / MARQUEE_FADE)); // the left fade, once moving
                 m.setScale(rect.right - left, 1f);
                 m.postTranslate(left, 0f);
@@ -2376,40 +2361,14 @@ final class HomeView extends View {
         }
     }
 
-    /** "Long press (⌄) to enter the Hidden section", on glass at the bottom right, after an app moves there. */
-    @SuppressWarnings("deprecation") // announceForAccessibility: a passing note has no node to be a live region of
-    private void showHiddenToast() {
-        toastShown = true;
-        toastWidth = 2 * TOAST_PAD + toastText.measureText(toastBefore) + TOAST_KEY_GAP + TOAST_KEY + TOAST_KEY_GAP
-                + toastText.measureText(toastAfter);
-        removeCallbacks(hideToast);
-        postDelayed(hideToast, TOAST_MS);
-        announceForAccessibility(toastSpoken);
-        kick();
-    }
-
-    private void drawToast(Canvas c) {
-        int alpha = Math.round(255 * toastAnim);
-        float bottom = height - CLOCK_TOP + 16f * (1f - toastAnim);
-        r.set(EDGE - toastWidth, bottom - CLOCK_H, EDGE, bottom);
-        drawGlass(c, r, CLOCK_H / 2f, 0f, 0x8C1C1C22, alpha);
-        float x = r.left + TOAST_PAD, cy = r.centerY();
-        toastText.setAlpha(alpha);
-        c.drawText(toastBefore, x, cy + 9f, toastText);
-        x += toastText.measureText(toastBefore) + TOAST_KEY_GAP;
-        // The remote's Down key: a chevron in a ring
-        stroke.setColor(Color.WHITE);
-        stroke.setAlpha(alpha);
-        stroke.setStrokeWidth(2.2f);
-        c.drawCircle(x + TOAST_KEY / 2f, cy, TOAST_KEY / 2f - 1.1f, stroke);
-        stroke.setStrokeWidth(2.6f);
-        c.save();
-        c.translate(x + TOAST_KEY / 2f, cy + 1.5f);
-        c.drawPath(downChevron, stroke);
-        c.restore();
-        stroke.setStrokeWidth(3f);
-        x += TOAST_KEY + TOAST_KEY_GAP;
-        c.drawText(toastAfter, x, cy + 9f, toastText);
+    /** The marquee's edge fades, MARQUEE_FADE wide across a focused card this wide: made again only when that changes (wide, square). */
+    private void fitMarqueeFade(float width) {
+        if (width == marqueeFadeFor) return;
+        float edge = MARQUEE_FADE / width; // across the card, 0 to 1
+        marqueeFade = new LinearGradient(0, 0, 1, 0, new int[]{0x00FFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x00FFFFFF},
+                new float[]{0f, edge, 1f - edge, 1f}, Shader.TileMode.CLAMP);
+        rowMarqueeText.setShader(marqueeFade);
+        marqueeFadeFor = width;
     }
 
     /** The full-screen shelf's details, laid out for the program shown (once per program, not per frame). */
@@ -2742,7 +2701,7 @@ final class HomeView extends View {
                     float bx = alertBox.left + ALERT_PAD + i * (bw + 20f);
                     out.add(new A11y.Item(A11Y_ALERT + i, i == 0 ? cancelLabel : deleteLabel, null,
                             i == 0 ? alertTitle + " " + alertMessage.getText() : null,
-                            new RectF(bx, by, bx + bw, by + ALERT_BUTTON_H), i == alertSel));
+                            alertBox.isEmpty() ? new RectF() : new RectF(bx, by, bx + bw, by + ALERT_BUTTON_H), i == alertSel));
                 }
                 return;
             }

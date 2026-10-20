@@ -236,16 +236,19 @@ final class Controls {
         // The dialog only helps against an ordinary home app; a locked one wins regardless.
         s.canPickHome = !s.homeActive && s.lockedHomes.isEmpty() && !chosen
                 && (roleAvailable || hasHomeSettings());
-        s.disabledHomes.addAll(disabled());
-        // And any of the TV's own home apps still turned off for this user, saved or not (the
-        // launcher's data cleared since, say), so Restore can always bring the TV's home back.
+        // The home apps self-setup turned off, and any of the TV's own still turned off for this user
+        // (the launcher's data cleared since, say), so Restore can always bring the TV's home back.
+        // Only those still installed and still off: Restore stops at the first it can't turn on.
+        Set<String> candidates = disabled();
         for (ResolveInfo ri : pm.queryIntentActivities(home, PackageManager.MATCH_DISABLED_COMPONENTS | PackageManager.MATCH_SYSTEM_ONLY)) {
-            String pkg = ri.activityInfo.packageName;
-            if (self.equals(pkg) || NEVER_DISABLE.contains(pkg) || s.disabledHomes.contains(pkg)) continue;
+            candidates.add(ri.activityInfo.packageName);
+        }
+        for (String pkg : candidates) {
+            if (self.equals(pkg) || NEVER_DISABLE.contains(pkg)) continue;
             try {
                 if (pm.getApplicationEnabledSetting(pkg) == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER) s.disabledHomes.add(pkg);
             } catch (IllegalArgumentException ignored) {
-                // gone meanwhile
+                // uninstalled since
             }
         }
         s.adbOn = adbEnabled();

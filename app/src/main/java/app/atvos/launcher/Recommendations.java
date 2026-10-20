@@ -123,7 +123,7 @@ final class Recommendations {
                 try { // one app's odd row mustn't cost every other app theirs
                     if (dismissed(c)) continue;
                     String pkg = c.getString(PKG);
-                    if (pkg == null || landscapeImage(c) == null) continue;
+                    if (pkg == null || cardImage(c) == null) continue;
                     found.watchNext.add(pkg);
                     if (noWatchNext.contains(pkg)) continue;
                     Item item = item(context, c, null);
@@ -142,7 +142,7 @@ final class Recommendations {
                 try { // as above
                     if (dismissed(c)) continue;
                     String pkg = c.getString(PKG);
-                    if (pkg == null || landscapeImage(c) == null) continue;
+                    if (pkg == null || cardImage(c) == null) continue;
                     found.previews.add(pkg);
                     if (noPreviews.contains(pkg)) continue;
                     long channel = c.isNull(ORDER_A) ? Long.MAX_VALUE : c.getLong(ORDER_A);
@@ -186,7 +186,7 @@ final class Recommendations {
 
     private static Item item(Context context, Cursor c, String section) {
         String pkg = c.getString(PKG), title = c.getString(TITLE);
-        String image = landscapeImage(c);
+        String image = cardImage(c);
         if (pkg == null || image == null) return null;
         String description = text(c, SHORT_DESCRIPTION);
         if (description == null) description = text(c, LONG_DESCRIPTION);
@@ -251,8 +251,11 @@ final class Recommendations {
         return out.toString();
     }
 
-    /** A wide image (16:9, 3:2 or 4:3), else one of unknown shape; portrait posters don't work as backdrops. */
-    private static String landscapeImage(Cursor c) {
+    /**
+     * A wide image (16:9, 3:2 or 4:3), else a square one (music and podcasts: a square card in the
+     * row), else one of unknown shape; portrait posters work as neither backdrop nor card.
+     */
+    private static String cardImage(Cursor c) {
         String thumb = c.getString(THUMB), poster = c.getString(POSTER);
         // Some apps write "" rather than leaving a column empty.
         if (thumb != null && thumb.isEmpty()) thumb = null;
@@ -261,6 +264,8 @@ final class Recommendations {
         int posterRatio = c.isNull(POSTER_RATIO) ? -1 : c.getInt(POSTER_RATIO);
         if (thumb != null && isLandscape(thumbRatio)) return thumb;
         if (poster != null && isLandscape(posterRatio)) return poster;
+        if (thumb != null && thumbRatio == TvContract.PreviewPrograms.ASPECT_RATIO_1_1) return thumb;
+        if (poster != null && posterRatio == TvContract.PreviewPrograms.ASPECT_RATIO_1_1) return poster;
         if (thumb != null && thumbRatio == -1) return thumb;
         if (poster != null && posterRatio == -1) return poster;
         return null;

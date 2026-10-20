@@ -348,7 +348,7 @@ final class ControlCenter {
             text.setAlpha(alpha);
             c.drawText(powerOff, r.centerX(), r.bottom - 34f * grow, text);
         } else if (line1 == null) {
-            float size = bare ? cogSize * grow : r.height() * 0.46f;
+            float size = bare ? (id == LAUNCHER_SETTINGS ? cogSize - 1f : cogSize) * grow : r.height() * 0.46f; // the switches a point smaller
             drawIcon(c, icon, r.centerX() - size / 2f, r.centerY() - size / 2f, size, iconColor, alpha);
         } else {
             float size = 36f * grow, x = r.left + 24f * grow;

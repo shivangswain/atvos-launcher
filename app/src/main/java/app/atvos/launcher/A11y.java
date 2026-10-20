@@ -92,6 +92,12 @@ final class A11y extends AccessibilityNodeProvider {
         // TalkBack's item went (a menu opened over it, say): don't let a later item with its id
         // claim TalkBack's focus.
         if (!a11yFocusShown) a11yFocusedId = View.NO_ID;
+        // Not drawn yet (a menu just opened): say nothing, not even that the screen changed, until
+        // it has a place to point to; drawn() comes back then and tells it all.
+        if (focused != null && focused.bounds.isEmpty()) {
+            recheck = true;
+            return;
+        }
         if (!ids.toString().equals(layout)) {
             layout = ids.toString();
             focusedId = View.NO_ID; // a new screen: say where focus is on it, even at the same id
@@ -100,10 +106,6 @@ final class A11y extends AccessibilityNodeProvider {
         }
         if (focused == null) {
             focusedId = View.NO_ID;
-            return;
-        }
-        if (focused.bounds.isEmpty()) { // not drawn yet: tell TalkBack once it has somewhere to point
-            recheck = true;
             return;
         }
         String text = focused.label + '|' + focused.state + '|' + focused.hint;

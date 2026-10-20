@@ -139,11 +139,11 @@ final class Backdrops {
 
     static final String DEFAULT = "default";
     /**
-     * One card in a row: its program, and its picture cropped to 16:9 at the card's size with its
-     * corners already rounded, so it's drawn as a plain bitmap (a hardware bitmap in a shader is
-     * twice as slow on the TV's Mali).
+     * One card in a row: its program, its picture cropped to the card (16:9, or square for square
+     * art) at the card's size with its corners already rounded, so it's drawn as a plain bitmap (a
+     * hardware bitmap in a shader is twice as slow on the TV's Mali), and its width in design units.
      */
-    record Card(Recommendations.Item item, Bitmap picture) {
+    record Card(Recommendations.Item item, Bitmap picture, float width) {
     }
 
     /** A row's cards, in 1920-wide design units (tvOS's), and the row's background. */
@@ -374,9 +374,12 @@ final class Backdrops {
         chosen.put(pkg, item.image());
     }
 
-    /** 1080p, give or take 5%: enough to fill the screen sharply. */
+    /**
+     * 1080p, give or take 5%, and wide (4:3 or wider): enough to fill the screen sharply. A big
+     * square picture (album art) makes a square card instead of a cropped backdrop.
+     */
     private static boolean fullHd(int w, int h) {
-        return w >= 1824 && h >= 1026;
+        return w >= 1824 && h >= 1026 && w * 10L >= h * 13L;
     }
 
     /**
@@ -387,7 +390,8 @@ final class Backdrops {
         Recommendations.Item item = current(pkg);
         if (item == null || !downloaded.contains(item.image())) return null;
         if (!Boolean.FALSE.equals(hd.get(item.image()))) return REMOTE + item.image();
-        return ROW + pkg + "#" + rowItems(pkg).size() + (prefs.getBoolean(HomeActivity.KEY_LIGHT, false) ? "L" : "D");
+        // What's in the row, not just how much: new programs, progress or titles at the same count build it afresh.
+        return ROW + pkg + "#" + rowItems(pkg).hashCode() + (prefs.getBoolean(HomeActivity.KEY_LIGHT, false) ? "L" : "D");
     }
 
     /** The app's programs on disk, in order: a row's cards. */
@@ -461,12 +465,13 @@ final class Backdrops {
 
     /**
      * For pictures under Full HD, which would look soft stretched across the screen: the app's
-     * programs as a row of 16:9 cards over a plain dark background, as tvOS shows a Continue
-     * Watching row. The cards are drawn (and focused) by the home screen.
+     * programs as a row of cards over a plain dark background, as tvOS shows a Continue Watching
+     * row. Wide pictures make 16:9 cards; square ones (album and podcast art) square cards of the
+     * same height, as tvOS sizes its square items. The cards are drawn (and focused) by the home screen.
      */
     private Backdrop row(String pkg) {
         float s = width / 1920f;
-        int cw = Math.round(ROW_CARD_W * s), ch = Math.round(ROW_CARD_H * s);
+        int ch = Math.round(ROW_CARD_H * s);
         List<Card> cards = new ArrayList<>();
         for (Recommendations.Item item : rowItems(pkg)) {
             File file = cacheFile(item.image());
@@ -474,6 +479,10 @@ final class Backdrops {
             bounds.inJustDecodeBounds = true;
             BitmapFactory.decodeFile(file.getPath(), bounds);
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) continue;
+            // Square-ish (or taller): a square card; wider: 16:9, cropped from 4:3 or 3:2.
+            boolean square = bounds.outWidth * 4L < bounds.outHeight * 5L;
+            float design = square ? ROW_CARD_H : ROW_CARD_W;
+            int cw = Math.round(design * s);
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inSampleSize = 1;
             while (bounds.outWidth / (opts.inSampleSize * 2) >= cw && bounds.outHeight / (opts.inSampleSize * 2) >= ch) {
@@ -481,14 +490,14 @@ final class Backdrops {
             }
             Bitmap src = BitmapFactory.decodeFile(file.getPath(), opts);
             if (src == null) continue;
-            Bitmap crop = cover(src, cw, ch); // centre-cropped to 16:9, which also drops letterbox bars
+            Bitmap crop = cover(src, cw, ch); // centre-cropped to the card, which also drops letterbox bars
             if (crop != src) src.recycle();
             Bitmap card = Bitmap.createBitmap(cw, ch, Bitmap.Config.ARGB_8888);
             Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
             p.setShader(new BitmapShader(crop, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
             new Canvas(card).drawRoundRect(0, 0, cw, ch, ROW_CARD_R * s, ROW_CARD_R * s, p);
             crop.recycle();
-            cards.add(new Card(item, toHardware(card)));
+            cards.add(new Card(item, toHardware(card), design));
         }
         if (cards.isEmpty()) return null;
         Bitmap plain = Bitmap.createBitmap(16, 9, Bitmap.Config.ARGB_8888);

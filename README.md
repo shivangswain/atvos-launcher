@@ -92,8 +92,8 @@ Settings > Support is opened, until Settings closes.
 greyed out in a **Hidden** section below your apps, which stays out of the way until you hold Down
 on the last row of apps. In there, a hidden app's **Move to… > Home Screen** brings it back, or use
 **Edit Home Screen** to move it back up among your apps. Moving an app down into Hidden while editing
-hides it. Each time an app is hidden, a note on glass at the bottom right says how to get back to it:
-"Long press ↓ to enter the Hidden section". Up out of the section (or Back) folds it away again. The
+hides it. Each time an app is hidden, a toast says how to get back to it, beside an icon of the
+remote's Down key: "Long press to enter the hidden apps section". Up out of the section (or Back) folds it away again. The
 order, folders and hidden apps are saved on the TV.
 
 ### Folders and deleting apps
@@ -128,7 +128,8 @@ image is on disk, so a slow or missing network never blocks the UI. Local `conte
   app does. With more than one page, round arrows at the sides and page dots at the bottom show
   for a moment, then fade. Select plays what's shown.
 - **Smaller images**, such as YouTube thumbnails, would look soft stretched, so the app's programs
-  are shown as tvOS shows a Continue Watching row: 16:9 cards over a plain dark background, each
+  are shown as tvOS shows a Continue Watching row: 16:9 cards over a plain dark background (square
+  ones, the same height, for square art such as Spotify's podcasts and albums), each
   section titled "Continue Watching" (Watch Next) or "Recommended" (its preview channels), with a progress
   bar on anything partly watched. Up focuses the first card, which grows on a drop shadow with the
   same glass rim as the dock and the clock pill, and shows its title. A title too long for the card starts at its left edge, faded out at the right, and after a

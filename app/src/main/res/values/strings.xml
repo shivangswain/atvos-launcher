@@ -17,9 +17,8 @@
     <string name="delete">Delete</string>
     <string name="hidden">Hidden</string>
     <string name="hidden_empty">Move apps here to hide them</string>
-    <!-- Shown for a moment after an app is moved to Hidden: how to get back to it. %1$s is where the
-         remote's Down key is drawn (a chevron in a circle); screen readers say a11y_down there. -->
-    <string name="hidden_toast">Long press %1$s to enter the Hidden section</string>
+    <!-- A toast after an app is moved to Hidden, beside an icon of the remote's Down key: how to get back to it. -->
+    <string name="hidden_toast">Long press to enter the hidden apps section</string>
     <string name="continue_watching">Continue Watching</string>
     <string name="recommendations">Recommended</string>
     <string name="play">Play</string>
@@ -167,7 +166,6 @@
     <string name="remaining_m">%dm</string>
     <string name="a11y_shelf_hint">Press up to see %s</string>
     <string name="a11y_hidden">Hidden</string>
-    <string name="a11y_down">Down</string>
     <string name="a11y_moving">Moving</string>
     <string name="a11y_moving_hint">Use the arrows to move it, then press select to drop it</string>
     <string name="a11y_reveal_hint">Hold down to show hidden apps</string>

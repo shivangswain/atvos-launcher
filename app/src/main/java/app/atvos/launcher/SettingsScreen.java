@@ -465,9 +465,10 @@ final class SettingsScreen {
         if (busy || sel < 0 || sel >= rows.size()) return;
         Row row = rows.get(sel);
         if (row.action() == null || !row.enabled()) return;
+        int was = page;
         host.sound(SoundEffectConstants.CLICK);
         row.action().run();
-        if (!busy) build(); // the values follow (a new page has built itself)
+        if (!busy && page == was) build(); // the values follow (a new page has built itself)
         host.changed();
     }
 

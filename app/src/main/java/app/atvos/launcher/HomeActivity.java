@@ -10,8 +10,12 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
+import android.graphics.Color;
 import android.graphics.Rect;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.Editable;
@@ -20,12 +24,17 @@ import android.text.InputFilter;
 import android.text.InputType;
 import android.text.TextWatcher;
 import android.util.DisplayMetrics;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import java.net.URISyntaxException;
@@ -50,6 +59,12 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     /** Settings > Time Format: 24-hour (true) or 12-hour; unset follows the TV. */
     private static final String KEY_24_HOUR = "time_24_hour";
     private static final String WEBSITE = "https://atvos.tv";
+    /**
+     * The system toast's colours on Android TV and Google TV, measured: a dark surface with light
+     * text up to Android 15 (darker on 12 and 13), a light one with dark text from Android 16.
+     */
+    private static final int TOAST_FILL = Build.VERSION.SDK_INT >= 36 ? 0xFFEEEDF4 : Build.VERSION.SDK_INT >= 34 ? 0xFF2F3036 : 0xFF191C1E;
+    private static final int TOAST_INK = Build.VERSION.SDK_INT >= 36 ? 0xFF1B1B21 : 0xFFE4E2E6;
     /** Android TV's stand-ins for apps a TV doesn't have (a browser): they only say there's no app. */
     private static final String NO_APP_STUBS = "com.android.tv.frameworkpackagestubs";
     private static final int REQUEST_LISTINGS = 8, REQUEST_HOME = 9;
@@ -69,6 +84,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     private boolean homeInstance;      // started by the Home button (else opened like an app)
     private EditText input;            // takes the TV keyboard's typing for the view (a folder's name)
     private HomeView.TextEdit textEdit; // ...while it's open
+    private Toast hiddenHint;          // the last "Long press…" toast, so a new one replaces it
 
     // UI thread
     private List<Apps.Entry> current = Collections.emptyList();
@@ -590,6 +606,41 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     public void setUse24Hour(boolean on) {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_24_HOUR, on).apply();
         view.timeFormatChanged();
+    }
+
+    /**
+     * After an app moves to Hidden: a toast with the remote's Down key as its icon. A text toast
+     * would carry the app's own icon (Android 12+ draws those itself), so this one has its own
+     * view, in the system toast's looks; screen readers read it as they do any toast.
+     */
+    @Override
+    @SuppressWarnings("deprecation") // setView: still shown for the app in front, as Home always is when this runs
+    public void showHiddenHint() {
+        if (hiddenHint != null) hiddenHint.cancel();
+        float dp = getResources().getDisplayMetrics().density;
+        LinearLayout view = new LinearLayout(this);
+        view.setOrientation(LinearLayout.HORIZONTAL);
+        view.setGravity(Gravity.CENTER_VERTICAL);
+        view.setPadding(Math.round(16 * dp), Math.round(12 * dp), Math.round(20 * dp), Math.round(12 * dp));
+        GradientDrawable frame = new GradientDrawable();
+        frame.setColor(TOAST_FILL);
+        frame.setCornerRadius(100 * dp); // a pill, as the system's is
+        view.setBackground(frame);
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(R.drawable.ic_down_circle);
+        icon.setImageTintList(ColorStateList.valueOf(TOAST_INK));
+        view.addView(icon, new LinearLayout.LayoutParams(Math.round(24 * dp), Math.round(24 * dp)));
+        TextView text = new TextView(this);
+        text.setText(R.string.hidden_toast);
+        text.setTextColor(TOAST_INK);
+        text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        gap.setMarginStart(Math.round(12 * dp));
+        view.addView(text, gap);
+        hiddenHint = new Toast(this);
+        hiddenHint.setView(view);
+        hiddenHint.setDuration(Toast.LENGTH_LONG);
+        hiddenHint.show();
     }
 
     /** Settings > Support: atvOS's website, its page on Google Play, or Android's App Info for it. */
