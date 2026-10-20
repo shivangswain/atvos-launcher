@@ -13,7 +13,9 @@ tvOS are trademarks of Apple Inc.
   stdlib (see [Building](#building)). The release APK is about 380 KB.
 - **One custom `View`.** It draws everything on a single canvas in 1920×1080 design units. The
   animations are interruptible exponential eases, and the view only redraws while something is
-  moving. It runs at 60 fps on the TV's MT5896, with about 1 ms of UI-thread work per frame.
+  moving. It runs at 60 fps on the TV's MT5896, with about 1 ms of UI-thread work per frame. The
+  backdrops come with their scrims already applied and the glass is a single filtered pass, so most frames
+  take the GPU 8–10 ms; a crossfade between two backdrops takes about 22 ms.
 - **Works with TalkBack.** The view gives screen readers a tree of virtual items (app tiles, the
   clock pill, Control Center tiles with their states, menu options, Play) and moves their focus
   with the remote's, so each item is read as it's reached. With no screen reader on, this costs a

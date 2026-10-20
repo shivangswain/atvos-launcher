@@ -19,8 +19,10 @@ import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.RadialGradient;
+import android.graphics.RecordingCanvas;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.RenderNode;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
@@ -98,6 +100,8 @@ final class HomeView extends View {
         /** Settings > Time Format: the clock in 24-hour time (by default, as the TV has it). */
         boolean use24Hour();
         void setUse24Hour(boolean on);
+        /** The full-screen top shelf went up or down: show its pictures without (or with) the dock's scrims. */
+        void setFullScreen(boolean on);
         /** An app just moved to Hidden: a toast on how to get back to it. */
         void showHiddenHint();
         /** Settings > Support: opens {@link SettingsScreen#WEBSITE}, {@link SettingsScreen#STORE} or {@link SettingsScreen#APP_INFO}. */
@@ -292,7 +296,7 @@ final class HomeView extends View {
     private final Paint backdropPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
     // Behind an open folder: the blurred backdrop, darkened as it's drawn.
     private final Paint folderBlur = new Paint(Paint.FILTER_BITMAP_FLAG);
-    private final LightingColorFilter[] dimFilters = new LightingColorFilter[26];
+    private final LightingColorFilter[] dimFilters = new LightingColorFilter[256]; // by alpha, made as needed
     private final Paint art = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint hiddenArt = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG); // greyscale
     private final TextPaint headerText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
@@ -316,11 +320,22 @@ final class HomeView extends View {
     private final TextPaint rowMarqueeText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Path playTriangle = new Path();
     private final Paint cardPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-    // Darker at the bottom for the dock, at the top for the clock. (Multiplying them into the
-    // backdrop in one shader pass measured twice as slow on Mali: a hardware bitmap in a compose
-    // shader loses the fast path. Plain passes it is.)
-    private final Paint bottomScrim = new Paint();
-    private final Paint topScrim = new Paint();
+    // The glass: one pass per shape, its tint and the dim folded into the blur's colour matrix
+    // (cached per tint and dim level); while backdrops crossfade, their blurs mixed on the CPU into
+    // one small bitmap, so the glass is one pass then too.
+    private final int[] glassTints = new int[32], glassDims = new int[32];
+    private final ColorFilter[] glassFilters = new ColorFilter[32];
+    private int glassFilterNext;
+    private Bitmap mixedBlur;
+    private android.graphics.BitmapShader mixedShader;
+    private int[] mixedPixels = new int[0];
+    private Backdrops.Backdrop mixedFrom, mixedTo;
+    private int mixedLevel = -1;
+    // The home screen frozen into a layer under the Control Center (see drawFrozenHome), and a
+    // fingerprint of everything it shows, to tell when it moved and must be drawn again.
+    private RenderNode homeNode;
+    private final Paint homePaint = new Paint();
+    private double homeSig, frozenSig = Double.NaN;
     private final LinearGradient rimGradient, sheenGradient;
     private LinearGradient marqueeFade;  // the edges' fade, made for the focused card's width
     private float marqueeFadeFor;
@@ -400,10 +415,7 @@ final class HomeView extends View {
         cc = new ControlCenter(context, EDGE,
                 new RectF(EDGE - 8f - AVATAR, CLOCK_TOP + (CLOCK_H - AVATAR) / 2f, EDGE - 8f, CLOCK_TOP + (CLOCK_H + AVATAR) / 2f));
 
-        // Liquid-glass: the blurred backdrop, more saturated, with a light rim brighter at the top.
-        ColorMatrix saturate = new ColorMatrix();
-        saturate.setSaturation(1.3f);
-        glass.setColorFilter(new ColorMatrixColorFilter(saturate));
+        // Liquid-glass: the blurred backdrop, more saturated (see glassFilter), with a light rim brighter at the top.
         rimGradient = new LinearGradient(0, 0, 0, 1, new int[]{0x73FFFFFF, 0x14FFFFFF, 0x2EFFFFFF},
                 new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP);
         rim.setStyle(Paint.Style.STROKE);
@@ -1084,6 +1096,7 @@ final class HomeView extends View {
             return;
         }
         expanded = on;
+        host.setFullScreen(on); // its pictures without the dock's scrims
         if (on) {
             Apps.Entry e = focused();
             pages = e != null ? host.shelfPages(e) : Collections.emptyList();
@@ -1813,6 +1826,21 @@ final class HomeView extends View {
             e.focus = ease(e.focus, i == focus && !expanded && !rowFocused && !pillFocused ? 1f : 0f, 14f, dt, 0.002f);
         }
         if (editing && motion) animating = true; // the picked-up app wiggles
+        homeSig = homeFingerprint();
+    }
+
+    /** Everything the home screen under the overlays shows, summed: it changes whenever any of it moves. */
+    private double homeFingerprint() {
+        double f = scroll + away * 3 + expand * 5 + rowAnim * 7 + playFocus * 11 + rowScroll * 13 + pagerAnim * 17
+                + editAnim * 19 + downProgress * 23 + downAppear * 29 + bounce * 31 + hint * 37 + fade * 41
+                + marqueeOffset * 43 + hintInk * 47 + System.identityHashCode(backdrop) + 3.0 * System.identityHashCode(previous)
+                + (light ? 53 : 0) + focus * 59 + (menuAnim > 0f ? 61 : 0);
+        for (float v : rowFocus) f += v * 67;
+        for (int i = 0, n = total(); i < n; i++) {
+            Apps.Entry e = entry(i);
+            f += e.x * 0.7 + e.y * 0.9 + e.focus * 71 * (i + 1);
+        }
+        return f;
     }
 
     /**
@@ -1858,11 +1886,9 @@ final class HomeView extends View {
     protected void onSizeChanged(int w, int h, int oldW, int oldH) {
         scale = w / W;
         height = h / scale;
-        bottomScrim.setShader(new LinearGradient(0, height * 0.45f, 0, height, 0x00000000, 0x8C000000, Shader.TileMode.CLAMP));
         // Behind the full-screen shelf's details: darkest at the bottom-left corner, in one pass.
-        detailsScrim.setShader(new RadialGradient(0f, height, 1500f, new int[]{0xB8000000, 0x66000000, 0x00000000},
+        detailsScrim.setShader(new RadialGradient(0f, height, Backdrops.DETAILS_SCRIM_RADIUS, Backdrops.DETAILS_SCRIM,
                 new float[]{0f, 0.5f, 1f}, Shader.TileMode.CLAMP));
-        topScrim.setShader(new LinearGradient(0, 0, 0, 220f, 0x4D000000, 0x00000000, Shader.TileMode.CLAMP));
         defaultAvatar = makeAvatar(Math.max(1, Math.round(AVATAR * scale)));
         shadowMask = makeShadowMask(scale);
     }
@@ -1889,6 +1915,52 @@ final class HomeView extends View {
             return;
         }
         boolean covered = folderCover() > 0.999f;
+        if (ccAnim > 0f && c.isHardwareAccelerated()) {
+            drawFrozenHome(c, covered);
+        } else {
+            drawHome(c, covered);
+            if (!Double.isNaN(frozenSig) && homeNode != null) homeNode.discardDisplayList(); // and its layer
+            frozenSig = Double.NaN;
+        }
+        if (!covered) drawClock(c);
+        if (ccAnim > 0f) cc.draw(c, ccGlass, ccAnim, ccInk);
+        if (folderAnim > 0f) drawFolder(c);
+        if (menuAnim > 0f) drawMenu(c);
+        if (alertAnim > 0f) drawAlert(c);
+        if (setupAnim > 0f) setupFlow.draw(c, ccGlass, setupAnim, height);
+        if (settingsAnim > 0f) settings.draw(c, settingsAnim, height);
+        c.restore();
+
+        if (animating) postInvalidateOnAnimation();
+        a11y.drawn(); // what just opened has bounds now, for screen readers
+    }
+
+    /**
+     * Under the Control Center the home screen holds still, so it's drawn once into a layer and that
+     * layer is drawn each frame, dimmed by its paint: one screen of pixels instead of the backdrop,
+     * the dock and its tiles plus a full-screen dimming pass. Drawn again only while something under
+     * it is still moving (a tile losing focus as the Control Center opens, say).
+     */
+    private void drawFrozenHome(Canvas c, boolean covered) {
+        if (homeNode == null) homeNode = new RenderNode("home");
+        if (homeSig != frozenSig) {
+            homeNode.setPosition(0, 0, getWidth(), getHeight());
+            RecordingCanvas rc = homeNode.beginRecording();
+            rc.scale(scale, scale);
+            drawHome(rc, covered);
+            homeNode.endRecording();
+            frozenSig = homeSig;
+        }
+        homePaint.setColorFilter(dimFilter(Math.round(110 * ccAnim))); // the Control Center's dim
+        homeNode.setUseCompositingLayer(true, homePaint);
+        c.save();
+        c.scale(1f / scale, 1f / scale);
+        c.drawRenderNode(homeNode);
+        c.restore();
+    }
+
+    /** The home screen under the overlays: the backdrop, the row or details, the dock and grid, the pager. */
+    private void drawHome(Canvas c, boolean covered) {
         if (!covered) drawBackground(c);
 
         float offset = lift() - scroll - bounce;
@@ -1912,25 +1984,14 @@ final class HomeView extends View {
             c.restore();
         }
         if (pagerAnim > 0.01f && !covered) drawPager(c);
-
-        if (ccAnim > 0f) c.drawColor(Color.argb(Math.round(110 * ccAnim), 0, 0, 0));
-        if (!covered) drawClock(c);
-        if (ccAnim > 0f) cc.draw(c, ccGlass, ccAnim, ccInk);
-        if (folderAnim > 0f) drawFolder(c);
-        if (menuAnim > 0f) drawMenu(c);
-        if (alertAnim > 0f) drawAlert(c);
-        if (setupAnim > 0f) setupFlow.draw(c, ccGlass, setupAnim, height);
-        if (settingsAnim > 0f) settings.draw(c, settingsAnim, height);
-        c.restore();
-
-        if (animating) postInvalidateOnAnimation();
-        a11y.drawn(); // what just opened has bounds now, for screen readers
     }
 
     /**
-     * The backdrop is the costliest thing on screen (each layer covers all 2 million pixels), so
-     * layers that can't be seen are skipped, the grid's dimming is folded into the image draw as a
-     * colour filter rather than a separate pass, and the scrims fade out once the grid is dimmed.
+     * The backdrop is the costliest thing on screen (each layer covers all 2 million pixels, and the
+     * TV's GPU manages about six a frame), so layers that can't be seen are skipped, the grid's
+     * dimming is folded into the image draw as a colour filter rather than a separate pass, and the
+     * scrims behind the dock and clock are baked into the pictures (the full-screen shelf shows
+     * them without: see {@link Host#setFullScreen}).
      */
     private void drawBackground(Canvas c) {
         dim = Math.round(away * 100);
@@ -1938,13 +1999,6 @@ final class HomeView extends View {
         boolean crossfading = previous != null && fade < 0.98f;
         if (crossfading) drawBackdrop(c, previous, 255);
         if (backdrop != null) drawBackdrop(c, backdrop, crossfading ? Math.round(255 * fade) : 255);
-        int a = Math.round(255 * (1f - expand) * (1f - away));
-        if (a > 2) {
-            bottomScrim.setAlpha(a);
-            c.drawRect(0, height * 0.45f, W, height, bottomScrim);
-            topScrim.setAlpha(a);
-            c.drawRect(0, 0, W, 220f, topScrim);
-        }
     }
 
     /** Sharp, blurred, or (mid-transition) the blurred copy faded in over the sharp one. */
@@ -1960,30 +2014,40 @@ final class HomeView extends View {
         }
     }
 
-    /** Darkens by {@code alpha}/255, like a black overlay, cached in 26 steps. */
+    /** Darkens by {@code alpha}/255, exactly like a black overlay of that alpha. */
     private ColorFilter dimFilter(int alpha) {
-        int level = alpha / 4;
-        if (level == 0) return null;
-        if (dimFilters[level] == null) {
-            int k = 255 - level * 4;
-            dimFilters[level] = new LightingColorFilter(Color.rgb(k, k, k), 0);
+        int a = Math.max(0, Math.min(255, alpha));
+        if (a == 0) return null;
+        if (dimFilters[a] == null) {
+            int k = 255 - a;
+            dimFilters[a] = new LightingColorFilter(Color.rgb(k, k, k), 0);
         }
-        return dimFilters[level];
+        return dimFilters[a];
     }
 
-    /** A liquid-glass shape: blurred backdrop + tint + rim. {@code offsetY} is the canvas' current y translation. */
+    /**
+     * A liquid-glass shape: the blurred backdrop, more saturated, under its tint and the screen's
+     * dim, and a rim. One pass for the glass however many backdrops are showing, then the rim.
+     * {@code offsetY} is the canvas' current y translation.
+     */
     private void drawGlass(Canvas c, RectF rect, float radius, float offsetY, int tint, int alpha) {
-        if (previous != null) glassLayer(c, previous, rect, radius, offsetY, alpha);
-        if (backdrop != null) {
-            glassLayer(c, backdrop, rect, radius, offsetY, previous != null ? Math.round(alpha * fade) : alpha);
+        Bitmap blur = null;
+        android.graphics.BitmapShader shader = null;
+        if (previous != null && backdrop != null && mixBlurs()) {
+            blur = mixedBlur;
+            shader = mixedShader;
+        } else if (backdrop != null) {
+            blur = backdrop.blur;
+            shader = backdrop.blurShader;
         }
-        // The glass sees the same dimmed backdrop as everything else: the black dim and the tint over
-        // it, composited here into one fill so it's one draw instead of two.
-        int ta = Color.alpha(tint) * alpha / 255, da = dim * alpha / 255;
-        int a = ta + da * (255 - ta) / 255;
-        if (a > 0) {
-            fill.setColor(Color.argb(a, Color.red(tint) * ta / a, Color.green(tint) * ta / a, Color.blue(tint) * ta / a));
-            c.drawRoundRect(rect, radius, radius, fill);
+        if (shader != null) {
+            m.setScale(W / blur.getWidth(), height / blur.getHeight());
+            m.postTranslate(0f, -offsetY);
+            shader.setLocalMatrix(m);
+            glass.setShader(shader);
+            glass.setColorFilter(glassFilter(tint, dim));
+            glass.setAlpha(alpha);
+            c.drawRoundRect(rect, radius, radius, glass);
         }
         m.setScale(1f, rect.height());
         m.postTranslate(0f, rect.top);
@@ -1992,13 +2056,62 @@ final class HomeView extends View {
         c.drawRoundRect(rect, radius, radius, rim);
     }
 
-    private void glassLayer(Canvas c, Backdrops.Backdrop b, RectF rect, float radius, float offsetY, int alpha) {
-        m.setScale(W / b.blur.getWidth(), height / b.blur.getHeight());
-        m.postTranslate(0f, -offsetY);
-        b.blurShader.setLocalMatrix(m);
-        glass.setShader(b.blurShader);
-        glass.setAlpha(alpha);
-        c.drawRoundRect(rect, radius, radius, glass);
+    /**
+     * The glass's colour filter: the blur 30% more saturated, then the tint and the black dim laid
+     * over it as one fill would be (out = blur × (1 − a) + tint × its alpha), all in one matrix.
+     */
+    private ColorFilter glassFilter(int tint, int dimAlpha) {
+        int level = dimAlpha / 4; // the dim in 26 steps, as dimFilter
+        for (int i = 0; i < glassFilters.length; i++) {
+            if (glassFilters[i] != null && glassTints[i] == tint && glassDims[i] == level) return glassFilters[i];
+        }
+        float ta = Color.alpha(tint) / 255f, da = level * 4 / 255f;
+        float a = ta + da * (1f - ta), k = 1f - a;
+        ColorMatrix cm = new ColorMatrix();
+        cm.setSaturation(1.3f);
+        cm.postConcat(new ColorMatrix(new float[]{
+                k, 0, 0, 0, Color.red(tint) * ta,
+                0, k, 0, 0, Color.green(tint) * ta,
+                0, 0, k, 0, Color.blue(tint) * ta,
+                0, 0, 0, 1, 0}));
+        int i = glassFilterNext;
+        glassFilterNext = (i + 1) % glassFilters.length;
+        glassTints[i] = tint;
+        glassDims[i] = level;
+        glassFilters[i] = new ColorMatrixColorFilter(cm);
+        return glassFilters[i];
+    }
+
+    /**
+     * The two backdrops' blurs mixed as far as the crossfade has gone, into {@link #mixedBlur}: 20
+     * thousand pixels on the CPU (well under a millisecond), so the glass draws one texture, not
+     * two. Done once a frame however many glass shapes there are. False if the blurs don't match.
+     */
+    private boolean mixBlurs() {
+        int[] from = previous.blurPixels, to = backdrop.blurPixels;
+        Bitmap b = backdrop.blur;
+        if (from.length != to.length || previous.blur.getWidth() != b.getWidth()) return false;
+        if (mixedBlur == null || mixedBlur.getWidth() != b.getWidth() || mixedBlur.getHeight() != b.getHeight()) {
+            mixedBlur = Bitmap.createBitmap(b.getWidth(), b.getHeight(), Bitmap.Config.ARGB_8888);
+            mixedShader = new android.graphics.BitmapShader(mixedBlur, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            mixedPixels = new int[to.length];
+            mixedLevel = -1;
+        }
+        int t = Math.round(fade * 256f);
+        if (t == mixedLevel && mixedFrom == previous && mixedTo == backdrop) return true;
+        int u = 256 - t;
+        for (int i = 0; i < to.length; i++) {
+            int p = from[i], q = to[i];
+            int r = (((p >> 16) & 255) * u + ((q >> 16) & 255) * t) >> 8;
+            int g = (((p >> 8) & 255) * u + ((q >> 8) & 255) * t) >> 8;
+            int bl = ((p & 255) * u + (q & 255) * t) >> 8;
+            mixedPixels[i] = 0xFF000000 | (r << 16) | (g << 8) | bl;
+        }
+        mixedBlur.setPixels(mixedPixels, 0, b.getWidth(), 0, 0, b.getWidth(), b.getHeight());
+        mixedLevel = t;
+        mixedFrom = previous;
+        mixedTo = backdrop;
+        return true;
     }
 
     private void drawDock(Canvas c, float offset) {
@@ -2402,8 +2515,15 @@ final class HomeView extends View {
         if (item == null) return;
         if (item != detailsFor) layOutDetails(item);
         int alpha = Math.round(255 * expand);
-        detailsScrim.setAlpha(alpha);
-        c.drawRect(0f, 0f, W, height, detailsScrim);
+        // The darkening behind the details is baked into the full-screen picture: drawn here only for
+        // as much of the picture as doesn't have it yet (fading in after Up, say).
+        float baked = (b.details ? 1f : 0f) * (previous != null ? fade : 1f)
+                + (previous != null && previous.details ? 1f - fade : 0f);
+        int scrim = Math.round(alpha * (1f - baked));
+        if (scrim > 2) {
+            detailsScrim.setAlpha(scrim);
+            c.drawRect(0f, 0f, W, height, detailsScrim);
+        }
         float y = height - DETAILS_BOTTOM - PLAY_H;
         drawPlayButton(c, DETAILS_X, y, alpha);
         y -= 34f;

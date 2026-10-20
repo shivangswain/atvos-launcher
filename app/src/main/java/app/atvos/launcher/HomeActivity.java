@@ -97,6 +97,14 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         if (adbApproving && selfAdb != null) selfAdb.declined();
     };
     private volatile String wantedBackdrop = "";
+    private boolean fullScreen;        // the full-screen top shelf is up: its pictures without the dock's scrims
+    /**
+     * Focus moving again this soon after the last move (running along the dock) holds the backdrop
+     * until it settles, rather than starting a crossfade (two full-screen pictures a frame) per app.
+     */
+    private static final long SETTLE_MS = 150;
+    private long focusMovedAt;
+    private final Runnable settled = this::updateBackdrop;
 
     /** Installs, updates and removals; between them, resuming Home skips the PackageManager queries. */
     private final BroadcastReceiver packages = new BroadcastReceiver() {
@@ -234,6 +242,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
             return;
         }
         view.removeCallbacks(checkApproval);
+        view.removeCallbacks(settled);
         checkApproval.run(); // still waiting on the TV's prompt: stop (nothing has run yet)
         unregisterReceiver(packages);
         io.shutdownNow();
@@ -288,7 +297,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         // A folder shows its first app's backdrop, as on tvOS.
         Apps.Entry shown = focused != null && focused.folder != null
                 ? (focused.folder.apps.isEmpty() ? null : focused.folder.apps.get(0)) : focused;
-        String key = shown != null ? backdrops.backdropKey(shown.pkg) : Backdrops.DEFAULT;
+        String key = shown != null ? backdrops.backdropKey(shown.pkg, fullScreen) : Backdrops.DEFAULT;
         Recommendations.Item program = shown != null ? backdrops.recommendation(shown.pkg) : null;
         if (key.equals(wantedBackdrop)) return;
         wantedBackdrop = key;
@@ -313,7 +322,11 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     public void onFocusChanged(Apps.Entry entry, boolean inDock) {
         focused = entry;
         focusInDock = inDock;
-        updateBackdrop();
+        long now = android.os.SystemClock.uptimeMillis();
+        view.removeCallbacks(settled);
+        if (inDock && now - focusMovedAt < SETTLE_MS) view.postDelayed(settled, SETTLE_MS);
+        else updateBackdrop();
+        focusMovedAt = now;
         // An app with a top shelf in the dock: fetch its other pages now, so Up can page through them.
         if (inDock && entry != null && entry.folder == null && backdrops.recommendation(entry.pkg) != null
                 && pagesQueued.add(entry.pkg)) {
@@ -324,6 +337,13 @@ public final class HomeActivity extends Activity implements HomeView.Host {
                 updateBackdrop(); // a row shows the new card
             })));
         }
+    }
+
+    /** The full-screen shelf went up (or down): its picture changes to the one without (or with) the dock's scrims. */
+    @Override
+    public void setFullScreen(boolean on) {
+        fullScreen = on;
+        updateBackdrop();
     }
 
     @Override

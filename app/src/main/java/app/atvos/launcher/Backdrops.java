@@ -77,6 +77,10 @@ final class Backdrops {
         final Bitmap sharp;
         final Bitmap blur;
         final BitmapShader blurShader;
+        /** The blur's pixels, for the glass to mix two backdrops' on the CPU while they crossfade. */
+        final int[] blurPixels;
+        /** The full-screen shelf's darkening behind its details is in the picture already. */
+        boolean details;
 
         /** Set when the image is an app's recommendation. */
         final Recommendations.Item program;
@@ -98,6 +102,8 @@ final class Backdrops {
             this.sharp = sharp;
             this.blur = blur;
             this.blurShader = new BitmapShader(blur, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            this.blurPixels = new int[blur.getWidth() * blur.getHeight()];
+            blur.getPixels(blurPixels, 0, blur.getWidth(), 0, 0, blur.getWidth(), blur.getHeight());
             this.program = program;
             this.row = row;
             this.clockLight = light(blur, 0.86f, 0.03f, 1f, 0.11f);
@@ -157,7 +163,13 @@ final class Backdrops {
     private static final float LOGO_SIZE = 160f;
     // Per-app switches for the two recommendation sources (sets of packages switched off).
     private static final String NO_WATCH_NEXT = "no_watch_next", NO_PREVIEWS = "no_previews";
-    private static final String REMOTE = "rec:", APP = "app:", ROW = "row:";
+    /** Keys: a recommendation behind the dock (scrims baked in), the same picture full screen (plain), an app's logo, a row. */
+    private static final String REMOTE = "rec:", FULL = "full:", APP = "app:", ROW = "row:";
+    // The scrims behind the dock and the clock, in fractions of the screen's height: baked into each
+    // backdrop when it's made, so they cost nothing per frame (they were 0.75 of a screen of fill).
+    private static final float SCRIM_BOTTOM_FROM = 0.45f;
+    private static final int SCRIM_BOTTOM = 0x8C000000, SCRIM_TOP = 0x4D000000;
+    private static final float SCRIM_TOP_DESIGN = 220f; // the top one's depth, in 1920-wide design units
     private static final int MAX_DOWNLOAD = 16 << 20;
     /**
      * A download's whole time, after which it's cut off: an app's content that never finishes (a
@@ -217,7 +229,7 @@ final class Backdrops {
         this.cacheSize = am != null && am.isLowRamDevice() ? 3 : 6;
         Bitmap aurora = aurora();
         Bitmap blurred = blur(aurora);
-        this.fallback = new Backdrop(toHardware(aurora), blurred, null);
+        this.fallback = new Backdrop(toHardware(bake(aurora)), blurred, null);
     }
 
     /** Re-reads app recommendations. Keys include the image URL, so a new image is picked up. IO thread. */
@@ -402,9 +414,11 @@ final class Backdrops {
     }
 
     /** What sits behind the dock for an app: its top shelf, else its splash picture or logo. */
-    String backdropKey(String pkg) {
+    /** The backdrop for an app; {@code fullScreen}: its full-screen shelf, without the dock's scrims. */
+    String backdropKey(String pkg, boolean fullScreen) {
         String shelf = shelfKey(pkg);
-        return shelf != null ? shelf : APP + pkg;
+        if (shelf == null) return APP + pkg;
+        return fullScreen && shelf.startsWith(REMOTE) ? FULL + shelf.substring(REMOTE.length()) : shelf;
     }
 
     Recommendations.Item recommendation(String pkg) {
@@ -436,8 +450,9 @@ final class Backdrops {
         if (DEFAULT.equals(key)) return fallback;
         if (key.startsWith(APP)) return appLogo(key.substring(APP.length()));
         if (key.startsWith(ROW)) return row(key.substring(ROW.length(), key.lastIndexOf('#')));
-        if (!key.startsWith(REMOTE)) return null;
-        File file = cacheFile(key.substring(REMOTE.length()));
+        boolean full = key.startsWith(FULL);
+        if (!full && !key.startsWith(REMOTE)) return null;
+        File file = cacheFile(key.substring((full ? FULL : REMOTE).length()));
         if (!file.isFile()) return null;
 
         // Just the header first: the size decides between full screen and the row.
@@ -459,8 +474,10 @@ final class Backdrops {
         if (src == null) return null;
         Bitmap sharp = cover(src, width, height);
         if (sharp != src) src.recycle();
-        Bitmap blurred = blur(sharp);
-        return new Backdrop(toHardware(sharp), blurred, program);
+        Bitmap blurred = blur(sharp); // of the plain picture: the glass shows it as it is
+        Backdrop b = new Backdrop(toHardware(full ? bakeDetails(sharp) : bake(sharp)), blurred, program);
+        b.details = full;
+        return b;
     }
 
     /**
@@ -500,9 +517,14 @@ final class Backdrops {
             cards.add(new Card(item, toHardware(card), design));
         }
         if (cards.isEmpty()) return null;
-        Bitmap plain = Bitmap.createBitmap(16, 9, Bitmap.Config.ARGB_8888);
-        plain.eraseColor(prefs.getBoolean(HomeActivity.KEY_LIGHT, false) ? ROW_LIGHT : ROW_DARK);
-        return new Backdrop(plain, plain, cards.get(0).item(), cards);
+        int colour = prefs.getBoolean(HomeActivity.KEY_LIGHT, false) ? ROW_LIGHT : ROW_DARK;
+        // The background: a strip the screen's height, stretched across it, with the scrims in it.
+        Bitmap strip = Bitmap.createBitmap(4, height, Bitmap.Config.ARGB_8888);
+        strip.eraseColor(colour);
+        // Its blur as big as every other backdrop's, so the glass can mix them as they crossfade.
+        Bitmap plain = Bitmap.createBitmap(BLUR_W, blurHeight(), Bitmap.Config.ARGB_8888);
+        plain.eraseColor(colour);
+        return new Backdrop(bake(strip), plain, cards.get(0).item(), cards);
     }
 
     /**
@@ -524,7 +546,7 @@ final class Backdrops {
         }
         if (out == null) return null;
         Bitmap blurred = blur(out);
-        return new Backdrop(toHardware(out), blurred, null);
+        return new Backdrop(toHardware(bake(out)), blurred, null);
     }
 
     private ActivityInfo launchActivity(String pkg) {
@@ -1260,8 +1282,57 @@ final class Backdrops {
     }
 
     /** A heavily blurred 192px-wide copy. Drawn scaled up with bilinear filtering it reads as a smooth blur. */
+    /**
+     * The scrims drawn into a screen-high software picture, once: darker toward the bottom for the
+     * dock, at the top for the clock. Mutable in place (a copy if it isn't). IO thread.
+     */
+    private Bitmap bake(Bitmap b) {
+        if (!b.isMutable()) {
+            Bitmap copy = b.copy(Bitmap.Config.ARGB_8888, true);
+            b.recycle();
+            b = copy;
+        }
+        float h = b.getHeight();
+        Canvas c = new Canvas(b);
+        Paint p = new Paint();
+        p.setShader(new LinearGradient(0, h * SCRIM_BOTTOM_FROM, 0, h, 0x00000000, SCRIM_BOTTOM, Shader.TileMode.CLAMP));
+        c.drawRect(0, h * SCRIM_BOTTOM_FROM, b.getWidth(), h, p);
+        float top = SCRIM_TOP_DESIGN * h * width / (1920f * height); // design units to this picture's rows
+        p.setShader(new LinearGradient(0, 0, 0, top, SCRIM_TOP, 0x00000000, Shader.TileMode.CLAMP));
+        c.drawRect(0, 0, b.getWidth(), top, p);
+        return b;
+    }
+
+    /**
+     * The full-screen shelf's darkening behind its title, description and Play, baked in: darkest in
+     * the bottom-left corner (what HomeView would otherwise draw over the whole screen each frame).
+     */
+    private Bitmap bakeDetails(Bitmap b) {
+        if (!b.isMutable()) {
+            Bitmap copy = b.copy(Bitmap.Config.ARGB_8888, true);
+            b.recycle();
+            b = copy;
+        }
+        float h = b.getHeight(), radius = DETAILS_SCRIM_RADIUS * b.getWidth() / 1920f;
+        Paint p = new Paint();
+        p.setShader(new RadialGradient(0f, h, radius, DETAILS_SCRIM, new float[]{0f, 0.5f, 1f}, Shader.TileMode.CLAMP));
+        new Canvas(b).drawRect(0, 0, b.getWidth(), h, p);
+        return b;
+    }
+
+    /** The full-screen shelf's darkening: its colours and its radius in design units (HomeView draws the same). */
+    static final int[] DETAILS_SCRIM = {0xB8000000, 0x66000000, 0x00000000};
+    static final float DETAILS_SCRIM_RADIUS = 1500f;
+
+    /** Every blur's size: the screen's shape at {@link #BLUR_W} wide. */
+    private int blurHeight() {
+        return Math.max(1, Math.round(BLUR_W * (float) height / width));
+    }
+
+    private static final int BLUR_W = 192;
+
     static Bitmap blur(Bitmap src) {
-        int w = 192;
+        int w = BLUR_W;
         int h = Math.max(1, Math.round(w * (float) src.getHeight() / src.getWidth()));
         // Two-step downscale so the bilinear sampling doesn't skip detail and sparkle.
         Bitmap mid = Bitmap.createScaledBitmap(src, w * 3, h * 3, true);
