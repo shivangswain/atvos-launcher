@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Two switches, one off and one on: tvOS's Control Center glyph, for atvOS's own Settings. Tinted at draw time. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Off: an outlined track with the knob at the left -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M6.05,2.65h11.9a4.05,4.05 0,0 1,0 8.1h-11.9a4.05,4.05 0,0 1,0 -8.1zM6.05,4.15a2.55,2.55 0,0 0,0 5.1h11.9a2.55,2.55 0,0 0,0 -5.1zM4.15,6.7a1.9,1.9 0,1 0,3.8 0a1.9,1.9 0,1 0,-3.8 0z" />
+    <!-- On: a filled track with the knob cut out at the right -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M6.05,13.25h11.9a4.05,4.05 0,0 1,0 8.1h-11.9a4.05,4.05 0,0 1,0 -8.1zM15.35,17.3a2.6,2.6 0,1 0,5.2 0a2.6,2.6 0,1 0,-5.2 0z" />
+</vector>

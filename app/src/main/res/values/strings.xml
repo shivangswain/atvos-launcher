@@ -1,30 +1,139 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">atvOS Launcher</string>
+    <!-- The long-press menu, as on tvOS. "…" options open a second list. -->
     <string name="edit_home">Edit Home Screen</string>
+    <string name="move_to">Move to…</string>
+    <string name="top_shelf">Top Shelf…</string>
     <string name="app_info">App Info</string>
-    <string name="hide_app">Hide App</string>
-    <string name="unhide_app">Unhide App</string>
+    <string name="delete_app">Delete App</string>
+    <string name="new_folder">New Folder</string>
+    <string name="home_screen">Home Screen</string>
+    <!-- A new folder's name when Android doesn't say what kind of app it holds. -->
+    <string name="folder">Folder</string>
+    <string name="delete_title">Delete “%s”?</string>
+    <string name="delete_message">Deleting this app will also delete its data.</string>
+    <string name="cancel">Cancel</string>
+    <string name="delete">Delete</string>
     <string name="hidden">Hidden</string>
     <string name="hidden_empty">Move apps here to hide them</string>
+    <!-- Shown for a moment after an app is moved to Hidden: how to get back to it. %1$s is where the
+         remote's Down key is drawn (a chevron in a circle); screen readers say a11y_down there. -->
+    <string name="hidden_toast">Long press %1$s to enter the Hidden section</string>
     <string name="continue_watching">Continue Watching</string>
-    <string name="recommendations">Recommendations</string>
+    <string name="recommendations">Recommended</string>
     <string name="play">Play</string>
     <string name="full_screen_hint">Press up for full screen</string>
-    <!-- Setup & Support: shown on first run, and from any app's long-press menu. -->
-    <string name="setup_and_support">Setup &amp; Support</string>
+    <!-- Setup: a few steps on first run, and from Settings while another app has the Home button. -->
     <string name="setup_welcome">Welcome to atvOS Launcher</string>
-    <string name="setup_intro">A fast, minimal home screen for Android TV and Google TV.</string>
-    <string name="setup_home_active">atvOS Launcher is your home screen</string>
-    <string name="setup_home_named">%s opens when you press Home</string>
-    <string name="setup_home_other">Another app is your home screen</string>
-    <string name="setup_adb_steps">This TV\'s own home screen keeps the Home button until it\'s turned off, which only adb can do:\n1. In Settings, open About and select the build number 7 times to turn on Developer options.\n2. In Developer options, turn on USB debugging (or Wireless debugging).\n3. From a computer, or an adb app on your phone, connect to the TV and run:</string>
-    <string name="setup_adb_command" translatable="false">adb shell pm disable-user --user 0 %s</string>
-    <string name="setup_adb_undo">To go back, run the same commands with pm enable.</string>
-    <string name="setup_set_home">Set as Default Home App</string>
-    <string name="setup_release_power">Remove Power Control</string>
-    <string name="setup_continue">Continue to Home Screen</string>
+    <string name="setup_welcome_body">A fast, minimal home screen for your TV. Setting it up takes a minute, right here on the TV.</string>
+    <string name="setup_get_started">Get Started</string>
+    <string name="setup_not_now">Not Now</string>
+    <string name="setup_back">Back</string>
+    <!-- "Android TV OS build" is the name Settings gives the row; keep it the same as there. -->
+    <string name="setup_developer_title">Turn On Developer Options</string>
+    <string name="setup_developer_body">Select Android TV OS build seven times, until the TV says you\'re now a developer. Then press Back to come back here.</string>
+    <string name="setup_open_about">Open About</string>
+    <string name="setup_debugging_title">Turn On USB Debugging</string>
+    <string name="setup_debugging_body">Turn on USB debugging, and confirm when the TV asks. atvOS Launcher uses it once, to take over the Home button. Then press Back to come back here.</string>
+    <string name="setup_open_developer">Open Developer Options</string>
+    <string name="setup_allow_title">Allow USB Debugging</string>
+    <string name="setup_allow_body">Select Set Up. When the TV asks, tick “Always allow from this computer”, then select Allow.</string>
+    <string name="setup_set_up">Set Up</string>
+    <string name="setup_try_again">Try Again</string>
+    <string name="setup_pick_title">Make It Your Home Screen</string>
+    <string name="setup_pick_body">Choose atvOS Launcher in the list that opens.</string>
+    <string name="setup_pick_button">Choose Home App</string>
+    <string name="setup_account_title">Add Your Profile Picture</string>
+    <string name="setup_account_body">Choose your Google account to show its picture on the home screen. This is optional, and you can change it any time in Settings.</string>
+    <string name="setup_choose_account">Choose Account</string>
+    <string name="setup_done_title">You\'re All Set</string>
+    <string name="setup_done_body">atvOS Launcher is your home screen. Press Home any time to come back to it.</string>
+    <string name="setup_done_body_not_home">atvOS Launcher is ready. You can make it your home screen any time from Settings in Control Center.</string>
+    <string name="setup_go_home">Go to Home Screen</string>
+    <string name="setup_tv_connecting">Connecting to this TV…</string>
+    <string name="setup_tv_approve">Approve “Allow USB debugging” on your TV…</string>
+    <string name="setup_tv_working">Updating the home screen…</string>
+    <string name="setup_tv_done">Done. atvOS Launcher is your home screen.</string>
+    <string name="setup_tv_restored">Restored the TV\'s own home screen.</string>
+    <string name="setup_tv_enable_debug">Turn on USB debugging in Developer options, then try again.</string>
+    <string name="setup_tv_unreachable">Couldn\'t reach this TV\'s debugging. Check that USB debugging is on, then try again.</string>
+    <string name="setup_tv_denied">Debugging wasn\'t approved on the TV. Try again and select Allow.</string>
+    <string name="setup_tv_failed">The TV didn\'t let atvOS Launcher change the home screen.</string>
+    <!-- Settings (the switches in Control Center), laid out as tvOS Settings, with tvOS's names where it has the same thing -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_none">None</string>
+    <string name="settings_home">Home Screen</string>
+    <string name="settings_home_other">Another app</string>
+    <string name="settings_home_about">%s opens when you press Home. Select to make atvOS Launcher your home screen, one step at a time.</string>
+    <string name="settings_general">General</string>
+    <string name="settings_about">About</string>
+    <string name="settings_model">Model</string>
+    <!-- The app's version, as tvOS's About lists tvOS's -->
+    <string name="settings_atvos">atvOS</string>
+    <string name="settings_android_tv">Android TV</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_appearance_about">Select Light or Dark to change the appearance of Settings and of the rows of programs on the top shelf.</string>
+    <string name="settings_light">Light</string>
+    <string name="settings_dark">Dark</string>
+    <string name="settings_privacy">Privacy</string>
+    <string name="settings_privacy_about">atvOS Launcher keeps everything on this TV. It collects nothing and shares nothing: your profile photo comes straight from Google, and donations are handled by Google Play.</string>
+    <string name="settings_acknowledgements">Acknowledgements</string>
+    <string name="settings_acknowledgements_about">Icons from Google\'s Material Symbols, under the Apache License 2.0. Donations through the Google Play Billing Library.</string>
+    <!-- A section title (shown in capitals) -->
+    <string name="settings_date_time">Date &amp; Time</string>
+    <string name="settings_time_format">Time Format</string>
+    <string name="settings_time_format_about">How the clock beside your profile picture shows the time.</string>
+    <string name="settings_12_hour">12-Hour</string>
+    <string name="settings_24_hour">24-Hour</string>
+    <string name="settings_profiles">Profiles and Accounts</string>
+    <string name="settings_account">Account</string>
+    <string name="settings_account_about">The Google account whose picture appears beside the clock. Select to choose an account.</string>
+    <string name="settings_picture">Profile Picture</string>
+    <string name="settings_picture_about">What appears beside the clock: your Google account\'s photo, its initial, or neither.</string>
+    <string name="settings_picture_photo">Google Photo</string>
+    <string name="settings_picture_initial">Initial</string>
+    <string name="settings_uninstall">Uninstall</string>
+    <string name="settings_restore">Restore Default Launcher</string>
+    <string name="settings_restore_about">Turns the TV\'s own home screen back on. Do this before uninstalling atvOS Launcher.</string>
+    <string name="settings_restore_not_needed">The TV\'s own home screen is already on.</string>
+    <string name="settings_release_power">Remove Power Control</string>
+    <string name="settings_release_power_about">Do this before uninstalling atvOS Launcher. Power Off and the Sleep Timer stop working until you use Power Off again.</string>
+    <string name="settings_support">Support</string>
+    <string name="settings_website">Website</string>
+    <string name="settings_website_address">atvos.tv</string>
+    <string name="settings_website_about">News, help and ways to get in touch.</string>
+    <string name="settings_website_elsewhere">News, help and ways to get in touch. Visit atvos.tv on your phone or computer.</string>
+    <string name="settings_store">Open Play Store</string>
+    <string name="settings_store_about">atvOS Launcher on Google Play: check for updates, or leave a review.</string>
+    <string name="settings_app_info">App Info</string>
+    <string name="settings_app_info_about">atvOS Launcher in the TV\'s own Settings: its storage, permissions and Uninstall.</string>
+    <string name="settings_donate">Donate</string>
+    <string name="settings_donate_about">A one-time donation of %s, through Google Play. It unlocks nothing (everything is already yours), but it helps keep atvOS Launcher going. Thank you!</string>
+    <string name="settings_donate_connecting">Asking Google Play…</string>
+    <string name="settings_donate_pending">Your donation is waiting on Google Play. Thank you!</string>
+    <string name="settings_donate_thanks">Thank you for supporting atvOS Launcher! Select to donate again.</string>
+    <string name="settings_donate_unavailable">Donations aren\'t available right now. Try again later.</string>
     <string name="setup_home_unavailable">This TV has no screen for choosing the home app.</string>
+    <!-- The pictures in setup show the TV's own Settings screens: these are the words Settings
+         uses there, so keep each the same as the TV's Settings in that language. -->
+    <string name="art_about">About</string>
+    <string name="art_model">Model</string>
+    <string name="art_version">Android TV OS version</string>
+    <string name="art_build">Android TV OS build</string>
+    <string name="art_developer">Developer options</string>
+    <string name="art_color_mode">Picture color mode</string>
+    <string name="art_color_summary">Use sRGB</string>
+    <string name="art_debugging">Debugging</string>
+    <string name="art_usb_debugging">USB debugging</string>
+    <string name="art_usb_summary">Debug mode when USB is connected</string>
+    <string name="art_revoke">Revoke USB debugging authorizations</string>
+    <string name="art_prompt_title">Allow USB debugging?</string>
+    <string name="art_prompt_key">The computer\'s RSA key fingerprint is:</string>
+    <string name="art_always_allow">Always allow from this computer</string>
+    <string name="art_allow">Allow</string>
+    <!-- On the build row's badge: select it this many times. -->
+    <string name="art_times">7×</string>
     <string name="cannot_open">Can\'t open %s</string>
     <string name="not_available">Not available on this TV</string>
 
@@ -33,16 +142,37 @@
     <string name="a11y_control_center">Control Center</string>
     <string name="a11y_profile">Profile</string>
     <string name="a11y_settings">Settings</string>
+    <!-- The switches beside the TV's Settings cog: atvOS's own Settings -->
+    <string name="a11y_launcher_settings">atvOS Launcher Settings</string>
+    <!-- A Settings choice that's the one chosen -->
+    <string name="a11y_selected">Selected</string>
     <string name="a11y_inputs">Inputs</string>
     <string name="a11y_accessibility">Accessibility</string>
     <string name="a11y_system">System</string>
     <string name="a11y_search">Search</string>
     <string name="a11y_play">Play %s</string>
+    <string name="a11y_page">Page %1$d of %2$d</string>
+    <string name="a11y_watched">%d%% watched</string>
+    <!-- The full-screen top shelf's details line, and the rows' section for Watch Next. -->
+    <string name="season_episode">S%1$s, E%2$s</string>
+    <string name="episode_number">Episode %s</string>
+    <string name="type_movie">Movie</string>
+    <string name="type_tv_show">TV Show</string>
+    <string name="duration_hm">%1$d hr %2$d min</string>
+    <string name="duration_h">%d hr</string>
+    <string name="duration_m">%d min</string>
+    <!-- Time left, on the Play button of something partly watched -->
+    <string name="remaining_hm">%1$dh %2$dm</string>
+    <string name="remaining_h">%dh</string>
+    <string name="remaining_m">%dm</string>
     <string name="a11y_shelf_hint">Press up to see %s</string>
     <string name="a11y_hidden">Hidden</string>
+    <string name="a11y_down">Down</string>
     <string name="a11y_moving">Moving</string>
     <string name="a11y_moving_hint">Use the arrows to move it, then press select to drop it</string>
     <string name="a11y_reveal_hint">Hold down to show hidden apps</string>
+    <string name="a11y_folder">Folder</string>
+    <string name="a11y_rename_hint">Press select to rename it</string>
     <string name="power_off">Power Off</string>
     <string name="wifi">Wi‑Fi</string>
     <string name="ethernet">Ethernet</string>
@@ -60,6 +190,6 @@
     <!-- Shown when the TV has no screen for granting Do Not Disturb access (Google TV doesn't). -->
     <string name="dnd_needs_access">This TV doesn\'t let apps turn on Do Not Disturb.</string>
     <string name="power_released">Power control removed. atvOS Launcher can now be uninstalled.</string>
-    <string name="power_admin_description">Lets atvOS Launcher put the TV to sleep for Power Off and the Sleep Timer. It can\'t do anything else. To remove it, hold select on Power Off.</string>
+    <string name="power_admin_description">Lets atvOS Launcher put the TV to sleep for Power Off and the Sleep Timer. It can\'t do anything else. To remove it, use Remove Power Control in atvOS Launcher\'s Settings, under Uninstall.</string>
     <string name="power_not_held">atvOS Launcher doesn\'t have power control.</string>
 </resources>

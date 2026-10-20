@@ -38,6 +38,7 @@ public final class SleepTimer extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         forget(context);
+        pending(context).cancel(); // spent: so active() reports it gone, as after cancel()
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         if (dpm.isAdminActive(new ComponentName(context, PowerAdmin.class))) dpm.lockNow();
     }

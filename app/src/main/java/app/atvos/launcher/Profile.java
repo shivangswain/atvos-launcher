@@ -19,6 +19,9 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Shader;
 import android.graphics.Typeface;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.Toast;
@@ -41,8 +44,9 @@ import java.util.function.Consumer;
 
 /**
  * The profile picture in the clock pill: the Google account's profile photo, else its letter avatar
- * (what Google shows for accounts without one); files/avatar.png, if you push one, beats both. The
- * account is picked once with Android's own chooser.
+ * (what Google shows for accounts without one), or, as Settings &gt; Profile Picture chooses, just
+ * the letter or nothing. The account is picked once with Android's own chooser; there's no other
+ * source of pictures.
  * <p>
  * Google gives profile photos only to apps it knows: this one needs an Android OAuth client in a
  * Google Cloud project (see README). Until then the token request fails and the letter stays. The
@@ -52,9 +56,11 @@ import java.util.function.Consumer;
 final class Profile {
 
     static final int REQUEST_ACCOUNT = 7;
+    /** Settings > Profile Picture: the account's photo (else its letter), its letter, or none. */
+    static final String PHOTO = "photo", INITIAL = "initial", NONE = "none";
     private static final String TAG = "atvOS";
     private static final String GOOGLE = "com.google";
-    private static final String KEY_ACCOUNT = "account", KEY_PHOTO_TRIED = "photo_tried";
+    private static final String KEY_ACCOUNT = "account", KEY_PHOTO_TRIED = "photo_tried", KEY_PICTURE = "picture";
     private static final String SCOPE = "oauth2:https://www.googleapis.com/auth/userinfo.profile";
     private static final String USERINFO = "https://www.googleapis.com/oauth2/v3/userinfo";
     private static final long REFRESH_MS = 24 * 60 * 60_000L;
@@ -63,29 +69,46 @@ final class Profile {
     private final Activity activity;
     private final Executor io;
     private final SharedPreferences prefs;
-    private final File file, photo;
+    private final File photo;
     private final int size;
 
     Profile(Activity activity, Executor io, int sizePx) {
         this.activity = activity;
         this.io = io;
         this.prefs = activity.getSharedPreferences(HomeActivity.PREFS, Context.MODE_PRIVATE);
-        File external = activity.getExternalFilesDir(null);
-        this.file = new File(external != null ? external : activity.getFilesDir(), "avatar.png");
         this.photo = new File(activity.getFilesDir(), "google_photo");
         this.size = sizePx;
     }
 
-    /** avatar.png, else the account's Google photo, else its monogram; nothing if no account was chosen. */
+    /** The picture chosen in Settings: the account's Google photo, else its monogram; null for none. */
     void load(Consumer<Bitmap> onAvatar) {
-        String account = prefs.getString(KEY_ACCOUNT, null);
+        String account = prefs.getString(KEY_ACCOUNT, null), picture = picture();
         io.execute(() -> {
-            Bitmap shown = file.isFile() ? decodeCircle(file, size) : null;
-            if (shown == null && account != null && photo.isFile()) shown = decodeCircle(photo, size);
-            if (shown == null && account != null) shown = monogram(account, size);
-            Bitmap result = shown;
-            if (result != null) activity.runOnUiThread(() -> onAvatar.accept(result));
+            Bitmap result = shown(account, picture);
+            activity.runOnUiThread(() -> onAvatar.accept(result)); // null: the plain silhouette
         });
+    }
+
+    /** IO thread. */
+    private Bitmap shown(String account, String picture) {
+        if (account == null || NONE.equals(picture)) return null;
+        Bitmap round = PHOTO.equals(picture) && photo.isFile() ? decodeCircle(photo, size) : null;
+        return round != null ? round : monogram(account, size);
+    }
+
+    /** The chosen Google account's name (its address), or null. */
+    String account() {
+        return prefs.getString(KEY_ACCOUNT, null);
+    }
+
+    /** {@link #PHOTO}, {@link #INITIAL} or {@link #NONE}. */
+    String picture() {
+        return prefs.getString(KEY_PICTURE, PHOTO);
+    }
+
+    void setPicture(String picture, Consumer<Bitmap> onAvatar) {
+        prefs.edit().putString(KEY_PICTURE, picture).apply();
+        load(onAvatar);
     }
 
     /**
@@ -101,7 +124,9 @@ final class Profile {
     private void refresh(Consumer<Bitmap> onAvatar, boolean ask) {
         String name = prefs.getString(KEY_ACCOUNT, null);
         long now = System.currentTimeMillis();
-        if (name == null || file.isFile() || now - prefs.getLong(KEY_PHOTO_TRIED, 0) < REFRESH_MS) return;
+        if (name == null || now - prefs.getLong(KEY_PHOTO_TRIED, 0) < REFRESH_MS) return;
+        // Waking from standby, the TV resumes before Wi-Fi is back, and a try then would wait a day.
+        if (!online()) return;
         prefs.edit().putLong(KEY_PHOTO_TRIED, now).apply();
         AccountManager am = AccountManager.get(activity);
         Account account = null;
@@ -115,8 +140,8 @@ final class Profile {
                     am.invalidateAuthToken(GOOGLE, token); // expired: a fresh one next time
                     return;
                 }
-                Bitmap round = photo.isFile() ? decodeCircle(photo, size) : monogram(name, size);
-                if (round != null) activity.runOnUiThread(() -> onAvatar.accept(round));
+                Bitmap round = shown(name, picture());
+                activity.runOnUiThread(() -> onAvatar.accept(round));
             } catch (OperationCanceledException | AuthenticatorException | IOException | RuntimeException e) {
                 // Typically "UnregisteredOnApiConsole" until the app has an OAuth client.
                 Log.w(TAG, "No Google profile photo: " + e.getMessage());
@@ -124,6 +149,13 @@ final class Profile {
         });
         if (ask) am.getAuthToken(account, SCOPE, null, activity, done, null);
         else am.getAuthToken(account, SCOPE, null, false, done, null);
+    }
+
+    private boolean online() {
+        ConnectivityManager cm = activity.getSystemService(ConnectivityManager.class);
+        Network net = cm != null ? cm.getActiveNetwork() : null;
+        NetworkCapabilities caps = net != null ? cm.getNetworkCapabilities(net) : null;
+        return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
     }
 
     /**
@@ -191,15 +223,17 @@ final class Profile {
         return out.toByteArray();
     }
 
-    /** Decodes avatar.png straight to about the size it's shown at, then rounds it. */
+    /** Decodes the cached photo straight to about the size it's shown at, then rounds it. */
     private static Bitmap decodeCircle(File f, int size) {
         if (f.length() <= 0 || f.length() > MAX_FILE) return null;
         try {
             Bitmap src = ImageDecoder.decodeBitmap(ImageDecoder.createSource(f), (decoder, info, source) -> {
                 decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE); // read by a shader on a software canvas
                 int w = info.getSize().getWidth(), h = info.getSize().getHeight();
-                if (w > size * 2 && h > size * 2) {
-                    float k = (float) size / Math.min(w, h);
+                // The circle shows the middle square, so the short side sets the scale; the long side
+                // is capped too, or a thin strip of a picture could still decode to hundreds of MB.
+                float k = Math.min((float) size / Math.min(w, h), 8f * size / Math.max(w, h));
+                if (k < 0.5f) {
                     decoder.setTargetSize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
                 }
             });
@@ -209,6 +243,11 @@ final class Profile {
         } catch (IOException | RuntimeException e) {
             return null;
         }
+    }
+
+    /** Whether an account has been chosen for the profile picture. */
+    boolean hasAccount() {
+        return prefs.getString(KEY_ACCOUNT, null) != null;
     }
 
     /** Shows Android's account picker; the result arrives in {@link #onActivityResult}. */

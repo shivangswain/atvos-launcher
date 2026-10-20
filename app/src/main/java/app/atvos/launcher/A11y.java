@@ -49,6 +49,11 @@ final class A11y extends AccessibilityNodeProvider {
     private int focusedId = View.NO_ID, a11yFocusedId = View.NO_ID;
     private String focusedText = "", layout = "";
 
+    // The items as last listed, kept until the screen draws again or changes (sync()). TalkBack
+    // asks for the nodes one by one, and listing every item again for each was O(n²).
+    private final List<Item> snapshot = new ArrayList<>();
+    private boolean fresh;
+
     A11y(View host, Source source) {
         this.host = host;
         this.source = source;
@@ -62,13 +67,19 @@ final class A11y extends AccessibilityNodeProvider {
      */
     void sync() {
         if (manager == null || !manager.isEnabled()) return;
+        fresh = false;
         List<Item> items = items();
         StringBuilder ids = new StringBuilder();
         Item focused = null;
+        boolean a11yFocusShown = false;
         for (Item it : items) {
             ids.append(it.id).append(',');
             if (it.focused) focused = it;
+            if (it.id == a11yFocusedId) a11yFocusShown = true;
         }
+        // TalkBack's item went (a menu opened over it, say): don't let a later item with its id
+        // claim TalkBack's focus.
+        if (!a11yFocusShown) a11yFocusedId = View.NO_ID;
         if (!ids.toString().equals(layout)) {
             layout = ids.toString();
             send(View.NO_ID, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, null,
@@ -95,6 +106,7 @@ final class A11y extends AccessibilityNodeProvider {
         if (id == HOST_VIEW_ID) {
             AccessibilityNodeInfo info = new AccessibilityNodeInfo(host);
             host.onInitializeAccessibilityNodeInfo(info);
+            fresh = false; // a new look at the whole screen
             for (Item it : items()) info.addChild(host, it.id);
             return info;
         }
@@ -159,10 +171,18 @@ final class A11y extends AccessibilityNodeProvider {
         }
     }
 
+    /** The screen drew: things may have moved, so list the items afresh when next asked. */
+    void invalidate() {
+        fresh = false;
+    }
+
     private List<Item> items() {
-        List<Item> out = new ArrayList<>();
-        source.items(out);
-        return out;
+        if (!fresh) {
+            snapshot.clear();
+            source.items(snapshot);
+            fresh = true;
+        }
+        return snapshot;
     }
 
     private Item find(int id) {

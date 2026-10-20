@@ -1,5 +1,6 @@
 package app.atvos.launcher;
 
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -18,12 +19,13 @@ import java.util.Locale;
  * the layout, focus movement and drawing; {@link HomeView} owns input routing and {@link Controls}
  * does the actual work.
  * <pre>
- *   9:41 AM               ☾ ⏱  (⚙) (S)
+ *   9:41 AM            ☾ ⏱  (≡) (⚙) (S)
  *   [ Power ]  [ Wi-Fi     ]
  *   [  Off  ]  [ DND       ]
  *   [ Bluetooth ] [ Sleep  ]
  *   (In) (Acc) (System) (Find)
  * </pre>
+ * (≡), two switches as on tvOS, is atvOS's own Settings; (⚙) is the TV's.
  */
 final class ControlCenter {
 
@@ -32,8 +34,11 @@ final class ControlCenter {
     }
 
     static final int PROFILE = 0, SETTINGS = 1, POWER = 2, WIFI = 3, DND = 4, BLUETOOTH = 5, SLEEP = 6,
-            INPUTS = 7, ACCESSIBILITY = 8, SYSTEM = 9, SEARCH = 10;
-    static final int COUNT = 11;
+            INPUTS = 7, ACCESSIBILITY = 8, SYSTEM = 9, SEARCH = 10, LAUNCHER_SETTINGS = 11;
+    static final int COUNT = 12;
+    /** The tiles as they're read, left to right and down: the status row, then the grid. */
+    static final int[] READING_ORDER = {LAUNCHER_SETTINGS, SETTINGS, PROFILE, POWER, WIFI, DND, BLUETOOTH, SLEEP,
+            INPUTS, ACCESSIBILITY, SYSTEM, SEARCH};
 
     // One grid, as on tvOS: circles as tall as the pills, two circles to a pill column.
     private static final float ROW_H = 92f, GAP = 20f, COL_W = 2 * ROW_H + GAP, TOP = 134f, SETTINGS_D = 50f;
@@ -46,12 +51,12 @@ final class ControlCenter {
     private final RectF[] rects = new RectF[COUNT];
     private final float[] radii = new float[COUNT];
     private final float[] focus = new float[COUNT];
-    private final float cogSize; // the Settings cog, a little smaller than the profile avatar beside it
+    private final float cogSize; // the two Settings icons, a little smaller than the profile avatar
     private final Drawable power, wifi, ethernet, moon, bluetooth, headphones, timer, input, accessibility,
-            system, search, settings;
+            system, search, settings, switches;
     private final String powerOff, wifiLabel, ethernetLabel, connected, notConnected, dndLabel,
             bluetoothLabel, on, off, sleepTimerLabel, sleepLabel, minutes, profileLabel, settingsLabel, inputsLabel,
-            accessibilityLabel, systemLabel, searchLabel;
+            accessibilityLabel, systemLabel, searchLabel, launcherSettingsLabel;
 
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -68,9 +73,14 @@ final class ControlCenter {
     /** {@code right} is the screen-space right edge to align to; {@code avatar} is where the clock draws the profile avatar. */
     ControlCenter(Context context, float right, RectF avatar) {
         float rx = right - COL_W, lx = right - WIDTH;
-        float cy = avatar.centerY(), sx = avatar.left - 18f - SETTINGS_D / 2f;
+        // The status row, right to left: profile, the TV's Settings, then atvOS's own, the same gap
+        // between what's seen of each (both icons' glyphs fill 20 of their 24 units).
+        cogSize = avatar.width() * 0.95f; // a little smaller than the avatar beside them
+        float glyph = cogSize * 20f / 24f, gap = 24f;
+        float cy = avatar.centerY(), sx = avatar.left - gap - glyph / 2f, qx = sx - glyph - gap;
         rects[PROFILE] = new RectF(avatar);
         rects[SETTINGS] = new RectF(sx - SETTINGS_D / 2f, cy - SETTINGS_D / 2f, sx + SETTINGS_D / 2f, cy + SETTINGS_D / 2f);
+        rects[LAUNCHER_SETTINGS] = new RectF(qx - SETTINGS_D / 2f, cy - SETTINGS_D / 2f, qx + SETTINGS_D / 2f, cy + SETTINGS_D / 2f);
         rects[POWER] = new RectF(lx, TOP, lx + COL_W, TOP + 2 * ROW_H + GAP);
         rects[WIFI] = pill(rx, 0);
         rects[DND] = pill(rx, 1);
@@ -84,7 +94,6 @@ final class ControlCenter {
         }
         for (int i = 0; i < COUNT; i++) radii[i] = rects[i].height() / 2f;
         radii[POWER] = 44f;
-        cogSize = avatar.width() * 0.95f; // its glyph is 20 of the icon's 24 units, so a little smaller than the avatar
 
         power = icon(context, R.drawable.ic_power);
         wifi = icon(context, R.drawable.ic_wifi);
@@ -98,6 +107,7 @@ final class ControlCenter {
         system = icon(context, R.drawable.ic_tv);
         search = icon(context, R.drawable.ic_search);
         settings = icon(context, R.drawable.ic_settings);
+        switches = icon(context, R.drawable.ic_switches);
 
         powerOff = context.getString(R.string.power_off);
         wifiLabel = context.getString(R.string.wifi);
@@ -116,6 +126,7 @@ final class ControlCenter {
         accessibilityLabel = context.getString(R.string.a11y_accessibility);
         systemLabel = context.getString(R.string.a11y_system);
         searchLabel = context.getString(R.string.a11y_search);
+        launcherSettingsLabel = context.getString(R.string.a11y_launcher_settings);
         minutes = context.getString(R.string.minutes);
 
         text.setTypeface(Typeface.create(Typeface.DEFAULT, 500, false));
@@ -225,6 +236,7 @@ final class ControlCenter {
             case INPUTS -> inputsLabel;
             case ACCESSIBILITY -> accessibilityLabel;
             case SYSTEM -> systemLabel;
+            case LAUNCHER_SETTINGS -> launcherSettingsLabel;
             default -> searchLabel;
         };
     }
@@ -245,7 +257,7 @@ final class ControlCenter {
     /** Advances focus highlights; returns true while anything is still moving. */
     boolean step(float dt) {
         boolean moving = false;
-        float k = 1f - (float) Math.exp(-16f * dt);
+        float k = ValueAnimator.areAnimatorsEnabled() ? 1f - (float) Math.exp(-16f * dt) : 1f; // off: Remove animations
         for (int i = 0; i < COUNT; i++) {
             float target = i == selected ? 1f : 0f, d = target - focus[i];
             if (Math.abs(d) <= 0.002f) {
@@ -271,6 +283,7 @@ final class ControlCenter {
             ring.setAlpha(Math.round(alpha * focus[PROFILE]));
             c.drawCircle(a.centerX(), a.centerY(), a.width() / 2f + 5f, ring);
         }
+        tile(c, glass, LAUNCHER_SETTINGS, alpha, switches, 0, null, null);
         tile(c, glass, SETTINGS, alpha, settings, 0, null, null);
 
         c.save();
@@ -290,21 +303,22 @@ final class ControlCenter {
     }
 
     /**
-     * Status glyphs left of the Settings button, as on tvOS: what's on (Bluetooth audio, Do Not
-     * Disturb, sleep timer). The time and profile avatar are drawn by the clock.
+     * Status glyphs left of the status row's buttons, as on tvOS: what's on (Bluetooth audio, Do Not
+     * Disturb, sleep timer), never left of {@code minX} (where the time ends). The time and profile
+     * avatar are drawn by the clock.
      */
-    void drawStatus(Canvas c, float cy, int alpha) {
-        float size = 28f, x = rects[SETTINGS].left - 26f - size;
+    void drawStatus(Canvas c, float cy, int alpha, float minX) {
+        float size = 28f, x = rects[LAUNCHER_SETTINGS].left - 24f - size;
         Controls.State s = state;
-        if (s.sleepAt > 0) {
+        if (s.sleepAt > 0 && x >= minX) {
             drawIcon(c, timer, x, cy - size / 2f, size, WHITE, alpha);
-            x -= size + 18f;
+            x -= size + 16f;
         }
-        if (s.dnd) {
+        if (s.dnd && x >= minX) {
             drawIcon(c, moon, x, cy - size / 2f, size, WHITE, alpha);
-            x -= size + 18f;
+            x -= size + 16f;
         }
-        if (s.bluetoothDevice != null) drawIcon(c, headphones, x, cy - size / 2f, size, WHITE, alpha);
+        if (s.bluetoothDevice != null && x >= minX) drawIcon(c, headphones, x, cy - size / 2f, size, WHITE, alpha);
     }
 
     /** One tile: glass when idle, white when focused; an accent colour marks "on". */
@@ -315,8 +329,9 @@ final class ControlCenter {
         r.set(base.centerX() - w / 2f, base.centerY() - h / 2f, base.centerX() + w / 2f, base.centerY() + h / 2f);
         float radius = radii[id] * grow;
 
-        // The Settings button in the status row has no glass: just its icon, until focused.
-        if (f < 0.99f && id != SETTINGS) glass.draw(c, r, radius, 0x24FFFFFF, Math.round(alpha * (1f - f)));
+        // The status row's buttons have no glass: just their icons, until focused.
+        boolean bare = id == SETTINGS || id == LAUNCHER_SETTINGS;
+        if (f < 0.99f && !bare) glass.draw(c, r, radius, 0x24FFFFFF, Math.round(alpha * (1f - f)));
         if (f > 0.01f) {
             fill.setColor(Color.argb(Math.round(alpha * f * 0.96f), 255, 255, 255));
             c.drawRoundRect(r, radius, radius, fill);
@@ -333,7 +348,7 @@ final class ControlCenter {
             text.setAlpha(alpha);
             c.drawText(powerOff, r.centerX(), r.bottom - 34f * grow, text);
         } else if (line1 == null) {
-            float size = id == SETTINGS ? cogSize * grow : r.height() * 0.46f;
+            float size = bare ? cogSize * grow : r.height() * 0.46f;
             drawIcon(c, icon, r.centerX() - size / 2f, r.centerY() - size / 2f, size, iconColor, alpha);
         } else {
             float size = 36f * grow, x = r.left + 24f * grow;

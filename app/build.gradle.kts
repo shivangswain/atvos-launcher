@@ -4,9 +4,9 @@ plugins {
     id("com.android.application")
 }
 
-// Release signing comes from keystore.properties (never committed): storeFile, storePassword,
-// keyAlias, keyPassword. Without it, release builds are signed with the local debug key, for
-// sideloading.
+// Release signing (Google Play's upload key) comes from keystore.properties (never committed):
+// storeFile, storePassword, keyAlias, keyPassword. Without it, release builds are signed with the
+// local debug key, so a checkout without the key can still build and test them.
 val keystore = rootProject.file("keystore.properties").takeIf { it.isFile }?.let { file ->
     Properties().apply { file.inputStream().use { load(it) } }
 }
@@ -38,7 +38,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
@@ -60,4 +60,10 @@ android {
     }
 }
 
-// No dependencies: the app uses only the Android framework.
+dependencies {
+    // Google Play billing, for the optional tip in Settings, and nothing it would bring along: the
+    // three AndroidX calls it makes are stood in for in src/main/java/androidx (no AndroidX, no
+    // Kotlin), its usage logging (datatransport) turns itself off when missing, and the one screen
+    // needing androidx.activity (alternative billing, unused) is taken out of the manifest.
+    implementation("com.android.billingclient:billing:9.1.0") { isTransitive = false }
+}

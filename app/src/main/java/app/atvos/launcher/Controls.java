@@ -40,11 +40,12 @@ final class Controls {
     }
 
     private static final int[] SLEEP_MINUTES = {15, 30, 60, 90, 120};
+    private static final String KEY_ASKED_EXACT = "asked_exact_alarms";
     // Google TV Settings screens: Remotes & Accessories, and Settings > System.
     static final String ACCESSORIES = "com.android.tv.settings.ACCESSORIES_CONNECTED_DEVICES";
     static final String SYSTEM = "com.android.tv.settings.DEVICES";
     static final String INPUTS = "com.android.tv.action.VIEW_INPUTS";
-    /** How the TV's home screen is set up, for the Setup & Support sheet. */
+    /** How the TV's home screen is set up, for the setup steps and Settings. */
     static final class Setup {
         boolean homeActive;   // the Home button opens atvOS Launcher
         String currentHome;   // what it opens instead (the app's name), or null if unknown
@@ -55,7 +56,13 @@ final class Controls {
         final List<String> lockedHomes = new ArrayList<>();
         boolean canPickHome;  // Android's home-app dialog can make atvOS the home screen
         boolean holdsPower;   // the device admin is active
+        boolean developerOn;  // Developer options are turned on
+        boolean adbOn;        // USB (or network) debugging is turned on
+        /** Home apps this launcher turned off over self-adb, to offer putting back. */
+        final List<String> disabledHomes = new ArrayList<>();
     }
+    /** Packages we disabled over self-adb (comma-separated), so Restore can re-enable exactly those. */
+    static final String KEY_DISABLED_HOMES = "self_disabled_homes";
     private final Activity activity;
     private final SharedPreferences prefs;
     private final DevicePolicyManager dpm;
@@ -148,14 +155,19 @@ final class Controls {
             alarms.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, pi);
         } else {
             // An inexact alarm can be as much as 10 minutes late, so first ask for exact alarms
-            // (Android 14+ doesn't grant them by default), where the TV has the screen for it.
-            Intent ask = new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.fromParts("package", activity.getPackageName(), null));
-            try {
-                activity.startActivity(ask.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-                return;
-            } catch (ActivityNotFoundException | SecurityException e) {
-                alarms.setWindow(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, 60_000, pi);
+            // (Android 14+ doesn't grant them by default), where the TV has the screen for it. Only
+            // once: if the answer was no, or the screen had no switch, the timer must still work.
+            if (!prefs.getBoolean(KEY_ASKED_EXACT, false)) {
+                prefs.edit().putBoolean(KEY_ASKED_EXACT, true).apply();
+                Intent ask = new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.fromParts("package", activity.getPackageName(), null));
+                try {
+                    activity.startActivity(ask.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    return;
+                } catch (ActivityNotFoundException | SecurityException ignored) {
+                    // no such screen on this TV
+                }
             }
+            alarms.setWindow(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, 60_000, pi);
         }
         prefs.edit().putLong(SleepTimer.KEY_SLEEP_AT, trigger).apply(); // same clock as the alarm, so a clock change can't skew it
     }
@@ -203,7 +215,8 @@ final class Controls {
         String currentPkg = current != null ? current.activityInfo.packageName : null;
         s.homeActive = self.equals(currentPkg);
         if (!s.homeActive && currentPkg != null && !"android".equals(currentPkg)) { // "android": Android's chooser
-            s.currentHome = current.loadLabel(pm).toString();
+            // The app's name: Google TV's home activity is just called "Home".
+            s.currentHome = current.activityInfo.applicationInfo.loadLabel(pm).toString();
         }
         for (ResolveInfo ri : pm.queryIntentActivities(home, 0)) {
             String pkg = ri.activityInfo.packageName;
@@ -215,8 +228,38 @@ final class Controls {
         // The dialog only helps against an ordinary home app; a locked one wins regardless.
         s.canPickHome = !s.homeActive && s.lockedHomes.isEmpty() && !chosen
                 && (roleAvailable || hasHomeSettings());
+        for (String pkg : prefs.getString(KEY_DISABLED_HOMES, "").split(",")) {
+            if (!pkg.isEmpty()) s.disabledHomes.add(pkg);
+        }
+        s.adbOn = adbEnabled();
+        s.developerOn = s.adbOn || Settings.Global.getInt(activity.getContentResolver(),
+                Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1;
         s.holdsPower = dpm.isAdminActive(admin);
         return s;
+    }
+
+    /** True if adb debugging is on at all (USB or wireless); self-setup needs the user to have enabled it. */
+    boolean adbEnabled() {
+        return Settings.Global.getInt(activity.getContentResolver(), Settings.Global.ADB_ENABLED, 0) == 1;
+    }
+
+    /** Opens Developer options, where the user turns on debugging. */
+    void openDeveloperSettings() {
+        if (!openFresh(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) open(Settings.ACTION_SETTINGS);
+    }
+
+    /** Settings' About screen, where selecting the build number turns on Developer options. */
+    void openAbout() {
+        if (!openFresh(Settings.ACTION_DEVICE_INFO_SETTINGS)) open(Settings.ACTION_SETTINGS);
+    }
+
+    /** Remembers the home apps we just turned off, so Restore can put back exactly those. */
+    void rememberDisabled(List<String> packages) {
+        prefs.edit().putString(KEY_DISABLED_HOMES, String.join(",", packages)).apply();
+    }
+
+    void clearDisabled() {
+        prefs.edit().remove(KEY_DISABLED_HOMES).apply();
     }
 
     /**
@@ -243,8 +286,20 @@ final class Controls {
 
     /** Opens a screen by intent action; false if this TV has nothing for it. */
     boolean open(String action) {
+        return start(new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+    }
+
+    /**
+     * Opens exactly that screen, in a Settings started afresh. Without this, Settings left open
+     * elsewhere (or on this screen's parent) just comes back as it was, on whatever was last shown.
+     */
+    private boolean openFresh(String action) {
+        return start(new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
+    }
+
+    private boolean start(Intent intent) {
         try {
-            activity.startActivity(new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            activity.startActivity(intent);
             return true;
         } catch (ActivityNotFoundException | SecurityException e) {
             return false;

@@ -18,8 +18,17 @@
          USE_EXACT_ALARM, which it reserves for alarm clocks and calendars); from Android 14 the user
          grants it once, in Settings > Apps > Special app access > Alarms & reminders. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- Delete App: Android's own uninstall screen, after the Delete alert. -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <!-- Settings > Support > Donate: through Google Play (the billing library adds BILLING). On Android 12,
+         its receiver is kept private with this signature permission, as AndroidX does. -->
+    <permission
+        android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
 
-    <!-- Package visibility: apps that can be launched from a home screen, home apps, and the TV provider. -->
+    <!-- Package visibility: apps that can be launched from a home screen, home apps, the Settings
+         screen for choosing one, the TV provider, and what opens web and Google Play links. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -34,7 +43,20 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.HOME" />
         </intent>
+        <intent>
+            <action android:name="android.settings.HOME_SETTINGS" />
+        </intent>
         <provider android:authorities="android.media.tv" />
+        <!-- Settings > Support: whether there's a browser for the website, Google Play for its page -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="market" />
+        </intent>
     </queries>
 
     <application
@@ -52,7 +74,7 @@
         <activity
             android:name=".HomeActivity"
             android:clearTaskOnLaunch="true"
-            android:configChanges="density|fontScale|keyboard|keyboardHidden|layoutDirection|locale|navigation|orientation|screenLayout|screenSize|smallestScreenSize|touchscreen|uiMode"
+            android:configChanges="density|fontScale|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|touchscreen|uiMode"
             android:excludeFromRecents="true"
             android:exported="true"
             android:launchMode="singleTask"
@@ -85,16 +107,13 @@
             </intent-filter>
         </receiver>
 
-        <!-- adb only, before uninstalling: am broadcast -n app.atvos.launcher/.ReleasePower. The sender must
-             hold DUMP, which the adb shell has and apps can't get. -->
-        <receiver
-            android:name=".ReleasePower"
-            android:exported="true"
-            android:permission="android.permission.DUMP" />
-
         <!-- Sleep timer alarm; only our own PendingIntent can reach it. -->
         <receiver
             android:name=".SleepTimer"
             android:exported="false" />
+        <!-- Google Play billing's alternative-billing screen needs AndroidX, which isn't here; it's unused. -->
+        <activity
+            android:name="com.android.billingclient.api.ProxyBillingActivityV2"
+            tools:node="remove" />
     </application>
 </manifest>
