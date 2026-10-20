@@ -27,7 +27,9 @@ import android.provider.Settings;
 import android.widget.Toast;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /** The system state and actions behind the Control Center tiles. UI thread. */
 final class Controls {
@@ -63,6 +65,8 @@ final class Controls {
     }
     /** Packages we disabled over self-adb (comma-separated), so Restore can re-enable exactly those. */
     static final String KEY_DISABLED_HOMES = "self_disabled_homes";
+    /** Home apps self-setup never turns off: Android's chooser, and Settings (which holds the fallback home). */
+    private static final Set<String> NEVER_DISABLE = Set.of("android", "com.android.settings", "com.android.tv.settings");
     private final Activity activity;
     private final SharedPreferences prefs;
     private final DevicePolicyManager dpm;
@@ -133,7 +137,8 @@ final class Controls {
             requestAdmin();
             return;
         }
-        long now = SystemClock.elapsedRealtime(), at = prefs.getLong(SleepTimer.KEY_SLEEP_AT, 0);
+        // A deadline saved before a reboot is meaningless now (and its alarm is gone).
+        long now = SystemClock.elapsedRealtime(), at = SleepTimer.active(activity) ? prefs.getLong(SleepTimer.KEY_SLEEP_AT, 0) : 0;
         long left = at > now ? at - now : 0;
         // The next step up from what's left; after the longest, the timer turns off.
         int next = 0;
@@ -220,7 +225,10 @@ final class Controls {
         }
         for (ResolveInfo ri : pm.queryIntentActivities(home, 0)) {
             String pkg = ri.activityInfo.packageName;
-            if (ri.priority > 0 && !self.equals(pkg) && !s.lockedHomes.contains(pkg)) s.lockedHomes.add(pkg);
+            // Never Android itself or Settings (its fallback home), whatever priority they declare.
+            if (ri.priority > 0 && !self.equals(pkg) && !NEVER_DISABLE.contains(pkg) && !s.lockedHomes.contains(pkg)) {
+                s.lockedHomes.add(pkg);
+            }
         }
         RoleManager roles = activity.getSystemService(RoleManager.class);
         boolean roleAvailable = roles != null && roles.isRoleAvailable(RoleManager.ROLE_HOME);
@@ -228,8 +236,17 @@ final class Controls {
         // The dialog only helps against an ordinary home app; a locked one wins regardless.
         s.canPickHome = !s.homeActive && s.lockedHomes.isEmpty() && !chosen
                 && (roleAvailable || hasHomeSettings());
-        for (String pkg : prefs.getString(KEY_DISABLED_HOMES, "").split(",")) {
-            if (!pkg.isEmpty()) s.disabledHomes.add(pkg);
+        s.disabledHomes.addAll(disabled());
+        // And any of the TV's own home apps still turned off for this user, saved or not (the
+        // launcher's data cleared since, say), so Restore can always bring the TV's home back.
+        for (ResolveInfo ri : pm.queryIntentActivities(home, PackageManager.MATCH_DISABLED_COMPONENTS | PackageManager.MATCH_SYSTEM_ONLY)) {
+            String pkg = ri.activityInfo.packageName;
+            if (self.equals(pkg) || NEVER_DISABLE.contains(pkg) || s.disabledHomes.contains(pkg)) continue;
+            try {
+                if (pm.getApplicationEnabledSetting(pkg) == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER) s.disabledHomes.add(pkg);
+            } catch (IllegalArgumentException ignored) {
+                // gone meanwhile
+            }
         }
         s.adbOn = adbEnabled();
         s.developerOn = s.adbOn || Settings.Global.getInt(activity.getContentResolver(),
@@ -253,13 +270,26 @@ final class Controls {
         if (!openFresh(Settings.ACTION_DEVICE_INFO_SETTINGS)) open(Settings.ACTION_SETTINGS);
     }
 
-    /** Remembers the home apps we just turned off, so Restore can put back exactly those. */
-    void rememberDisabled(List<String> packages) {
-        prefs.edit().putString(KEY_DISABLED_HOMES, String.join(",", packages)).apply();
+    /** The home apps self-setup turned off, as saved. */
+    private Set<String> disabled() {
+        Set<String> all = new LinkedHashSet<>();
+        for (String pkg : prefs.getString(KEY_DISABLED_HOMES, "").split(",")) if (!pkg.isEmpty()) all.add(pkg);
+        return all;
     }
 
-    void clearDisabled() {
-        prefs.edit().remove(KEY_DISABLED_HOMES).apply();
+    /** Remembers home apps just turned off, with any turned off before, so Restore can put them all back. */
+    void rememberDisabled(List<String> packages) {
+        Set<String> all = disabled();
+        all.addAll(packages);
+        prefs.edit().putString(KEY_DISABLED_HOMES, String.join(",", all)).apply();
+    }
+
+    /** Forgets home apps just turned back on. */
+    void forgetDisabled(List<String> packages) {
+        Set<String> all = disabled();
+        packages.forEach(all::remove);
+        if (all.isEmpty()) prefs.edit().remove(KEY_DISABLED_HOMES).apply();
+        else prefs.edit().putString(KEY_DISABLED_HOMES, String.join(",", all)).apply();
     }
 
     /**

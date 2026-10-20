@@ -180,10 +180,11 @@ Google only shares profile photos with apps registered to it, so this needs a on
 for the app. It's free and has no secret to copy:
 
 1. In the [Google Cloud console](https://console.cloud.google.com/), create a project (or pick one).
-2. Under **Google Auth Platform**, set up the app as **External** and leave it in **Testing**. Under
-   **Audience**, add the TV's Google account as a test user. (Publishing would need a public home
-   page and privacy policy. Testing is fine here: access to basic profile info doesn't expire after
-   seven days, as it does for other scopes.)
+2. Under **Google Auth Platform**, set up the app as **External**, with atvos.tv as its home page and
+   its privacy policy's address. Then, under **Audience**, **Publish app** to put it **In
+   production**: while it's in Testing, only the Google accounts listed as test users get a photo,
+   and everyone else installing from Google Play would only ever see their letter. Basic profile info
+   is a non-sensitive scope, so publishing doesn't need Google's verification.
 3. Under **Clients**, create an **Android** client with package name `app.atvos.launcher` and the
    SHA-1 of Google Play's app signing key (Play Console > **Test and release** > **App integrity**).
 
@@ -236,6 +237,15 @@ keyPassword=…
 
 Testers install it from Play's internal testing track. Donations can only be tried in a copy from
 Google Play, by an account listed as a licence tester.
+
+### Before publishing on Google Play
+
+- **Privacy policy:** Play Console needs its address (on atvos.tv). The app shows the same promise in
+  Settings > General > Privacy.
+- **Data safety:** atvOS Launcher collects and shares nothing. The Google account's address and photo
+  are only read and kept on the TV, and donations are handled by Google Play.
+- **Donations:** the consumable in-app product `donation`, as above.
+- **Google profile photo:** the OAuth app published In production, as above.
 
 ## Uninstalling
 

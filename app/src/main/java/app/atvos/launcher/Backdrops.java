@@ -52,6 +52,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import javax.net.ssl.HttpsURLConnection;
 
@@ -97,9 +101,9 @@ final class Backdrops {
             this.program = program;
             this.row = row;
             this.clockLight = light(blur, 0.86f, 0.03f, 1f, 0.11f);
-            this.hintLight = light(blur, 0.40f, 0.62f, 0.60f, 0.70f);
             this.controlsLight = light(blur, 0.72f, 0.10f, 1f, 0.53f);
             this.hintColor = colour(blur, 0.40f, 0.62f, 0.60f, 0.70f);
+            this.hintLight = luminance(hintColor); // the mean colour's luminance is the mean luminance
         }
 
         /** Mean colour of a region given as fractions of the (small, blurred) bitmap. */
@@ -155,6 +159,17 @@ final class Backdrops {
     private static final String NO_WATCH_NEXT = "no_watch_next", NO_PREVIEWS = "no_previews";
     private static final String REMOTE = "rec:", APP = "app:", ROW = "row:";
     private static final int MAX_DOWNLOAD = 16 << 20;
+    /**
+     * A download's whole time, after which it's cut off: an app's content that never finishes (a
+     * pipe it never writes to) or a server sending a byte at a time would otherwise hold up every
+     * other app's artwork behind it.
+     */
+    private static final long FETCH_DEADLINE_S = 30;
+    private static final ScheduledExecutorService DEADLINES = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "fetch-deadline");
+        t.setDaemon(true);
+        return t;
+    });
     private static final int MAX_CACHED = 72; // a few pages each for the apps with top shelves
 
     private final ContentResolver resolver;
@@ -230,6 +245,7 @@ final class Backdrops {
             }
         }
         downloaded.removeIf(url -> !cacheFile(url).isFile());
+        hd.keySet().retainAll(downloaded); // sizes only of images still cached
         watchNext = found.watchNext;
         previews = found.previews;
         pages = shown;
@@ -1138,6 +1154,7 @@ final class Backdrops {
         }
         HttpURLConnection http = null;
         File tmp = null;
+        ScheduledFuture<?> deadline = null;
         try {
             InputStream in;
             if (https) {
@@ -1156,6 +1173,15 @@ final class Backdrops {
                 return null;
             }
             try (InputStream src = in) {
+                HttpURLConnection connection = http;
+                deadline = DEADLINES.schedule(() -> { // closing it ends a read that's waiting
+                    try {
+                        src.close();
+                    } catch (IOException ignored) {
+                        // closed already
+                    }
+                    if (connection != null) connection.disconnect();
+                }, FETCH_DEADLINE_S, TimeUnit.SECONDS);
                 //noinspection ResultOfMethodCallIgnored
                 downloads.mkdirs();
                 tmp = File.createTempFile("part", null, downloads);
@@ -1165,6 +1191,7 @@ final class Backdrops {
         } catch (IOException | RuntimeException e) {
             return null;
         } finally {
+            if (deadline != null) deadline.cancel(false);
             if (http != null) http.disconnect();
             if (tmp != null && tmp.exists()) //noinspection ResultOfMethodCallIgnored
                 tmp.delete();
@@ -1175,7 +1202,8 @@ final class Backdrops {
         String authority = uri.getAuthority();
         // Never a "user@": ContentResolver reads it as a user id and goes on to the authority after
         // it, so the provider checked here wouldn't be the one read.
-        if (authority == null || owner == null || uri.getUserInfo() != null) return false;
+        // ("%40" too: getUserInfo() misses an encoded one, but getAuthority() decodes it.)
+        if (authority == null || owner == null || uri.getUserInfo() != null || authority.indexOf('@') >= 0) return false;
         if (scheme.equals(ContentResolver.SCHEME_ANDROID_RESOURCE)) return authority.equals(owner);
         ProviderInfo provider = pm.resolveContentProvider(authority, 0);
         return provider != null && provider.exported && owner.equals(provider.packageName);
@@ -1238,7 +1266,11 @@ final class Backdrops {
             boxBlurTransposed(px, tmp, w, h);
             boxBlurTransposed(tmp, px, h, w);
         }
-        Bitmap out = small.isMutable() ? small : Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Bitmap out = small;
+        if (!small.isMutable()) {
+            out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            if (small != src) small.recycle();
+        }
         out.setPixels(px, 0, w, 0, 0, w, h);
         return out;
     }

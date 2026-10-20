@@ -42,6 +42,8 @@ import java.util.Locale;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 
+import javax.net.ssl.HttpsURLConnection;
+
 /**
  * The profile picture in the clock pill: the Google account's profile photo, else its letter avatar
  * (what Google shows for accounts without one), or, as Settings &gt; Profile Picture chooses, just
@@ -131,13 +133,21 @@ final class Profile {
         AccountManager am = AccountManager.get(activity);
         Account account = null;
         for (Account a : am.getAccountsByType(GOOGLE)) if (a.name.equals(name)) account = a;
-        if (account == null) return;
+        if (account != null) fetchPhoto(am, account, onAvatar, ask, true);
+    }
+
+    /** Asks for a token and fetches the photo with it; {@code retry}: once more with a fresh token if that one had expired. */
+    private void fetchPhoto(AccountManager am, Account account, Consumer<Bitmap> onAvatar, boolean ask, boolean retry) {
+        String name = account.name;
         AccountManagerCallback<Bundle> done = future -> io.execute(() -> {
             try {
                 String token = future.getResult().getString(AccountManager.KEY_AUTHTOKEN);
                 if (token == null) return; // consent still needed (only shown when asked)
                 if (!download(token)) {
-                    am.invalidateAuthToken(GOOGLE, token); // expired: a fresh one next time
+                    // Expired (Android hands out its cached token until told otherwise): get a fresh
+                    // one now rather than at the next try a day away.
+                    am.invalidateAuthToken(GOOGLE, token);
+                    if (retry) activity.runOnUiThread(() -> fetchPhoto(am, account, onAvatar, false, false));
                     return;
                 }
                 Bitmap round = shown(name, picture());
@@ -164,7 +174,7 @@ final class Profile {
      */
     private boolean download(String token) throws IOException {
         String picture;
-        HttpURLConnection http = (HttpURLConnection) new URL(USERINFO).openConnection();
+        HttpURLConnection http = (HttpsURLConnection) new URL(USERINFO).openConnection(); // HTTPS or it throws
         try {
             http.setConnectTimeout(8000);
             http.setReadTimeout(15000);
@@ -193,7 +203,7 @@ final class Profile {
         if (!"https".equals(url.getProtocol()) || host == null || !host.endsWith(".googleusercontent.com")) {
             throw new IOException("unexpected photo address");
         }
-        http = (HttpURLConnection) url.openConnection();
+        http = (HttpsURLConnection) url.openConnection();
         File tmp = new File(photo.getPath() + ".part");
         try {
             http.setConnectTimeout(8000);
@@ -266,9 +276,11 @@ final class Profile {
     void onActivityResult(int resultCode, Intent data, Consumer<Bitmap> onAvatar) {
         String name = data != null ? data.getStringExtra(AccountManager.KEY_ACCOUNT_NAME) : null;
         if (resultCode != Activity.RESULT_OK || name == null) return;
-        // A new pick also retries the photo now (say, after setting up the OAuth client).
+        // A new pick also retries the photo now (say, after setting up the OAuth client). Another
+        // account's photo goes at once; the same account's stays until a new one replaces it.
+        boolean other = !name.equals(prefs.getString(KEY_ACCOUNT, null));
         prefs.edit().putString(KEY_ACCOUNT, name).remove(KEY_PHOTO_TRIED).apply();
-        io.execute(photo::delete); // before load() reads it: the executor is single-threaded
+        if (other) io.execute(photo::delete); // before load() reads it: the executor is single-threaded
         load(onAvatar);
         refresh(onAvatar, true);
     }
@@ -301,7 +313,7 @@ final class Profile {
         p.setTypeface(Typeface.create(Typeface.DEFAULT, 500, false));
         p.setTextSize(size * 0.5f);
         p.setTextAlign(Paint.Align.CENTER);
-        String letter = account.isEmpty() ? "?" : account.substring(0, 1).toUpperCase(Locale.ROOT);
+        String letter = account.isEmpty() ? "?" : new String(Character.toChars(account.codePointAt(0))).toUpperCase(Locale.ROOT);
         c.drawText(letter, size / 2f, size / 2f - (p.descent() + p.ascent()) / 2f, p);
         return out;
     }

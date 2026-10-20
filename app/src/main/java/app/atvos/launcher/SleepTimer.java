@@ -24,21 +24,28 @@ public final class SleepTimer extends BroadcastReceiver {
 
     /** Whether the alarm still exists: alarms don't survive a reboot, though the saved deadline does. */
     static boolean active(Context context) {
-        return PendingIntent.getBroadcast(context, 0, new Intent(context, SleepTimer.class),
-                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_NO_CREATE) != null;
+        return existing(context) != null;
     }
 
     static void cancel(Context context) {
-        PendingIntent pi = pending(context);
-        context.getSystemService(AlarmManager.class).cancel(pi);
-        pi.cancel(); // so active() reports it gone
+        PendingIntent pi = existing(context); // none: nothing to cancel, and none made just to cancel it
+        if (pi != null) {
+            context.getSystemService(AlarmManager.class).cancel(pi);
+            pi.cancel(); // so active() reports it gone
+        }
         forget(context);
+    }
+
+    private static PendingIntent existing(Context context) {
+        return PendingIntent.getBroadcast(context, 0, new Intent(context, SleepTimer.class),
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_NO_CREATE);
     }
 
     @Override
     public void onReceive(Context context, Intent intent) {
         forget(context);
-        pending(context).cancel(); // spent: so active() reports it gone, as after cancel()
+        PendingIntent spent = existing(context);
+        if (spent != null) spent.cancel(); // so active() reports it gone, as after cancel()
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         if (dpm.isAdminActive(new ComponentName(context, PowerAdmin.class))) dpm.lockNow();
     }

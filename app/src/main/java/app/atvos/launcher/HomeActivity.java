@@ -469,32 +469,24 @@ public final class HomeActivity extends Activity implements HomeView.Host {
 
     @Override
     public void selfSetupHome(HomeView.SelfSetup progress) {
-        List<String> homes = new ArrayList<>(controls.setup().lockedHomes);
-        runSelfAdb(homes, SelfAdb.Job.HOME, progress, () -> {
-            controls.rememberDisabled(homes);
-            return SelfAdb.Result.OK.messageRes;
-        });
+        runSelfAdb(new ArrayList<>(controls.setup().lockedHomes), SelfAdb.Job.HOME, progress, controls::rememberDisabled,
+                SelfAdb.Result.OK.messageRes);
     }
 
     @Override
     public void restoreTvHome(HomeView.SelfSetup progress) {
-        runSelfAdb(new ArrayList<>(controls.setup().disabledHomes), SelfAdb.Job.RESTORE, progress, () -> {
-            controls.clearDisabled();
-            return R.string.setup_tv_restored;
-        });
-    }
-
-    /** What to do once a self-adb job has worked (on its thread): returns the message to show. */
-    private interface AfterAdb {
-        int done();
+        runSelfAdb(new ArrayList<>(controls.setup().disabledHomes), SelfAdb.Job.RESTORE, progress, controls::forgetDisabled,
+                R.string.setup_tv_restored);
     }
 
     /**
-     * Turns the TV's own home apps off (or back on) over its own adb, then runs {@code after}. On a
-     * thread of its own, not {@link #io}: it can wait over a minute on the TV's prompt, and the home screen's
-     * loading mustn't queue up behind it.
+     * Turns the TV's own home apps off (or back on) over its own adb. {@code record} hears which
+     * packages it changed, even when a later one fails, so none is lost track of; {@code okMessage}
+     * is shown when all worked. On a thread of its own, not {@link #io}: it can wait over a minute on
+     * the TV's prompt, and the home screen's loading mustn't queue up behind it.
      */
-    private void runSelfAdb(List<String> packages, SelfAdb.Job job, HomeView.SelfSetup progress, AfterAdb after) {
+    private void runSelfAdb(List<String> packages, SelfAdb.Job job, HomeView.SelfSetup progress,
+                            java.util.function.Consumer<List<String>> record, int okMessage) {
         if (!controls.adbEnabled()) {
             // We can't turn debugging on ourselves; send the user to the screen that does.
             controls.openDeveloperSettings();
@@ -509,13 +501,15 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         selfAdb = adb;
         adbApproving = false;
         new Thread(() -> {
+            List<String> changed = new ArrayList<>();
             SelfAdb.Result r = adb.run(packages, job, step -> runOnUiThread(() -> {
                 if (selfAdb != adb || isDestroyed()) return; // replaced by a retry, or gone
                 adbApproving = step == SelfAdb.Listener.APPROVE;
                 progress.status(stepMessage(step));
-            }));
+            }), changed);
+            if (!changed.isEmpty()) record.accept(changed);
             boolean ok = r == SelfAdb.Result.OK;
-            int message = ok ? after.done() : r.messageRes;
+            int message = ok ? okMessage : r.messageRes;
             runOnUiThread(() -> {
                 if (selfAdb != adb || isDestroyed()) return;
                 selfAdb = null;
@@ -652,9 +646,9 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     @Override
     public void editText(String text, HomeView.TextEdit edit) {
         finishTextEdit();
-        textEdit = edit;
         input.setText(text);
         input.setSelection(input.length());
+        textEdit = edit; // after setText, which isn't a change the user made
         input.setVisibility(View.VISIBLE);
         input.requestFocus();
         input.post(() -> getSystemService(InputMethodManager.class).showSoftInput(input, 0)); // the user asked to type
@@ -665,7 +659,10 @@ public final class HomeActivity extends Activity implements HomeView.Host {
             @Override
             public boolean onKeyPreIme(int keyCode, KeyEvent event) {
                 // Back keeps what's typed, as Menu does on tvOS.
-                if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) finishTextEdit();
+                if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
+                    finishTextEdit();
+                    return true; // done with: it mustn't go on to the home screen, now focused
+                }
                 return super.onKeyPreIme(keyCode, event);
             }
         };

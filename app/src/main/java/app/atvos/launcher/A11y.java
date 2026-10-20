@@ -10,6 +10,7 @@ import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityNodeProvider;
 import android.widget.Button;
+import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,8 +25,14 @@ import java.util.List;
  */
 final class A11y extends AccessibilityNodeProvider {
 
-    /** One focusable thing on screen. Bounds are in 1920-wide design units. */
-    record Item(int id, String label, String state, String hint, RectF bounds, boolean focused) {
+    /**
+     * One focusable thing on screen. Bounds are in 1920-wide design units. {@code clickable}: select
+     * does something (a row that only shows words, or a fact, doesn't).
+     */
+    record Item(int id, String label, String state, String hint, RectF bounds, boolean focused, boolean clickable) {
+        Item(int id, String label, String state, String hint, RectF bounds, boolean focused) {
+            this(id, label, state, hint, bounds, focused, true);
+        }
     }
 
     /** What the home screen tells this class. */
@@ -48,6 +55,10 @@ final class A11y extends AccessibilityNodeProvider {
     // What was last announced, to tell TalkBack only about changes.
     private int focusedId = View.NO_ID, a11yFocusedId = View.NO_ID;
     private String focusedText = "", layout = "";
+    // Where the focused item was when TalkBack was told of it, and whether to look again once the
+    // screen has drawn: what just opened is only laid out when first drawn.
+    private final RectF focusedBounds = new RectF();
+    private boolean recheck;
 
     // The items as last listed, kept until the screen draws again or changes (sync()). TalkBack
     // asks for the nodes one by one, and listing every item again for each was O(n²).
@@ -73,7 +84,8 @@ final class A11y extends AccessibilityNodeProvider {
         Item focused = null;
         boolean a11yFocusShown = false;
         for (Item it : items) {
-            ids.append(it.id).append(',');
+            // Labels too: another page of Settings can have the same ids (rows 0 to 3) and still be new.
+            ids.append(it.id).append(':').append(it.label).append(',');
             if (it.focused) focused = it;
             if (it.id == a11yFocusedId) a11yFocusShown = true;
         }
@@ -82,6 +94,7 @@ final class A11y extends AccessibilityNodeProvider {
         if (!a11yFocusShown) a11yFocusedId = View.NO_ID;
         if (!ids.toString().equals(layout)) {
             layout = ids.toString();
+            focusedId = View.NO_ID; // a new screen: say where focus is on it, even at the same id
             send(View.NO_ID, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, null,
                     AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE);
         }
@@ -89,10 +102,16 @@ final class A11y extends AccessibilityNodeProvider {
             focusedId = View.NO_ID;
             return;
         }
+        if (focused.bounds.isEmpty()) { // not drawn yet: tell TalkBack once it has somewhere to point
+            recheck = true;
+            return;
+        }
         String text = focused.label + '|' + focused.state + '|' + focused.hint;
         if (focused.id != focusedId) {
             focusedId = focused.id;
             focusedText = text;
+            focusedBounds.set(focused.bounds);
+            recheck = true;
             send(focused.id, AccessibilityEvent.TYPE_VIEW_FOCUSED, focused, 0);
         } else if (!text.equals(focusedText)) {
             focusedText = text;
@@ -114,21 +133,22 @@ final class A11y extends AccessibilityNodeProvider {
         if (it == null) return null;
         AccessibilityNodeInfo n = new AccessibilityNodeInfo(host, id);
         n.setPackageName(host.getContext().getPackageName());
-        n.setClassName(Button.class.getName());
+        n.setClassName(it.clickable ? Button.class.getName() : TextView.class.getName());
         n.setParent(host);
         n.setText(it.label);
         n.setStateDescription(it.state);
         n.setHintText(it.hint);
         Rect screen = screenBounds(it.bounds);
         n.setBoundsInScreen(screen);
-        n.setVisibleToUser(screen.width() > 0 && screen.height() > 0
-                && screen.bottom > 0 && screen.top < host.getRootView().getHeight());
+        View root = host.getRootView();
+        n.setVisibleToUser(screen.width() > 0 && screen.height() > 0 && screen.right > 0 && screen.left < root.getWidth()
+                && screen.bottom > 0 && screen.top < root.getHeight()); // off the row's ends too
         n.setEnabled(true);
         n.setFocusable(true);
         n.setFocused(it.focused);
-        n.setClickable(true);
+        n.setClickable(it.clickable);
         n.setAccessibilityFocused(id == a11yFocusedId);
-        n.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK);
+        if (it.clickable) n.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK);
         n.addAction(it.focused ? AccessibilityNodeInfo.AccessibilityAction.ACTION_CLEAR_FOCUS
                 : AccessibilityNodeInfo.AccessibilityAction.ACTION_FOCUS);
         n.addAction(id == a11yFocusedId ? AccessibilityNodeInfo.AccessibilityAction.ACTION_CLEAR_ACCESSIBILITY_FOCUS
@@ -176,6 +196,27 @@ final class A11y extends AccessibilityNodeProvider {
         fresh = false;
     }
 
+    /**
+     * The screen has drawn after a change: what opened is laid out now, so a focus held back for
+     * want of bounds is told, and if the focused item turned out somewhere else than TalkBack was
+     * told, it's told again. Once per change, not per frame.
+     */
+    void drawn() {
+        if (!recheck || manager == null || !manager.isEnabled()) return;
+        recheck = false;
+        host.post(() -> {
+            fresh = false;
+            int was = focusedId;
+            sync();
+            if (focusedId != was || focusedId == View.NO_ID) return; // told just now, or nothing focused
+            Item it = find(focusedId);
+            // Somewhere else, not just grown a little with focus (a menu now beside its tile, say)
+            if (it == null || Math.abs(it.bounds.left - focusedBounds.left) + Math.abs(it.bounds.top - focusedBounds.top) < 24f) return;
+            focusedBounds.set(it.bounds);
+            send(View.NO_ID, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, null, AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE);
+        });
+    }
+
     private List<Item> items() {
         if (!fresh) {
             snapshot.clear();
@@ -208,7 +249,7 @@ final class A11y extends AccessibilityNodeProvider {
             e.setClassName(host.getClass().getName());
         } else {
             e.setSource(host, id);
-            e.setClassName(Button.class.getName());
+            e.setClassName(it == null || it.clickable ? Button.class.getName() : TextView.class.getName());
         }
         if (it != null) {
             e.getText().add(it.label);

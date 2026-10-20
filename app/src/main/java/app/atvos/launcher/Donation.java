@@ -109,8 +109,12 @@ final class Donation {
         if (state != State.THANKS) state = State.UNAVAILABLE;
     }
 
-    /** Opens Google Play's own purchase sheet for the donation. */
+    /** Opens Google Play's own purchase sheet for the donation (first connecting again, if Play dropped us). */
     void give() {
+        if (client == null && listener != null) {
+            start(listener);
+            return;
+        }
         if (client == null || product == null) return;
         BillingFlowParams params = BillingFlowParams.newBuilder()
                 .setProductDetailsParamsList(List.of(BillingFlowParams.ProductDetailsParams.newBuilder()
@@ -130,15 +134,21 @@ final class Donation {
             List<ProductDetails> list = found != null ? found.getProductDetailsList() : null;
             product = result.getResponseCode() == BillingClient.BillingResponseCode.OK && list != null && !list.isEmpty()
                     ? list.get(0) : null;
-            set(product != null && price() != null ? State.READY : State.UNAVAILABLE);
+            // A pending donation, or thanks for one, found meanwhile says more than the price does.
+            if (state == State.PENDING || state == State.THANKS) {
+                if (listener != null) listener.changed();
+            } else {
+                set(product != null && price() != null ? State.READY : State.UNAVAILABLE);
+            }
         }));
     }
 
     /** A donation paid for earlier but never used up (the app closed first, or it was pending): finish it now. */
     private void finishEarlier() {
+        BillingClient asked = client;
         client.queryPurchasesAsync(QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.INAPP).build(),
                 (result, purchases) -> main.post(() -> {
-                    if (result.getResponseCode() == BillingClient.BillingResponseCode.OK) consumeAll(purchases);
+                    if (client == asked && result.getResponseCode() == BillingClient.BillingResponseCode.OK) consumeAll(purchases);
                 }));
     }
 

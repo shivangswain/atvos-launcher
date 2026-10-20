@@ -88,8 +88,9 @@ final class SettingsScreen {
 
     /** A row; {@code about} is what the left side says while it's focused, {@code action} what Select does. */
     private record Row(int kind, String title, String value, String about, Runnable action, boolean enabled, boolean checked) {
+        /** Facts too, unseen (no pill), so the remote and screen readers can still go through them on a page of facts. */
         boolean focusable() {
-            return kind == NAV || kind == ACTION || kind == CHOICE;
+            return kind != HEADER;
         }
     }
 
@@ -105,6 +106,8 @@ final class SettingsScreen {
     private final List<Row> rows = new ArrayList<>();
     private final List<RectF> rowRects = new ArrayList<>(); // where each row was last drawn, for screen readers
     private float[] tops = new float[0];  // each row's top, before scrolling
+    private String[] fitTitle = new String[0], fitValue = new String[0]; // fitted to the row once per build, not per frame
+    private String noteFit, noteFitFor;
     private float[] focus = new float[0];
     private final ArrayDeque<int[]> under = new ArrayDeque<>(); // the pages Back returns to: {page, focused row}
     private int page = MAIN, sel = -1;  // sel: the focused row, or -1 on a page of facts only
@@ -260,12 +263,45 @@ final class SettingsScreen {
                 rows.add(nav(R.string.settings_support, null, null, () -> go(SUPPORT)));
             }
         }
-        tops = new float[rows.size()];
-        for (int i = 0; i < rows.size(); i++) tops[i] = ROW_TOP + i * ROW_PITCH; // a section title takes a row's room
-        if (focus.length != rows.size()) focus = new float[rows.size()];
-        while (rowRects.size() < rows.size()) rowRects.add(new RectF());
+        int n = rows.size();
+        tops = new float[n];
+        fitTitle = new String[n];
+        fitValue = new String[n];
+        for (int i = 0; i < n; i++) {
+            tops[i] = ROW_TOP + i * ROW_PITCH; // a section title takes a row's room
+            fit(i);
+        }
+        if (focus.length != n) focus = new float[n];
+        while (rowRects.size() < n) rowRects.add(new RectF());
         sel = nearest(sel);
+        layOut();
         title = TextUtils.ellipsize(title, titleText, W - 200f, TextUtils.TruncateAt.END).toString();
+    }
+
+    /** Row {@code i}'s title and value, shortened to fit it (as unfocused: focus only grows it a little). */
+    private void fit(int i) {
+        Row row = rows.get(i);
+        if (row.kind() == HEADER) {
+            fitTitle[i] = TextUtils.ellipsize(row.title(), headerText, ROW_W - 40f, TextUtils.TruncateAt.END).toString();
+            return;
+        }
+        boolean mark = row.kind() == NAV || row.kind() == CHOICE && row.checked();
+        float x = ROW_X + 32f, right = ROW_X + ROW_W - (mark ? 74f : 34f), textRight = right;
+        if (row.value() != null && !row.value().isEmpty()) {
+            // As much room as the title leaves (a long model name, an email address), at least 45%
+            float room = Math.max(ROW_W * 0.45f, right - x - rowText.measureText(row.title()) - 40f);
+            fitValue[i] = TextUtils.ellipsize(row.value(), valueText, room, TextUtils.TruncateAt.END).toString();
+            textRight = right - valueText.measureText(fitValue[i]) - 24f;
+        }
+        fitTitle[i] = TextUtils.ellipsize(row.title(), rowText, Math.max(60f, textRight - x), TextUtils.TruncateAt.END).toString();
+    }
+
+    /** Where each row is, unfocused, before it's first drawn: screen readers can be asked at once. */
+    private void layOut() {
+        for (int i = 0; i < rows.size(); i++) {
+            float top = tops[i] - scroll;
+            rowRects.get(i).set(ROW_X, top, ROW_X + ROW_W, top + (rows.get(i).kind() == HEADER ? ROW_PITCH : ROW_H));
+        }
     }
 
     private Row nav(int title, String value, String about, Runnable action) {
@@ -309,8 +345,8 @@ final class SettingsScreen {
     private void go(int to) {
         under.push(new int[]{page, sel});
         page = to;
-        if (to == SUPPORT) host.donation().start(this::refresh); // Play is asked only once someone looks
         enter(-1);
+        if (to == SUPPORT) host.donation().start(this::refresh); // Play is asked only once someone looks (after: it calls back at once)
     }
 
     private void enter(int at) {
@@ -322,6 +358,7 @@ final class SettingsScreen {
         sel = at >= 0 ? nearest(at) : first();
         if (sel >= 0) focus[sel] = 1f;
         scroll = wantScroll();
+        layOut();
     }
 
     /** The ticked choice, else the first row that can take focus; -1 if none can. */
@@ -517,9 +554,13 @@ final class SettingsScreen {
             noteY = NOTE_TOP + about.getHeight() + 52f;
         }
         if (note != null && noteRow == sel && notePage == page) {
+            if (!note.equals(noteFitFor)) {
+                noteFit = TextUtils.ellipsize(note, noteText, NOTE_W, TextUtils.TruncateAt.END).toString();
+                noteFitFor = note;
+            }
             noteText.setColor(light ? 0xFF0A5BC4 : 0xFF64D2FF);
             noteText.setAlpha(a);
-            c.drawText(TextUtils.ellipsize(note, noteText, NOTE_W, TextUtils.TruncateAt.END).toString(), NOTE_CX, noteY, noteText);
+            c.drawText(noteFit, NOTE_CX, noteY, noteText);
         }
 
         c.save();
@@ -536,11 +577,10 @@ final class SettingsScreen {
             rowRects.get(i).set(ROW_X, top, ROW_X + ROW_W, top + ROW_PITCH);
             headerText.setColor(dimInk);
             headerText.setAlpha(alpha);
-            c.drawText(TextUtils.ellipsize(row.title(), headerText, ROW_W - 40f, TextUtils.TruncateAt.END).toString(),
-                    HEADER_X, top + HEADER_BASELINE, headerText);
+            c.drawText(fitTitle[i], HEADER_X, top + HEADER_BASELINE, headerText);
             return;
         }
-        float f = i < focus.length ? focus[i] : 0f, grow = 1f + 0.016f * f;
+        float f = row.kind() == INFO || i >= focus.length ? 0f : focus[i], grow = 1f + 0.016f * f; // a fact never lights up
         float cx = ROW_X + ROW_W / 2f, cy = top + ROW_H / 2f;
         float w = ROW_W * grow, h = ROW_H * (1f + 0.06f * f);
         r.set(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f);
@@ -556,21 +596,15 @@ final class SettingsScreen {
         int text = row.enabled() ? blend(ink, Color.BLACK, f) : blend(offInk, 0xFFA1A1A6, f);
         int soft = blend(valueInk, 0xFF8A8A8E, f);
         boolean mark = row.kind() == NAV || row.kind() == CHOICE && row.checked(); // a chevron, or a tick
-        float right = r.right - (mark ? 74f : 34f), textRight = right;
-        if (row.value() != null && !row.value().isEmpty()) {
+        float right = r.right - (mark ? 74f : 34f);
+        if (fitValue[i] != null) {
             valueText.setColor(soft);
             valueText.setAlpha(alpha);
-            // As much room as the title leaves (a long model name, an email address), at least 45%
-            float room = Math.max(ROW_W * 0.45f, right - (r.left + 32f) - rowText.measureText(row.title()) - 40f);
-            String v = TextUtils.ellipsize(row.value(), valueText, room, TextUtils.TruncateAt.END).toString();
-            c.drawText(v, right, cy + 13f, valueText);
-            textRight = right - valueText.measureText(v) - 24f;
+            c.drawText(fitValue[i], right, cy + 13f, valueText);
         }
         rowText.setColor(text);
         rowText.setAlpha(alpha);
-        float x = r.left + 32f;
-        c.drawText(TextUtils.ellipsize(row.title(), rowText, Math.max(60f, textRight - x), TextUtils.TruncateAt.END).toString(),
-                x, cy + 13f, rowText);
+        c.drawText(fitTitle[i], r.left + 32f, cy + 13f, rowText);
         if (mark) {
             stroke.setColor(row.kind() == CHOICE ? soft : blend(valueInk, 0xFF5A5A5E, f));
             stroke.setStrokeWidth(row.kind() == CHOICE ? 3f : 3.5f);
@@ -599,7 +633,8 @@ final class SettingsScreen {
             String state = row.kind() == CHOICE ? (row.checked() ? s(R.string.a11y_selected) : null) : row.value();
             String hint = row.about();
             if (i == sel && note != null && noteRow == sel && notePage == page) hint = hint == null ? note : hint + " " + note;
-            out.add(new A11y.Item(base + i, row.title(), state, hint, new RectF(rowRects.get(i)), i == sel));
+            boolean clickable = row.kind() != INFO && row.action() != null && row.enabled(); // words to read aren't buttons
+            out.add(new A11y.Item(base + i, row.title(), state, hint, new RectF(rowRects.get(i)), i == sel, clickable));
         }
     }
 }

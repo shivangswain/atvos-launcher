@@ -924,11 +924,6 @@ final class HomeView extends View {
                 || code == KeyEvent.KEYCODE_NUMPAD_ENTER || code == KeyEvent.KEYCODE_BUTTON_A;
     }
 
-    private static boolean isArrow(int code) {
-        return code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN
-                || code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT;
-    }
-
     /**
      * D-pad movement over the grid. The hidden apps form a second section below the visible ones,
      * shown while an app is being moved or once revealed; moving a picked-up app between the
@@ -936,7 +931,13 @@ final class HomeView extends View {
      */
     private void move(int dx, int dy) {
         int v = apps.size(), total = total();
-        if (total == 0) return;
+        if (total == 0) { // nothing to focus (it shouldn't happen): Up still reaches the clock pill
+            if (dy < 0 && !editing) {
+                navSound(0, -1);
+                focusPill();
+            }
+            return;
+        }
         boolean inHidden = focus >= v;
         int local = inHidden ? focus - v : focus, n = inHidden ? hidden.size() : v;
         int col = local % COLS, row = local / COLS;
@@ -1355,9 +1356,21 @@ final class HomeView extends View {
         openFolder(folder, folder.folder.apps.size() - 1);
     }
 
+    /**
+     * Whether {@code e} can go to Hidden and still leave a tile on the home screen: not the last
+     * tile, nor the only app of a folder that's the last tile (the folder would go with it).
+     */
+    private boolean canHide(Apps.Entry e) {
+        if (hidden.contains(e)) return false;
+        if (apps.size() > 1) return true;
+        if (apps.isEmpty() || apps.contains(e)) return false;
+        Apps.Entry last = apps.get(0);
+        return last.folder != null && last.folder.apps.size() > 1;
+    }
+
     /** Into Hidden: greyed out at its end; at least one tile stays on the home screen. */
     private void moveToHidden(Apps.Entry e) {
-        if (apps.contains(e) && apps.size() <= 1) return;
+        if (!canHide(e)) return;
         Apps.Entry folder = openFolder;
         detach(e);
         hidden.add(e);
@@ -1449,7 +1462,7 @@ final class HomeView extends View {
         for (Apps.Entry t : apps) {
             if (t.folder != null && t != openFolder) addRow(subRows, t.label, null, ROW_PLAIN, () -> moveToFolder(e, t), null);
         }
-        if (!isHidden && (inFolder || apps.size() > 1)) addRow(subRows, R.string.hidden, null, ROW_PLAIN, () -> moveToHidden(e), null);
+        if (canHide(e)) addRow(subRows, R.string.hidden, null, ROW_PLAIN, () -> moveToHidden(e), null);
         subWidth = listWidth(subRows);
     }
 
@@ -1889,6 +1902,7 @@ final class HomeView extends View {
             settings.draw(c, 1f, height);
             c.restore();
             if (animating) postInvalidateOnAnimation();
+            a11y.drawn();
             return;
         }
         boolean covered = folderCover() > 0.999f;
@@ -1928,6 +1942,7 @@ final class HomeView extends View {
         c.restore();
 
         if (animating) postInvalidateOnAnimation();
+        a11y.drawn(); // what just opened has bounds now, for screen readers
     }
 
     /**
@@ -2773,7 +2788,7 @@ final class HomeView extends View {
                     Recommendations.Item item = rowCards.get(i).item();
                     String state = item.progress() > 0.01f ? c.getString(R.string.a11y_watched, Math.round(item.progress() * 100)) : null;
                     out.add(new A11y.Item(A11Y_ROW + i, item.title() == null ? "" : item.title(), state, item.details(),
-                            new RectF(rowCardRect(i, 1f, new RectF())), rowFocused && i == rowIndex && !pillFocused));
+                            rowCardRect(i, 1f, new RectF()), rowFocused && i == rowIndex && !pillFocused));
                 }
             }
             float offset = lift() - scroll - bounce;

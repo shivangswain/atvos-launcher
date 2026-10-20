@@ -115,11 +115,11 @@ final class SelfAdb {
     }
 
     /**
-     * Runs {@code job} on each package over self-adb. Returns as soon as one step fails. A package
-     * not matching {@link #PKG} fails the run before anything is sent, so a bad name can never
-     * widen the command.
+     * Runs {@code job} on each package over self-adb, adding each one it worked for to {@code done}.
+     * Returns as soon as one step fails. A package not matching {@link #PKG} fails the run before
+     * anything is sent, so a bad name can never widen the command.
      */
-    Result run(List<String> packages, Job job, Listener listener) {
+    Result run(List<String> packages, Job job, Listener listener, List<String> done) {
         for (String pkg : packages) {
             if (!PKG.matcher(pkg).matches()) return Result.FAILED; // never send a command we can't vouch for
         }
@@ -137,6 +137,7 @@ final class SelfAdb {
             for (String pkg : packages) {
                 String cmd = String.format(job.command, pkg);
                 if (!shell(in, out, ++stream, cmd)) return Result.FAILED;
+                done.add(pkg); // so a later failure doesn't lose track of what this one changed
             }
             return Result.OK;
         } catch (IOException e) {

@@ -32,11 +32,10 @@ final class Recommendations {
     static final int MAX_PAGES = 8;
 
     /**
-     * What was found: the program to show per app, the programs to page through (that one first),
-     * and which apps publish each source at all.
+     * What was found: the programs to page through per app (the one to show first), and which apps
+     * publish each source at all.
      */
     static final class Found {
-        final Map<String, Item> best = new HashMap<>();
         final Map<String, List<Item>> pages = new HashMap<>();
         final Set<String> watchNext = new HashSet<>(), previews = new HashSet<>();
     }
@@ -121,31 +120,39 @@ final class Recommendations {
         Map<String, List<Ranked>> engaged = new HashMap<>(), channels = new HashMap<>();
         try (Cursor c = cr.query(TvContract.WatchNextPrograms.CONTENT_URI, WATCH_NEXT_COLUMNS, null, null, null)) {
             while (c != null && c.moveToNext()) {
-                if (dismissed(c)) continue;
-                String pkg = c.getString(PKG);
-                if (pkg == null || landscapeImage(c) == null) continue;
-                found.watchNext.add(pkg);
-                if (noWatchNext.contains(pkg)) continue;
-                Item item = item(context, c, null);
-                if (item == null) continue;
-                long when = c.isNull(ORDER_A) ? 0 : c.getLong(ORDER_A), id = c.isNull(ORDER_B) ? 0 : c.getLong(ORDER_B);
-                engaged.computeIfAbsent(pkg, k -> new ArrayList<>()).add(new Ranked(item, -when, -id)); // newest first
+                try { // one app's odd row mustn't cost every other app theirs
+                    if (dismissed(c)) continue;
+                    String pkg = c.getString(PKG);
+                    if (pkg == null || landscapeImage(c) == null) continue;
+                    found.watchNext.add(pkg);
+                    if (noWatchNext.contains(pkg)) continue;
+                    Item item = item(context, c, null);
+                    if (item == null) continue;
+                    long when = c.isNull(ORDER_A) ? 0 : c.getLong(ORDER_A), id = c.isNull(ORDER_B) ? 0 : c.getLong(ORDER_B);
+                    engaged.computeIfAbsent(pkg, k -> new ArrayList<>()).add(new Ranked(item, -when, -id)); // newest first
+                } catch (RuntimeException ignored) {
+                    // skip it
+                }
             }
         } catch (RuntimeException ignored) {
             // No TV provider, no permission, or an unexpected schema: just no recommendations.
         }
         try (Cursor c = cr.query(TvContract.PreviewPrograms.CONTENT_URI, PREVIEW_COLUMNS, null, null, null)) {
             while (c != null && c.moveToNext()) {
-                if (dismissed(c)) continue;
-                String pkg = c.getString(PKG);
-                if (pkg == null || landscapeImage(c) == null) continue;
-                found.previews.add(pkg);
-                if (noPreviews.contains(pkg)) continue;
-                long channel = c.isNull(ORDER_A) ? Long.MAX_VALUE : c.getLong(ORDER_A);
-                Item item = item(context, c, ""); // "Recommended", whatever the app names its channels
-                if (item == null) continue;
-                long weight = c.isNull(ORDER_B) ? 0 : c.getLong(ORDER_B);
-                channels.computeIfAbsent(pkg, k -> new ArrayList<>()).add(new Ranked(item, channel, -weight));
+                try { // as above
+                    if (dismissed(c)) continue;
+                    String pkg = c.getString(PKG);
+                    if (pkg == null || landscapeImage(c) == null) continue;
+                    found.previews.add(pkg);
+                    if (noPreviews.contains(pkg)) continue;
+                    long channel = c.isNull(ORDER_A) ? Long.MAX_VALUE : c.getLong(ORDER_A);
+                    Item item = item(context, c, ""); // "Recommended", whatever the app names its channels
+                    if (item == null) continue;
+                    long weight = c.isNull(ORDER_B) ? 0 : c.getLong(ORDER_B);
+                    channels.computeIfAbsent(pkg, k -> new ArrayList<>()).add(new Ranked(item, channel, -weight));
+                } catch (RuntimeException ignored) {
+                    // skip it
+                }
             }
         } catch (RuntimeException ignored) {
             // As above.
@@ -165,7 +172,6 @@ final class Recommendations {
                 }
             }
             found.pages.put(pkg, pages);
-            found.best.put(pkg, pages.get(0));
         }
         return found;
     }
@@ -213,7 +219,9 @@ final class Recommendations {
                 int added = 0;
                 for (String g : TvContract.Programs.Genres.decode(genres)) {
                     if (added == 2 || TvContract.Programs.Genres.MOVIES.equals(g)) continue;
-                    parts.add(genreName(g));
+                    String name = genreName(g);
+                    if (name.isEmpty()) continue;
+                    parts.add(name);
                     added++;
                 }
             }
@@ -235,6 +243,7 @@ final class Recommendations {
     private static String genreName(String g) {
         StringBuilder out = new StringBuilder();
         for (String word : g.split("_")) {
+            if (word.isEmpty()) continue; // any app can write any text here: "_DRAMA", "SCI__FI", ""
             if (out.length() > 0) out.append(g.startsWith("TECH") || g.startsWith("ARTS") || g.startsWith("ANIMAL")
                     || g.startsWith("FAMILY") || g.startsWith("LIFE") ? " & " : " ");
             out.append(word.charAt(0)).append(word.substring(1).toLowerCase(Locale.ROOT));
