@@ -1,6 +1,5 @@
-# Google Play billing is used without the libraries it would bring along (see build.gradle.kts):
-# its references to them are to annotations, its own optional logging, and the alternative-billing
-# screen that isn't in the manifest, none of which run.
+# R8 does not warn about the AndroidX classes that Google Play Billing refers to. The app does not include these
+# classes.
 -dontwarn androidx.activity.**
 -dontwarn androidx.annotation.**
 -dontwarn com.google.android.datatransport.**

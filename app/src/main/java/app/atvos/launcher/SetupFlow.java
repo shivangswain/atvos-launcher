@@ -22,17 +22,17 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Setup: one Liquid Glass card that takes the user through what atvOS needs from the
- * TV, a step at a time, each with a picture of the Settings screen to look for and a button that
- * opens it. Steps already done are skipped, and coming back from Settings moves on by itself.
+ * Setup: one glass card that shows the steps that atvOS needs, one at a time. Each step has a picture of the Settings
+ * screen to find and a button that opens it. Steps that are complete are skipped. When the user comes back from
+ * Settings, the next step shows.
  * <pre>
  *   Welcome → Developer options → USB debugging → Allow → Profile picture → Done
  * </pre>
- * Opened later from Settings, it runs just the steps the TV still needs ({@link #openSteps}).
+ * From Settings, it runs only the steps that the TV needs ({@link #openSteps}).
  */
 final class SetupFlow {
 
-    /** What the flow needs from the home screen. Called on the UI thread. */
+    /** The data and actions that the flow gets from the home screen. UI thread. */
     interface Host {
         Controls.Setup state();
         boolean hasAccount();
@@ -43,11 +43,11 @@ final class SetupFlow {
         void chooseAccount();
         void close();
         void sound(int effect);
-        /** Something changed: redraw it, and tell screen readers. */
+        /** Draws the card again and updates screen readers. */
         void changed();
     }
 
-    // In the order they come; the numbers order them.
+    // The steps. The numbers give their order.
     private static final int WELCOME = 0, DEVELOPER = 1, DEBUGGING = 2, ALLOW = 3, PICK_HOME = 4, ACCOUNT = 5,
             DONE = 6;
     private static final int ART_NONE = -1, ART_LOGO = 10, ART_AVATAR = 11, ART_CHECK = 12;
@@ -67,10 +67,10 @@ final class SetupFlow {
             buttonText = new TextPaint(Paint.ANTI_ALIAS_FLAG), noteText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), stroke = new Paint(Paint.ANTI_ALIAS_FLAG),
             image = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-    private Bitmap avatar; // the profile picture before there is one, made when first shown
+    private Bitmap avatar; // the default profile picture, made at the first draw
     private final Path check = new Path();
     private final RectF r = new RectF(), artBox = new RectF();
-    /** Where the card and its buttons were last drawn, for screen readers. */
+    /** The bounds of the card and its buttons at the last draw, for screen readers. */
     final RectF card = new RectF();
     private final RectF[] buttonRects = new RectF[6];
 
@@ -78,17 +78,17 @@ final class SetupFlow {
     private int step = WELCOME, origin = WELCOME, artKind = ART_NONE;
     private final List<Button> buttons = new ArrayList<>();
     private final List<Integer> dots = new ArrayList<>();
-    private final List<Integer> journey = new ArrayList<>(); // the steps this run takes: a dot each, done or not
-    private boolean busy;      // the on-TV setup is running
+    private final List<Integer> journey = new ArrayList<>(); // the steps of this run, one dot each
+    private boolean busy;      // the on-TV setup runs
     private int sel, dot = -1;
-    private final float[] focus = new float[6]; // each button's focus highlight, easing to the selection
+    private final float[] focus = new float[6]; // the focus highlight of each button
     private float fade = 1f;
-    // Laid out once per change (text wrapped and shortened to fit, in any language), never per frame.
+    // Laid out once for each change: the text is wrapped and shortened to fit.
     private String title = "", note, summary = "";
     private int noteColor;
     private StaticLayout body;
     private float cardH;
-    private final float[] buttonX = new float[6], buttonW = new float[6]; // each button's place across the screen
+    private final float[] buttonX = new float[6], buttonW = new float[6]; // the horizontal position and width of each button
 
     SetupFlow(Context context, Host host) {
         this.context = context;
@@ -115,7 +115,7 @@ final class SetupFlow {
         check.lineTo(28f, -18f);
     }
 
-    /** First run: from Welcome. */
+    /** Opens the first-launch setup at Welcome. */
     void open() {
         origin = WELCOME;
         busy = false;
@@ -124,7 +124,7 @@ final class SetupFlow {
         go(origin);
     }
 
-    /** From Settings: just the steps this TV still needs to hand atvOS the Home button (Back from the first closes). */
+    /** Opens only the steps that the TV needs to give the Home button to atvOS. Back on the first step closes it. */
     void openSteps() {
         busy = false;
         setup = host.state();
@@ -139,7 +139,7 @@ final class SetupFlow {
         go(origin);
     }
 
-    /** Back from Settings, a picker or a package change: re-read the TV, and move on if this step is done. */
+    /** Reads the TV state again and goes to the next step if this step is complete. */
     void refresh() {
         setup = host.state();
         if (busy) return;
@@ -153,23 +153,25 @@ final class SetupFlow {
         if (done) next(); else layOut();
     }
 
-    /** A step that's part of setting up (not Welcome or Done). */
+    /** Returns true for a setup step (not Welcome or Done). */
     private boolean inSteps() {
         return step > WELCOME && step < DONE;
     }
 
-    /** Whether Home leaves it open: all of first-run setup, and any step (not Done, from Settings). */
+    /**
+     * Returns true if the Home key does not close it: the first-launch setup, and each step from Settings except Done.
+     */
     boolean staysOnHome() {
         return origin == WELCOME || inSteps();
     }
 
-    /** The steps still to do, in order, from the TV as it is now. */
+    /** Returns the steps that remain, in order, from the current state of the TV. */
     private List<Integer> plan() {
         List<Integer> p = new ArrayList<>();
         Controls.Setup s = setup;
         if (!s.homeActive) {
             if (!s.lockedHomes.isEmpty()) {
-                // The TV's own home keeps the Home button until it's turned off, which takes adb.
+                // The home app of the TV keeps the Home button until adb disables it.
                 if (!s.developerOn) p.add(DEVELOPER);
                 if (!s.adbOn) p.add(DEBUGGING);
                 p.add(ALLOW);
@@ -214,9 +216,12 @@ final class SetupFlow {
         layOut();
     }
 
-    // ---- Input -------------------------------------------------------------------------------
+    // Input
 
-    /** Arrows and Back; false lets anything else (volume…) through. Select is {@link #select}. */
+    /**
+     * Handles the arrow keys and Back. Returns false for other keys (for example, volume). {@link #select} handles
+     * Select.
+     */
     boolean key(int code) {
         switch (code) {
             case KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> move(code == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1);
@@ -247,7 +252,7 @@ final class SetupFlow {
         host.changed();
     }
 
-    /** Moves the selection to button {@code i} (a screen reader asking); false if there's no such button. */
+    /** Moves the selection to button {@code i} for a screen reader. Returns false if there is no such button. */
     boolean focus(int i) {
         if (busy || i < 0 || i >= buttons.size()) return false;
         sel = i;
@@ -255,9 +260,9 @@ final class SetupFlow {
         return true;
     }
 
-    // ---- The steps ---------------------------------------------------------------------------
+    // Steps
 
-    /** Turns the TV's own home off over its own adb; the user approves the TV's prompt. */
+    /** Disables the home app of the TV over self-adb. The user accepts the prompt of the TV. */
     private void runSetUp() {
         busy = true;
         showNote(R.string.setup_tv_connecting, TEAL);
@@ -286,7 +291,7 @@ final class SetupFlow {
         layOut();
     }
 
-    /** Builds the step's text, picture and buttons, and measures the card. */
+    /** Makes the text, the picture and the buttons of the step, and measures the card. */
     private void layOut() {
         buttons.clear();
         int bodyRes;
@@ -348,15 +353,15 @@ final class SetupFlow {
         String text = context.getString(bodyRes);
         body = StaticLayout.Builder.obtain(text, 0, text.length(), bodyText, Math.round(inner))
                 .setAlignment(Layout.Alignment.ALIGN_CENTER).setLineSpacing(6f, 1f)
-                .setBreakStrategy(LineBreaker.BREAK_STRATEGY_BALANCED).build(); // no word left alone on a line
+                .setBreakStrategy(LineBreaker.BREAK_STRATEGY_BALANCED).build(); // balanced lines
         if (note != null) note = TextUtils.ellipsize(note, noteText, inner, TextUtils.TruncateAt.END).toString();
 
-        // The dots: one per step of this run, this one lit (none for a run of one step).
+        // The dots: one for each step of this run, with this step lit. A run of one step has no dots.
         dots.clear();
         dot = journey.indexOf(step);
         if (inSteps() && dot >= 0 && journey.size() > 1) dots.addAll(journey);
 
-        // Buttons: a centred pair, each as wide as its label needs.
+        // The buttons: a centred pair, each as wide as its label.
         float total = 0f;
         for (int i = 0; i < buttons.size(); i++) {
             buttonW[i] = Math.max(240f, Math.min(inner / 2f - 10f, buttonText.measureText(buttons.get(i).label()) + 96f));
@@ -381,17 +386,17 @@ final class SetupFlow {
         if (buttons.size() < buttonRects.length) buttons.add(new Button(context.getString(label), action));
     }
 
-    /** The steps ahead as the run starts; the dots keep them all, so one done still shows as a dot. */
+    /** Records the steps at the start of the run. Each step keeps its dot when it is complete. */
     private void startJourney() {
         journey.clear();
         for (int s : plan()) if (s != DONE) journey.add(s);
     }
 
-    // ---- Animation and drawing ---------------------------------------------------------------
+    // Animation and draw
 
-    /** Advances the selection and the step's fade-in; true while anything is still moving. */
+    /** Moves the selection and the fade-in of the step forward by {@code dt}. Returns true while something moves. */
     boolean step(float dt) {
-        boolean motion = ValueAnimator.areAnimatorsEnabled(); // off: Remove animations
+        boolean motion = ValueAnimator.areAnimatorsEnabled(); // false when animations are off
         float k = motion ? 1f - (float) Math.exp(-20f * dt) : 1f;
         boolean moving = false;
         for (int i = 0; i < focus.length; i++) {
@@ -410,7 +415,7 @@ final class SetupFlow {
         return moving;
     }
 
-    /** The card over the dimmed home screen. {@code height} is the screen's, in design units. */
+    /** Draws the card over the dimmed home screen. {@code height}: the screen height in design units. */
     void draw(Canvas c, ControlCenter.Glass glass, float appear, float height) {
         int alpha = Math.round(255 * appear);
         if (alpha <= 2 || body == null) return;
@@ -422,7 +427,7 @@ final class SetupFlow {
         card.set(left, top, left + CARD_W, top + cardH);
         glass.draw(c, card, CARD_R, 0x99141418, alpha);
 
-        int a = Math.round(alpha * (0.35f + 0.65f * fade)); // a new step's content fades in
+        int a = Math.round(alpha * (0.35f + 0.65f * fade)); // the content of a new step fades in
         float y = top + PAD + (1f - fade) * 10f;
         if (!dots.isEmpty()) {
             float w = 0f;
@@ -460,13 +465,13 @@ final class SetupFlow {
         c.restore();
     }
 
-    /** The step's picture: the TV's Settings screen to look for, or a simple glyph. Returns the y below it. */
+    /** Draws the picture of the step: a Settings screen of the TV, or a glyph. Returns the y below it. */
     private float drawArt(Canvas c, float y, int alpha) {
         if (artKind == ART_NONE) return y;
         if (artKind < ART_LOGO) {
             artBox.set(W / 2f - ART_W / 2f, y, W / 2f + ART_W / 2f, y + ART_H);
             fill.setColor(0x59000000);
-            r.set(artBox.left - 2f, artBox.top + 6f, artBox.right + 2f, artBox.bottom + 12f); // a soft lift
+            r.set(artBox.left - 2f, artBox.top + 6f, artBox.right + 2f, artBox.bottom + 12f); // the shadow below the picture
             fill.setAlpha(Math.round(alpha * 0.35f));
             c.drawRoundRect(r, 22f, 22f, fill);
             art.draw(c, artKind, artBox, 20f, alpha);
@@ -493,7 +498,7 @@ final class SetupFlow {
         return y + ICON_H + 40f;
     }
 
-    /** The profile picture before there is one: the home screen's grey disc with a person in it. */
+    /** Draws the default profile picture: a grey disc with a person. */
     private void drawAvatar(Canvas c, float cx, float cy, float radius, int alpha) {
         if (avatar == null) avatar = HomeView.makeAvatar(Math.round(radius * 2f));
         r.set(cx - radius, cy - radius, cx + radius, cy + radius);
@@ -501,7 +506,7 @@ final class SetupFlow {
         c.drawBitmap(avatar, null, r, image);
     }
 
-    /** The selected button white with dark text, lifted a little; the others faint glass. */
+    /** Draws the buttons: the selected button white with dark text and lifted, the others as faint glass. */
     private void drawButtons(Canvas c, float y, int alpha) {
         for (int i = 0; i < buttons.size(); i++) {
             float s = focus[i], grow = 1f + 0.04f * s;
@@ -525,15 +530,15 @@ final class SetupFlow {
                 Math.round(Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t));
     }
 
-    // ---- Screen readers ----------------------------------------------------------------------
+    // Screen readers
 
-    /** The buttons; the first also reads out what the card says. */
+    /** Adds the buttons to {@code out}. The first button also has the text of the card. */
     void items(List<A11y.Item> out, int base) {
         for (int i = 0; i < buttons.size(); i++) {
             out.add(new A11y.Item(base + i, buttons.get(i).label(), null, i == 0 ? summary : null,
                     new RectF(buttonRects[i]), i == sel));
         }
-        if (buttons.isEmpty()) { // busy: just what it says
+        if (buttons.isEmpty()) { // while setup runs: only the text
             out.add(new A11y.Item(base, title, note, summary, new RectF(card), true));
         }
     }

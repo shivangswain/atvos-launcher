@@ -5,30 +5,25 @@
     <uses-feature android:name="android.software.leanback" android:required="true" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
-    <!-- Recommendation artwork. HTTPS only (cleartext is off below). -->
+    <!-- Downloads recommendation artwork over HTTPS. -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Apps' TV recommendations (Watch Next + preview channels): lets the TV provider share other
-         apps' searchable programs. Asked for once at first launch. -->
+    <!-- Reads the Watch Next and preview programs of other apps from the TV provider. -->
     <uses-permission android:name="android.permission.READ_TV_LISTINGS" />
-    <!-- Control Center: the Wi-Fi tile's status. -->
+    <!-- Shows the network status in Control Center. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Control Center: Do Not Disturb (the user still has to grant access). -->
+    <!-- Sets Do Not Disturb from Control Center. -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
-    <!-- Control Center: the sleep timer fires on time. Play allows this one for any app (unlike
-         USE_EXACT_ALARM, which it reserves for alarm clocks and calendars); from Android 14 the user
-         grants it once, in Settings > Apps > Special app access > Alarms & reminders. -->
+    <!-- Starts the sleep timer alarm at the exact time. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <!-- Delete App: Android's own uninstall screen, after the Delete alert. -->
+    <!-- Opens the system uninstall screen for Delete App. -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
-    <!-- Settings > Support > Donate: through Google Play (the billing library adds BILLING). On Android 12,
-         its receiver is kept private with this signature permission, as AndroidX does. -->
+    <!-- Protects the receiver of Google Play Billing on Android 12. Only apps with the same signature can send to it. -->
     <permission
         android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
         android:protectionLevel="signature" />
     <uses-permission android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
 
-    <!-- Package visibility: apps that can be launched from a home screen, home apps, the Settings
-         screen for choosing one, the TV provider, and what opens web and Google Play links. -->
+    <!-- Package visibility: launcher apps, home apps, the home settings screen, the TV provider, web browsers and Google Play. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -38,7 +33,7 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
-        <!-- Home apps: to tell whether Google TV's own home screen is still on. -->
+        <!-- Home apps. -->
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.HOME" />
@@ -47,7 +42,7 @@
             <action android:name="android.settings.HOME_SETTINGS" />
         </intent>
         <provider android:authorities="android.media.tv" />
-        <!-- Settings > Support: whether there's a browser for the website, Google Play for its page -->
+        <!-- A web browser and Google Play, for the Support page. -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
@@ -92,7 +87,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Force-lock only: lets Power Off and the Sleep Timer put the TV to sleep. Only the system can bind it. -->
+        <!-- Device admin with the force-lock policy only. Only the system can bind to it. -->
         <receiver
             android:name=".PowerAdmin"
             android:description="@string/power_admin_description"
@@ -107,11 +102,11 @@
             </intent-filter>
         </receiver>
 
-        <!-- Sleep timer alarm; only our own PendingIntent can reach it. -->
+        <!-- Receives the sleep timer alarm. It is not exported. -->
         <receiver
             android:name=".SleepTimer"
             android:exported="false" />
-        <!-- Google Play billing's alternative-billing screen needs AndroidX, which isn't here; it's unused. -->
+        <!-- Removes the alternative billing activity of Google Play Billing. It needs AndroidX. -->
         <activity
             android:name="com.android.billingclient.api.ProxyBillingActivityV2"
             tools:node="remove" />

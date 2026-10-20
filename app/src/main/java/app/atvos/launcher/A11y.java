@@ -16,34 +16,32 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * TalkBack for the home screen. Everything is drawn on one View, so to accessibility services it
- * would be a single blank node. This gives them a tree of virtual items instead (app tiles, the
- * clock pill, Control Center tiles, menu options, the Play button) and tells them which one has
- * focus as the remote moves it, so TalkBack reads each item as it's reached, as on any TV app.
- * <p>
- * Costs nothing while no accessibility service is on: {@link #sync} returns at once.
+ * Gives accessibility services a tree of virtual items for the home screen view. The items are app tiles, the clock
+ * pill, Control Center tiles, menu options and the Play button. It also tells the services which item has the focus of
+ * the remote.
+ *
+ * {@link #sync} returns immediately when no accessibility service is on.
  */
 final class A11y extends AccessibilityNodeProvider {
 
-    /**
-     * One focusable thing on screen. Bounds are in 1920-wide design units. {@code clickable}: select
-     * does something (a row that only shows words, or a fact, doesn't).
-     */
+    /** One focusable item. The bounds are in design units (1920 wide). {@code clickable}: Select does an action. */
     record Item(int id, String label, String state, String hint, RectF bounds, boolean focused, boolean clickable) {
         Item(int id, String label, String state, String hint, RectF bounds, boolean focused) {
             this(id, label, state, hint, bounds, focused, true);
         }
     }
 
-    /** What the home screen tells this class. */
+    /** The data that the home screen gives to this class. */
     interface Source {
-        /** The items on screen now, in reading order; exactly one is focused when anything is. */
+        /**
+         * Adds the items on the screen to {@code out}, in the order for screen readers. Only one item has the focus.
+         */
         void items(List<Item> out);
-        /** Moves the remote's focus to the item (TalkBack asking); false if it can't go there. */
+        /** Moves the focus of the remote to the item. Returns false if the item cannot have the focus. */
         boolean focus(int id);
-        /** Focuses the item and selects it, as the remote's select would. */
+        /** Moves the focus to the item and selects it. */
         boolean click(int id);
-        /** Pixels per design unit. */
+        /** Returns the number of pixels in one design unit. */
         float scale();
     }
 
@@ -52,16 +50,14 @@ final class A11y extends AccessibilityNodeProvider {
     private final AccessibilityManager manager;
     private final int[] location = new int[2];
 
-    // What was last announced, to tell TalkBack only about changes.
+    // The items in the last events. Only changes cause new events.
     private int focusedId = View.NO_ID, a11yFocusedId = View.NO_ID;
     private String focusedText = "", layout = "";
-    // Where the focused item was when TalkBack was told of it, and whether to look again once the
-    // screen has drawn: what just opened is only laid out when first drawn.
+    // The bounds of the focused item in the last event, and a flag to check the item again after the next draw.
     private final RectF focusedBounds = new RectF();
     private boolean recheck;
 
-    // The items as last listed, kept until the screen draws again or changes (sync()). TalkBack
-    // asks for the nodes one by one, and listing every item again for each was O(n²).
+    // The items from the last call to Source.items, kept until the next draw or sync().
     private final List<Item> snapshot = new ArrayList<>();
     private boolean fresh;
 
@@ -72,9 +68,8 @@ final class A11y extends AccessibilityNodeProvider {
     }
 
     /**
-     * Tells accessibility services what changed since last time: a different set of items (the
-     * Control Center opened, say), focus moving to another item, or the focused item's text or
-     * state changing (Do Not Disturb turned on). Call after anything that may have done so.
+     * Sends events for the changes since the last call. A change is a different set of items, the focus on a different
+     * item, or new text or state on the focused item.
      */
     void sync() {
         if (manager == null || !manager.isEnabled()) return;
@@ -84,23 +79,21 @@ final class A11y extends AccessibilityNodeProvider {
         Item focused = null;
         boolean a11yFocusShown = false;
         for (Item it : items) {
-            // Labels too: another page of Settings can have the same ids (rows 0 to 3) and still be new.
+            // The labels are part of the key because two Settings pages can have the same ids.
             ids.append(it.id).append(':').append(it.label).append(',');
             if (it.focused) focused = it;
             if (it.id == a11yFocusedId) a11yFocusShown = true;
         }
-        // TalkBack's item went (a menu opened over it, say): don't let a later item with its id
-        // claim TalkBack's focus.
+        // Clears the accessibility focus when its item is not on the screen.
         if (!a11yFocusShown) a11yFocusedId = View.NO_ID;
-        // Not drawn yet (a menu just opened): say nothing, not even that the screen changed, until
-        // it has a place to point to; drawn() comes back then and tells it all.
+        // The focused item has no bounds before the next draw. drawn() sends the events after that draw.
         if (focused != null && focused.bounds.isEmpty()) {
             recheck = true;
             return;
         }
         if (!ids.toString().equals(layout)) {
             layout = ids.toString();
-            focusedId = View.NO_ID; // a new screen: say where focus is on it, even at the same id
+            focusedId = View.NO_ID; // a new set of items: announce the focus again
             send(View.NO_ID, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, null,
                     AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE);
         }
@@ -127,7 +120,7 @@ final class A11y extends AccessibilityNodeProvider {
         if (id == HOST_VIEW_ID) {
             AccessibilityNodeInfo info = new AccessibilityNodeInfo(host);
             host.onInitializeAccessibilityNodeInfo(info);
-            fresh = false; // a new look at the whole screen
+            fresh = false; // lists the items again
             for (Item it : items()) info.addChild(host, it.id);
             return info;
         }
@@ -144,7 +137,7 @@ final class A11y extends AccessibilityNodeProvider {
         n.setBoundsInScreen(screen);
         View root = host.getRootView();
         n.setVisibleToUser(screen.width() > 0 && screen.height() > 0 && screen.right > 0 && screen.left < root.getWidth()
-                && screen.bottom > 0 && screen.top < root.getHeight()); // off the row's ends too
+                && screen.bottom > 0 && screen.top < root.getHeight());
         n.setEnabled(true);
         n.setFocusable(true);
         n.setFocused(it.focused);
@@ -193,15 +186,14 @@ final class A11y extends AccessibilityNodeProvider {
         }
     }
 
-    /** The screen drew: things may have moved, so list the items afresh when next asked. */
+    /** Lists the items again at the next request. Items can move during a draw. */
     void invalidate() {
         fresh = false;
     }
 
     /**
-     * The screen has drawn after a change: what opened is laid out now, so a focus held back for
-     * want of bounds is told, and if the focused item turned out somewhere else than TalkBack was
-     * told, it's told again. Once per change, not per frame.
+     * Sends the events that wait for bounds after a change. If the focused item moved, it sends the focus event again.
+     * It runs once for each change.
      */
     void drawn() {
         if (!recheck || manager == null || !manager.isEnabled()) return;
@@ -210,9 +202,9 @@ final class A11y extends AccessibilityNodeProvider {
             fresh = false;
             int was = focusedId;
             sync();
-            if (focusedId != was || focusedId == View.NO_ID) return; // told just now, or nothing focused
+            if (focusedId != was || focusedId == View.NO_ID) return;
             Item it = find(focusedId);
-            // Somewhere else, not just grown a little with focus (a menu now beside its tile, say)
+            // Sends a new event only if the item moved, not if it only became larger with the focus.
             if (it == null || Math.abs(it.bounds.left - focusedBounds.left) + Math.abs(it.bounds.top - focusedBounds.top) < 24f) return;
             focusedBounds.set(it.bounds);
             send(View.NO_ID, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, null, AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE);
@@ -240,7 +232,7 @@ final class A11y extends AccessibilityNodeProvider {
                 Math.round(location[0] + design.right * k), Math.round(location[1] + design.bottom * k));
     }
 
-    /** An event from one virtual item (or the host, for {@link View#NO_ID}). */
+    /** Sends an event for one virtual item, or for the host view if {@code id} is {@link View#NO_ID}. */
     private void send(int id, int type, Item it, int changes) {
         ViewParent parent = host.getParent();
         if (parent == null) return;

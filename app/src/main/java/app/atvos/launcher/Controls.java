@@ -31,41 +31,41 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-/** The system state and actions behind the Control Center tiles. UI thread. */
+/** The system state and the actions of the Control Center tiles. UI thread. */
 final class Controls {
 
-    /** A snapshot for drawing the tiles. */
+    /** A copy of the state for the tile draw. */
     static final class State {
         boolean online, ethernet, dnd, bluetoothOn;
-        String bluetoothDevice; // connected Bluetooth audio output, or null
-        long sleepAt;           // SystemClock.elapsedRealtime() deadline (the alarm's clock), 0 = off
+        String bluetoothDevice; // the connected Bluetooth audio device, or null
+        long sleepAt;           // the deadline in SystemClock.elapsedRealtime(), or 0 when off
     }
 
     private static final int[] SLEEP_MINUTES = {15, 30, 60, 90, 120};
     private static final String KEY_ASKED_EXACT = "asked_exact_alarms";
-    // Google TV Settings screens: Remotes & Accessories, and Settings > System.
+    // Settings screens of Google TV: Remotes & Accessories, and Settings > System.
     static final String ACCESSORIES = "com.android.tv.settings.ACCESSORIES_CONNECTED_DEVICES";
     static final String SYSTEM = "com.android.tv.settings.DEVICES";
     static final String INPUTS = "com.android.tv.action.VIEW_INPUTS";
-    /** How the TV's home screen is set up, for the setup steps and Settings. */
+    /** The home screen configuration of the TV, for setup and Settings. */
     static final class Setup {
         boolean homeActive;   // the Home button opens atvOS Launcher
-        String currentHome;   // what it opens instead (the app's name), or null if unknown
+        String currentHome;   // the name of the app that the Home button opens, or null
         /**
-         * Home apps that keep the Home button whatever is chosen in Android's dialog: the TV's own
-         * (Google TV's, Android TV's), which declare a raised priority. Only adb can turn them off.
+         * Home apps with a raised priority. They keep the Home button when the user selects a different home app. Only
+         * adb can disable them.
          */
         final List<String> lockedHomes = new ArrayList<>();
-        boolean canPickHome;  // Android's home-app dialog can make atvOS the home screen
+        boolean canPickHome;  // the home app dialog of Android can make atvOS the home app
         boolean holdsPower;   // the device admin is active
-        boolean developerOn;  // Developer options are turned on
-        boolean adbOn;        // USB (or network) debugging is turned on
-        /** Home apps this launcher turned off over self-adb, to offer putting back. */
+        boolean developerOn;  // Developer options are on
+        boolean adbOn;        // USB or network debugging is on
+        /** Home apps that self-adb disabled. */
         final List<String> disabledHomes = new ArrayList<>();
     }
-    /** Packages we disabled over self-adb (comma-separated), so Restore can re-enable exactly those. */
+    /** The packages that self-adb disabled (comma-separated). Restore enables these packages again. */
     static final String KEY_DISABLED_HOMES = "self_disabled_homes";
-    /** Home apps self-setup never turns off: Android's chooser, and Settings (which holds the fallback home). */
+    /** Home apps that self-adb does not disable: the Android chooser and Settings. */
     private static final Set<String> NEVER_DISABLE = Set.of("android", "com.android.settings", "com.android.tv.settings");
     private final Activity activity;
     private final SharedPreferences prefs;
@@ -90,14 +90,14 @@ final class Controls {
         NotificationManager nm = activity.getSystemService(NotificationManager.class);
         s.dnd = nm.getCurrentInterruptionFilter() > NotificationManager.INTERRUPTION_FILTER_ALL;
 
-        // Adapter state needs no permission on Android 12+; the connected headphones come from the
-        // audio routes, which avoids the BLUETOOTH_CONNECT permission entirely.
+        // The adapter state needs no permission on Android 12 and later. The connected headphones come from the audio
+        // routes, so BLUETOOTH_CONNECT is not necessary.
         BluetoothManager bm = activity.getSystemService(BluetoothManager.class);
         BluetoothAdapter adapter = bm != null ? bm.getAdapter() : null;
         try {
             s.bluetoothOn = adapter != null && adapter.isEnabled();
         } catch (SecurityException ignored) {
-            // Older releases want the legacy BLUETOOTH permission; just show it as off.
+            // Without the permission, Bluetooth shows as off.
         }
         AudioManager am = activity.getSystemService(AudioManager.class);
         for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
@@ -111,7 +111,7 @@ final class Controls {
             }
         }
 
-        // A reboot drops the alarm but not the saved deadline: only trust it while the alarm exists.
+        // A reboot removes the alarm but not the saved deadline. The deadline is used only while the alarm exists.
         long at = prefs.getLong(SleepTimer.KEY_SLEEP_AT, 0);
         if (at > SystemClock.elapsedRealtime() && SleepTimer.active(activity)) {
             s.sleepAt = at;
@@ -121,7 +121,7 @@ final class Controls {
         return s;
     }
 
-    /** Puts the TV to sleep, the same as the remote's power button. Needs the one-time "lock screen" admin consent. */
+    /** Puts the TV to sleep, as the power button of the remote does. The device admin must be active. */
     void powerOff() {
         if (dpm.isAdminActive(admin)) {
             dpm.lockNow();
@@ -130,17 +130,17 @@ final class Controls {
         }
     }
 
-    /** Off → 15 → 30 → 60 → 90 → 120 min → off. */
+    /** Changes the sleep timer: Off → 15 → 30 → 60 → 90 → 120 min → Off. */
     @SuppressLint("MissingPermission") // canScheduleExactAlarms() guards the exact alarm
     void cycleSleepTimer() {
         if (!dpm.isAdminActive(admin)) {
             requestAdmin();
             return;
         }
-        // A deadline saved before a reboot is meaningless now (and its alarm is gone).
+        // A deadline from before a reboot is ignored.
         long now = SystemClock.elapsedRealtime(), at = SleepTimer.active(activity) ? prefs.getLong(SleepTimer.KEY_SLEEP_AT, 0) : 0;
         long left = at > now ? at - now : 0;
-        // The next step up from what's left; after the longest, the timer turns off.
+        // The next step above the time that remains. After the longest step, the timer goes off.
         int next = 0;
         for (int m : SLEEP_MINUTES) {
             if (m * 60_000L > left + 60_000L) {
@@ -159,9 +159,8 @@ final class Controls {
         if (alarms.canScheduleExactAlarms()) {
             alarms.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, pi);
         } else {
-            // An inexact alarm can be as much as 10 minutes late, so first ask for exact alarms
-            // (Android 14+ doesn't grant them by default), where the TV has the screen for it. Only
-            // once: if the answer was no, or the screen had no switch, the timer must still work.
+            // Asks once for exact alarms if the TV has the screen for it. An inexact alarm can be up to 10 minutes
+            // late.
             if (!prefs.getBoolean(KEY_ASKED_EXACT, false)) {
                 prefs.edit().putBoolean(KEY_ASKED_EXACT, true).apply();
                 Intent ask = new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.fromParts("package", activity.getPackageName(), null));
@@ -169,19 +168,19 @@ final class Controls {
                     activity.startActivity(ask.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                     return;
                 } catch (ActivityNotFoundException | SecurityException ignored) {
-                    // no such screen on this TV
+                    // the TV has no such screen
                 }
             }
             alarms.setWindow(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, 60_000, pi);
         }
-        prefs.edit().putLong(SleepTimer.KEY_SLEEP_AT, trigger).apply(); // same clock as the alarm, so a clock change can't skew it
+        prefs.edit().putLong(SleepTimer.KEY_SLEEP_AT, trigger).apply(); // the same clock as the alarm
     }
 
-    /** Needs Do Not Disturb access, granted once with adb (Google TV has no screen for it). */
+    /** Turns Do Not Disturb on or off. It needs Do Not Disturb access. */
     void toggleDnd() {
         NotificationManager nm = activity.getSystemService(NotificationManager.class);
         if (!nm.isNotificationPolicyAccessGranted()) {
-            // Android's own screen for granting it, where the TV has one; otherwise say where to look.
+            // Opens the access screen of Android if the TV has one, else shows a message.
             if (!open(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) {
                 Toast.makeText(activity, R.string.dnd_needs_access, Toast.LENGTH_LONG).show();
             }
@@ -192,8 +191,7 @@ final class Controls {
     }
 
     /**
-     * Gives up the force-lock device admin (holding select on Power Off), so the app can be
-     * uninstalled without adb: Android TV has no settings screen for device admins.
+     * Removes the force-lock device admin, so that the user can uninstall the app. A long press on Power Off calls it.
      */
     void releasePower() {
         if (!dpm.isAdminActive(admin)) {
@@ -206,11 +204,9 @@ final class Controls {
     }
 
     /**
-     * Reads the home-screen setup from where the Home button actually goes, not from Android's
-     * home-app role: on Google TV and Android TV the TV's own home declares a raised priority and
-     * keeps the button even after atvOS is chosen in the dialog (checked on both, Android 12).
+     * Reads the home screen configuration from the app that the Home button opens, not from the home role of Android.
      */
-    @SuppressWarnings("deprecation") // the int-flag overloads work on every version from Android 12
+    @SuppressWarnings("deprecation") // the int-flag methods are available on Android 12 and later
     Setup setup() {
         Setup s = new Setup();
         PackageManager pm = activity.getPackageManager();
@@ -219,13 +215,13 @@ final class Controls {
         ResolveInfo current = pm.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY);
         String currentPkg = current != null ? current.activityInfo.packageName : null;
         s.homeActive = self.equals(currentPkg);
-        if (!s.homeActive && currentPkg != null && !"android".equals(currentPkg)) { // "android": Android's chooser
-            // The app's name: Google TV's home activity is just called "Home".
+        if (!s.homeActive && currentPkg != null && !"android".equals(currentPkg)) { // "android" is the chooser of Android
+            // Uses the app name, not the activity name.
             s.currentHome = current.activityInfo.applicationInfo.loadLabel(pm).toString();
         }
         for (ResolveInfo ri : pm.queryIntentActivities(home, 0)) {
             String pkg = ri.activityInfo.packageName;
-            // Never Android itself or Settings (its fallback home), whatever priority they declare.
+            // Never Android or Settings, whatever their priority.
             if (ri.priority > 0 && !self.equals(pkg) && !NEVER_DISABLE.contains(pkg) && !s.lockedHomes.contains(pkg)) {
                 s.lockedHomes.add(pkg);
             }
@@ -233,12 +229,11 @@ final class Controls {
         RoleManager roles = activity.getSystemService(RoleManager.class);
         boolean roleAvailable = roles != null && roles.isRoleAvailable(RoleManager.ROLE_HOME);
         boolean chosen = roleAvailable && roles.isRoleHeld(RoleManager.ROLE_HOME);
-        // The dialog only helps against an ordinary home app; a locked one wins regardless.
+        // The dialog applies only when no home app has a raised priority.
         s.canPickHome = !s.homeActive && s.lockedHomes.isEmpty() && !chosen
                 && (roleAvailable || hasHomeSettings());
-        // The home apps self-setup turned off, and any of the TV's own still turned off for this user
-        // (the launcher's data cleared since, say), so Restore can always bring the TV's home back.
-        // Only those still installed and still off: Restore stops at the first it can't turn on.
+        // The home apps that self-adb disabled, and the home apps of the TV that are disabled for this user. Only
+        // installed and disabled packages are kept, because Restore stops at the first failure.
         Set<String> candidates = disabled();
         for (ResolveInfo ri : pm.queryIntentActivities(home, PackageManager.MATCH_DISABLED_COMPONENTS | PackageManager.MATCH_SYSTEM_ONLY)) {
             candidates.add(ri.activityInfo.packageName);
@@ -248,7 +243,7 @@ final class Controls {
             try {
                 if (pm.getApplicationEnabledSetting(pkg) == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER) s.disabledHomes.add(pkg);
             } catch (IllegalArgumentException ignored) {
-                // uninstalled since
+                // uninstalled
             }
         }
         s.adbOn = adbEnabled();
@@ -258,36 +253,36 @@ final class Controls {
         return s;
     }
 
-    /** True if adb debugging is on at all (USB or wireless); self-setup needs the user to have enabled it. */
+    /** Returns true if adb debugging (USB or wireless) is on. */
     boolean adbEnabled() {
         return Settings.Global.getInt(activity.getContentResolver(), Settings.Global.ADB_ENABLED, 0) == 1;
     }
 
-    /** Opens Developer options, where the user turns on debugging. */
+    /** Opens Developer options. */
     void openDeveloperSettings() {
         if (!openFresh(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) open(Settings.ACTION_SETTINGS);
     }
 
-    /** Settings' About screen, where selecting the build number turns on Developer options. */
+    /** Opens the About screen of Settings. */
     void openAbout() {
         if (!openFresh(Settings.ACTION_DEVICE_INFO_SETTINGS)) open(Settings.ACTION_SETTINGS);
     }
 
-    /** The home apps self-setup turned off, as saved. */
+    /** Returns the saved home apps that self-adb disabled. */
     private Set<String> disabled() {
         Set<String> all = new LinkedHashSet<>();
         for (String pkg : prefs.getString(KEY_DISABLED_HOMES, "").split(",")) if (!pkg.isEmpty()) all.add(pkg);
         return all;
     }
 
-    /** Remembers home apps just turned off, with any turned off before, so Restore can put them all back. */
+    /** Adds {@code packages} to the saved home apps that self-adb disabled. */
     void rememberDisabled(List<String> packages) {
         Set<String> all = disabled();
         all.addAll(packages);
         prefs.edit().putString(KEY_DISABLED_HOMES, String.join(",", all)).apply();
     }
 
-    /** Forgets home apps just turned back on. */
+    /** Removes {@code packages} from the saved home apps that self-adb disabled. */
     void forgetDisabled(List<String> packages) {
         Set<String> all = disabled();
         packages.forEach(all::remove);
@@ -296,8 +291,8 @@ final class Controls {
     }
 
     /**
-     * Asks Android to make atvOS the home app: its "Default home app" dialog, else the Settings
-     * screen for it. False if this TV has neither.
+     * Asks Android to make atvOS the home app: the "Default home app" dialog, else the Settings screen for it. Returns
+     * false if the TV has neither.
      */
     boolean requestDefaultHome(int requestCode) {
         RoleManager roles = activity.getSystemService(RoleManager.class);
@@ -306,7 +301,7 @@ final class Controls {
                 activity.startActivityForResult(roles.createRequestRoleIntent(RoleManager.ROLE_HOME), requestCode);
                 return true;
             } catch (ActivityNotFoundException | SecurityException ignored) {
-                // fall through to Settings
+                // no dialog: try Settings
             }
         }
         return open(Settings.ACTION_HOME_SETTINGS);
@@ -317,15 +312,12 @@ final class Controls {
         return activity.getPackageManager().resolveActivity(new Intent(Settings.ACTION_HOME_SETTINGS), PackageManager.MATCH_DEFAULT_ONLY) != null;
     }
 
-    /** Opens a screen by intent action; false if this TV has nothing for it. */
+    /** Opens a screen by intent action. Returns false if no app can open it. */
     boolean open(String action) {
         return start(new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
     }
 
-    /**
-     * Opens exactly that screen, in a Settings started afresh. Without this, Settings left open
-     * elsewhere (or on this screen's parent) just comes back as it was, on whatever was last shown.
-     */
+    /** Opens the screen in a new Settings task. Without a new task, an open Settings task shows its last screen. */
     private boolean openFresh(String action) {
         return start(new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
     }
@@ -339,7 +331,7 @@ final class Controls {
         }
     }
 
-    /** A Settings screen, falling back to Settings itself where this TV doesn't have that screen. */
+    /** Opens a Settings screen, or Settings if the TV does not have that screen. */
     void openSettings(String action) {
         if (!open(action) && !open(Settings.ACTION_SETTINGS)) {
             Toast.makeText(activity, R.string.not_available, Toast.LENGTH_SHORT).show();

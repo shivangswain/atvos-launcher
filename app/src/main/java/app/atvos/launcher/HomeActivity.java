@@ -47,72 +47,75 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** The home activity: owns the view, loads apps and backdrops off the UI thread, launches apps. */
+/** The home activity. It owns the view, loads the apps and the backdrops on background threads, and launches apps. */
 public final class HomeActivity extends Activity implements HomeView.Host {
 
-    /** The one SharedPreferences file every part of the launcher keeps its settings in. */
+    /** The SharedPreferences file for all launcher settings. */
     static final String PREFS = "home";
     private static final String TV_LISTINGS = "android.permission.READ_TV_LISTINGS";
     private static final String KEY_ASKED = "asked_tv_listings", KEY_SET_UP = "set_up";
-    /** Settings > Appearance: the rows of programs and Settings light (else dark). Read by {@link Backdrops} too. */
+    /** Settings > Appearance: true for light rows and Settings, else dark. {@link Backdrops} reads it too. */
     static final String KEY_LIGHT = "appearance_light";
-    /** Settings > Time Format: 24-hour (true) or 12-hour; unset follows the TV. */
+    /** Settings > Time Format: true for 24-hour, false for 12-hour. If it is not set, the setting of the TV applies. */
     private static final String KEY_24_HOUR = "time_24_hour";
     private static final String WEBSITE = "https://atvos.tv";
     /**
-     * The system toast's colours on Android TV and Google TV, measured: a dark surface with light
-     * text up to Android 15 (darker on 12 and 13), a light one with dark text from Android 16.
+     * The colours of the system toast: a dark surface with light text up to Android 15, and a light surface with dark
+     * text from Android 16.
      */
     private static final int TOAST_FILL = Build.VERSION.SDK_INT >= 36 ? 0xFFEEEDF4 : Build.VERSION.SDK_INT >= 34 ? 0xFF2F3036 : 0xFF191C1E;
     private static final int TOAST_INK = Build.VERSION.SDK_INT >= 36 ? 0xFF1B1B21 : 0xFFE4E2E6;
-    /** Android TV's stand-ins for apps a TV doesn't have (a browser): they only say there's no app. */
+    /** The Android TV package that answers intents for apps that the TV does not have (for example, a browser). */
     private static final String NO_APP_STUBS = "com.android.tv.frameworkpackagestubs";
     private static final int REQUEST_LISTINGS = 8, REQUEST_HOME = 9;
-    /** After the TV's "Allow debugging" prompt closes, how long adb gets to let us in before it counts as declined. */
+    /**
+     * The time that adb gets to accept the key after the "Allow debugging" prompt closes. After this time, the prompt
+     * counts as declined.
+     */
     private static final long APPROVE_GRACE_MS = 5000;
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
-    private final ExecutorService net = Executors.newSingleThreadExecutor(); // recommendation prefetch
+    private final ExecutorService net = Executors.newSingleThreadExecutor(); // recommendation downloads
     private final AtomicBoolean prefetchQueued = new AtomicBoolean();
-    private final Set<String> pagesQueued = ConcurrentHashMap.newKeySet(); // apps whose other shelf pages are fetched
+    private final Set<String> pagesQueued = ConcurrentHashMap.newKeySet(); // apps whose other shelf pages are downloaded
     private Apps apps;
     private Backdrops backdrops;
     private Controls controls;
     private Profile profile;
     private Donation donation;
     private HomeView view;
-    private boolean homeInstance;      // started by the Home button (else opened like an app)
-    private EditText input;            // takes the TV keyboard's typing for the view (a folder's name)
-    private HomeView.TextEdit textEdit; // ...while it's open
-    private Toast hiddenHint;          // the last "Long press…" toast, so a new one replaces it
+    private boolean homeInstance;      // true if the Home button started this instance
+    private EditText input;            // receives the text from the TV keyboard (a folder name)
+    private HomeView.TextEdit textEdit; // the receiver of that text while the keyboard is open
+    private Toast hiddenHint;          // the last Hidden toast, so that a new one replaces it
 
     // UI thread
     private List<Apps.Entry> current = Collections.emptyList();
     private Apps.Entry focused;
     private boolean focusInDock = true, resumed;
-    private boolean appsDirty = true; // installed apps changed (or not loaded yet): re-query them on refresh
-    private SelfAdb selfAdb;          // the on-TV setup in progress, if any
-    private boolean adbApproving;     // ...waiting on the TV's "Allow debugging" prompt
+    private boolean appsDirty = true; // the installed apps changed, or are not loaded: query them at the next refresh
+    private SelfAdb selfAdb;          // the on-TV setup that runs, or null
+    private boolean adbApproving;     // true while the TV shows the "Allow debugging" prompt
     private final Runnable checkApproval = () -> {
         if (adbApproving && selfAdb != null) selfAdb.declined();
     };
     private volatile String wantedBackdrop = "";
-    private boolean fullScreen;        // the full-screen top shelf is up: its pictures without the dock's scrims
+    private boolean fullScreen;        // the full-screen top shelf shows: its pictures have the details scrim
     /**
-     * Focus moving again this soon after the last move (running along the dock) holds the backdrop
-     * until it settles, rather than starting a crossfade (two full-screen pictures a frame) per app.
+     * A focus move within this time after the last move keeps the backdrop until the focus stops. Then only one
+     * crossfade starts.
      */
     private static final long SETTLE_MS = 150;
     private long focusMovedAt;
     private final Runnable settled = this::updateBackdrop;
 
-    /** Installs, updates and removals; between them, resuming Home skips the PackageManager queries. */
+    /** Installs, updates and removals. Without them, a refresh does not query PackageManager. */
     private final BroadcastReceiver packages = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             appsDirty = true;
             if (resumed) refresh();
-            view.refreshSetup(); // turning off the TV's own home (adb) shows on the sheet at once
+            view.refreshSetup(); // the setup sheet shows a disabled home app immediately
         }
     };
 
@@ -126,7 +129,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         backdrops = new Backdrops(this, dm.widthPixels, dm.heightPixels);
         controls = new Controls(this);
         profile = new Profile(this, io, Math.round(40f * dm.widthPixels / HomeView.W));
-        donation = new Donation(this); // talks to Google Play only while Settings is open
+        donation = new Donation(this); // connects to Google Play only while Settings is open
         view = new HomeView(this, this);
         view.setBackdrop(backdrops.cached(Backdrops.DEFAULT));
         FrameLayout root = new FrameLayout(this);
@@ -142,14 +145,16 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         changes.addAction(Intent.ACTION_PACKAGE_CHANGED);
         changes.addAction(Intent.ACTION_PACKAGE_REPLACED);
         changes.addDataScheme("package");
-        registerReceiver(packages, changes); // protected system broadcasts only, so no export flag needed
+        registerReceiver(packages, changes); // only protected system broadcasts, so no export flag
 
-        // First run: the setup steps, then (as it closes) the recommendations prompt.
+        // First launch: the setup steps, then the recommendations prompt when setup closes.
         if (getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_SET_UP, false)) askForListings();
         else view.openSetup();
     }
 
-    /** Asks once for app recommendations; without them the top shelf shows apps' own art. */
+    /**
+     * Asks one time for access to the recommendations of apps. Without access, the top shelf shows the art of the apps.
+     */
     private void askForListings() {
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         if (checkSelfPermission(TV_LISTINGS) != PackageManager.PERMISSION_GRANTED && !prefs.getBoolean(KEY_ASKED, false)) {
@@ -168,18 +173,18 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         super.onResume();
         resumed = true;
         refresh();
-        profile.refresh(view::setAvatar); // at most once a day
+        profile.refresh(view::setAvatar); // not more than once a day
         view.setClockRunning(true);
-        view.refreshSetup(); // back from Android's home picker or Settings
-        // Back from the TV's "Allow debugging" prompt. adb answers a declined prompt with silence, so
-        // if it hasn't let us in shortly after, stop waiting.
+        view.refreshSetup(); // after the home app dialog or Settings
+        // After the "Allow debugging" prompt: adb does not answer a declined prompt, so the wait ends after
+        // APPROVE_GRACE_MS.
         if (adbApproving) view.postDelayed(checkApproval, APPROVE_GRACE_MS);
     }
 
     @Override
     protected void onPause() {
         finishTextEdit();
-        view.removeCallbacks(checkApproval); // posted again on the next resume
+        view.removeCallbacks(checkApproval); // posted again at the next resume
         resumed = false;
         view.setClockRunning(false);
         super.onPause();
@@ -188,11 +193,11 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        if (view == null) return; // handed off in onCreate: on its way out
+        if (view == null) return; // onCreate handed off: this instance closes
         if (intent.hasCategory(Intent.CATEGORY_HOME)) {
-            homeInstance = true; // Android sent Home here: this is the Home copy now, whatever opened it
+            homeInstance = true; // Android sent Home to this instance
             view.goHome();
-            // Setup finished in a copy opened like an app hands off to this one: ask here instead.
+            // Setup completed in an instance that handed off to this one: the prompt shows here.
             if (getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_SET_UP, false)) askForListings();
             return;
         }
@@ -200,10 +205,8 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     }
 
     /**
-     * This copy was opened like any app (Play Store's Open, an app list, adb) and atvOS is the home
-     * screen: Android keeps such a copy apart from the Home one, with caches of its own. Go to the
-     * Home one instead, and close this. False for the Home copy (whatever it's sent later), or
-     * while atvOS isn't the home screen.
+     * If atvOS is the home app and this instance did not start from the Home button, it opens the Home instance and
+     * closes this one. Returns false for the Home instance, or when atvOS is not the home app.
      */
     private boolean handOffToHome() {
         if (homeInstance || !isDefaultHome()) return false;
@@ -217,8 +220,11 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         return true;
     }
 
-    /** Whether the Home button opens atvOS (from where it resolves, not the role: see {@link Controls#setup}). */
-    @SuppressWarnings("deprecation") // the int-flag overload works on every version from Android 12
+    /**
+     * Returns true if the Home button opens atvOS. It reads the app that the intent resolves to (see
+     * {@link Controls#setup}).
+     */
+    @SuppressWarnings("deprecation") // the int-flag method is available on Android 12 and later
     private boolean isDefaultHome() {
         android.content.pm.ResolveInfo home = getPackageManager().resolveActivity(
                 new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_DEFAULT_ONLY);
@@ -230,20 +236,20 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == Profile.REQUEST_ACCOUNT) {
             profile.onActivityResult(resultCode, data, view::setAvatar);
-            view.refreshSetup(); // the profile picture step moves on
+            view.refreshSetup(); // the profile picture step continues
         }
         if (requestCode == REQUEST_HOME) view.refreshSetup();
     }
 
     @Override
     protected void onDestroy() {
-        if (view == null) { // handed off to Home before anything was set up
+        if (view == null) { // handed off before setup
             super.onDestroy();
             return;
         }
         view.removeCallbacks(checkApproval);
         view.removeCallbacks(settled);
-        checkApproval.run(); // still waiting on the TV's prompt: stop (nothing has run yet)
+        checkApproval.run(); // stops a run that waits for the prompt
         unregisterReceiver(packages);
         io.shutdownNow();
         net.shutdownNow();
@@ -252,21 +258,21 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     }
 
     /**
-     * Re-reads images and recommendations, and the installed apps only when they changed (the
-     * package receiver says so): resuming Home is then just a provider query and a directory listing.
+     * Reads the images and the recommendations again. It queries the installed apps only after the package receiver
+     * reports a change.
      */
     private void refresh() {
         List<Apps.Entry> previous = current;
         boolean reload = appsDirty || previous.isEmpty();
         appsDirty = false;
-        pagesQueued.clear(); // apps may have new pages since: fetch again as they're focused
+        pagesQueued.clear(); // pages of the apps can change: download them again at focus
         io.execute(() -> {
             backdrops.scan(this);
             Apps.Layout layout = reload ? apps.load(previous) : null;
             runOnUiThread(() -> {
                 if (isDestroyed()) return;
                 if (layout != null) {
-                    // Mid-edit, or arranged since this load read the saved layout: apply on the next refresh instead.
+                    // During an edit, or after a change of the layout during this load: apply at the next refresh.
                     if (!apps.isLatest(layout) || !view.setApps(layout.visible(), layout.hidden())) {
                         appsDirty = true;
                     } else {
@@ -285,16 +291,15 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         });
     }
 
-    /** A recommendation image just finished downloading: show it if its app is focused. */
+    /** Shows a downloaded recommendation image if its app has the focus. */
     private void shelfReady() {
         if (!isDestroyed()) updateBackdrop();
     }
 
     private void updateBackdrop() {
-        // Below the dock the backdrop stays on what the dock last showed (blurred and dimmed, as on
-        // tvOS): no image switch, so no costly crossfade on top of the blur transition.
+        // When the focus is below the dock, the backdrop does not change. It stays blurred and dimmed.
         if (!focusInDock && !wantedBackdrop.isEmpty()) return;
-        // A folder shows its first app's backdrop, as on tvOS.
+        // A folder shows the backdrop of its first app.
         Apps.Entry shown = focused != null && focused.folder != null
                 ? (focused.folder.apps.isEmpty() ? null : focused.folder.apps.get(0)) : focused;
         String key = shown != null ? backdrops.backdropKey(shown.pkg, fullScreen) : Backdrops.DEFAULT;
@@ -307,7 +312,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
             return;
         }
         io.execute(() -> {
-            if (!key.equals(wantedBackdrop)) return; // focus already moved on
+            if (!key.equals(wantedBackdrop)) return; // the focus moved
             Backdrops.Backdrop loaded = backdrops.load(key, program);
             runOnUiThread(() -> {
                 if (loaded != null) backdrops.put(key, loaded);
@@ -316,7 +321,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         });
     }
 
-    // ---- HomeView.Host -----------------------------------------------------------------------
+    // HomeView.Host
 
     @Override
     public void onFocusChanged(Apps.Entry entry, boolean inDock) {
@@ -327,7 +332,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         if (inDock && now - focusMovedAt < SETTLE_MS) view.postDelayed(settled, SETTLE_MS);
         else updateBackdrop();
         focusMovedAt = now;
-        // An app with a top shelf in the dock: fetch its other pages now, so Up can page through them.
+        // For an app in the dock with a top shelf, downloads its other pages now, so that Up can show them.
         if (inDock && entry != null && entry.folder == null && backdrops.recommendation(entry.pkg) != null
                 && pagesQueued.add(entry.pkg)) {
             String pkg = entry.pkg;
@@ -339,7 +344,10 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         }
     }
 
-    /** The full-screen shelf went up (or down): its picture changes to the one without (or with) the dock's scrims. */
+    /**
+     * The full-screen shelf opened or closed. The backdrop changes to the picture with the details scrim or with the
+     * dock scrim.
+     */
     @Override
     public void setFullScreen(boolean on) {
         fullScreen = on;
@@ -370,7 +378,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     @Override
     public void setShelfSource(Apps.Entry entry, int source, boolean on) {
         backdrops.setSource(entry.pkg, source, on);
-        refresh(); // re-reads recommendations without it, and swaps the backdrop
+        refresh(); // reads the recommendations again and changes the backdrop
     }
 
     @Override
@@ -383,17 +391,16 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     }
 
     /**
-     * Opens the program shown in the top shelf. The intent comes from another app's data, so it's
-     * treated as untrusted: it may only open the app that published it, with no selector and no
-     * URI permission grants.
+     * Opens the program of the top shelf. The intent comes from the data of a different app. It can open only the app
+     * that published it, with no selector and no URI permissions.
      */
     @Override
     public void launchProgram(Recommendations.Item program, Rect from) {
-        if (getPackageName().equals(program.pkg())) return; // never aim another app's intent at ourselves
+        if (getPackageName().equals(program.pkg())) return; // never opens an intent of a different app in this app
         Intent intent;
         try {
             intent = Intent.parseUri(program.intentUri(), Intent.URI_INTENT_SCHEME);
-        } catch (URISyntaxException | RuntimeException e) { // malformed extras can throw too
+        } catch (URISyntaxException | RuntimeException e) { // extras that are not valid can throw
             Toast.makeText(this, getString(R.string.cannot_open, program.title()), Toast.LENGTH_SHORT).show();
             return;
         }
@@ -420,7 +427,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         apps.saveLayout(visible, hidden);
     }
 
-    /** Every tile and app, folders' apps too: what the next load can reuse. A copy, taken on the UI thread. */
+    /** Returns a copy of all tiles and apps, with the apps in folders, for the next load. UI thread. */
     private static List<Apps.Entry> all(List<Apps.Entry> visible, List<Apps.Entry> hidden) {
         List<Apps.Entry> all = new ArrayList<>(visible);
         for (Apps.Entry e : visible) if (e.folder != null) all.addAll(e.folder.apps);
@@ -516,22 +523,20 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     }
 
     /**
-     * Turns the TV's own home apps off (or back on) over its own adb. {@code record} hears which
-     * packages it changed, even when a later one fails, so none is lost track of; {@code okMessage}
-     * is shown when all worked. On a thread of its own, not {@link #io}: it can wait over a minute on
-     * the TV's prompt, and the home screen's loading mustn't queue up behind it.
+     * Disables or enables the home apps of the TV over self-adb. {@code record} receives the changed packages, also
+     * when a later package fails. {@code okMessage} shows when all packages succeed. It runs on its own thread, not
+     * {@link #io}, because it can wait more than one minute for the prompt.
      */
     private void runSelfAdb(List<String> packages, SelfAdb.Job job, HomeView.SelfSetup progress,
                             java.util.function.Consumer<List<String>> record, int okMessage) {
         if (!controls.adbEnabled()) {
-            // We can't turn debugging on ourselves; send the user to the screen that does.
+            // The app cannot turn on debugging. This opens the screen where the user turns it on.
             controls.openDeveloperSettings();
             progress.done(false, R.string.setup_tv_enable_debug);
             return;
         }
-        // A run still going means the sheet was closed and opened again mid-run, and this is a retry.
-        // If that run is still waiting on the prompt, it stops (nothing has run yet); if it's already
-        // working, it finishes unheard.
+        // A run that waits for the prompt stops before it sends a command. A run that sends commands completes, and its
+        // result is ignored.
         checkApproval.run();
         SelfAdb adb = new SelfAdb();
         selfAdb = adb;
@@ -539,7 +544,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         new Thread(() -> {
             List<String> changed = new ArrayList<>();
             SelfAdb.Result r = adb.run(packages, job, step -> runOnUiThread(() -> {
-                if (selfAdb != adb || isDestroyed()) return; // replaced by a retry, or gone
+                if (selfAdb != adb || isDestroyed()) return; // a newer run replaced it, or the activity closed
                 adbApproving = step == SelfAdb.Listener.APPROVE;
                 progress.status(stepMessage(step));
             }), changed);
@@ -583,12 +588,12 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         return getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_LIGHT, false);
     }
 
-    /** Settings > Appearance: saved, then the row behind the dock is drawn again in it. */
+    /** Settings > Appearance: saves the value, then draws the row behind the dock again. */
     @Override
     public void setLightAppearance(boolean light) {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_LIGHT, light).apply();
         view.setLight(light);
-        updateBackdrop(); // a row's key includes the appearance
+        updateBackdrop(); // the key of a row contains the appearance
     }
 
     @Override
@@ -629,12 +634,11 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     }
 
     /**
-     * After an app moves to Hidden: a toast with the remote's Down key as its icon. A text toast
-     * would carry the app's own icon (Android 12+ draws those itself), so this one has its own
-     * view, in the system toast's looks; screen readers read it as they do any toast.
+     * Shows a toast after an app moves to Hidden, with an icon of the Down key. The toast has its own view in the style
+     * of the system toast. Screen readers read it as a toast.
      */
     @Override
-    @SuppressWarnings("deprecation") // setView: still shown for the app in front, as Home always is when this runs
+    @SuppressWarnings("deprecation") // setView applies to the app in the foreground
     public void showHiddenHint() {
         if (hiddenHint != null) hiddenHint.cancel();
         float dp = getResources().getDisplayMetrics().density;
@@ -644,7 +648,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         view.setPadding(Math.round(16 * dp), Math.round(12 * dp), Math.round(20 * dp), Math.round(12 * dp));
         GradientDrawable frame = new GradientDrawable();
         frame.setColor(TOAST_FILL);
-        frame.setCornerRadius(100 * dp); // a pill, as the system's is
+        frame.setCornerRadius(100 * dp); // a pill
         view.setBackground(frame);
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.drawable.ic_down_circle);
@@ -663,7 +667,10 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         hiddenHint.show();
     }
 
-    /** Settings > Support: atvOS's website, its page on Google Play, or Android's App Info for it. */
+    /**
+     * Returns the intent for Settings > Support: the atvOS website, the Google Play page of atvOS, or App Info for
+     * atvOS.
+     */
     private Intent supportIntent(int what) {
         return switch (what) {
             case SettingsScreen.WEBSITE -> new Intent(Intent.ACTION_VIEW, Uri.parse(WEBSITE)).addCategory(Intent.CATEGORY_BROWSABLE);
@@ -672,7 +679,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         };
     }
 
-    /** Whether the TV has an app for it. Android TV answers web links it has no browser for with a stub that only says so. */
+    /** Returns true if the TV has an app for the intent. The stub package of Android TV does not count. */
     @Override
     public boolean canOpenFromSettings(int what) {
         ComponentName handler = supportIntent(what).resolveActivity(getPackageManager());
@@ -687,7 +694,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
             startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             return true;
         } catch (ActivityNotFoundException | SecurityException e) {
-            return false; // no browser, say: Settings says where to go instead
+            return false; // no browser: Settings shows the address
         }
     }
 
@@ -696,15 +703,14 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         boolean first = !prefs.getBoolean(KEY_SET_UP, false);
         if (first) prefs.edit().putBoolean(KEY_SET_UP, true).apply();
-        // Setup run from the TV's app list just made atvOS the home screen: carry on in the Home copy.
+        // Setup made atvOS the home app: the Home instance continues.
         if (handOffToHome()) return;
         if (first) askForListings();
     }
 
     /**
-     * Deletes an app the user confirmed in the alert, with Android's own uninstall screen (never
-     * over adb). Only apps Android itself lets the user uninstall; the package receiver then
-     * refreshes Home.
+     * Uninstalls an app after the user confirms it in the alert. It opens the uninstall screen of Android. Only apps
+     * that Android lets the user uninstall. The package receiver then refreshes the home screen.
      */
     @Override
     public void deleteApp(Apps.Entry entry) {
@@ -713,26 +719,26 @@ public final class HomeActivity extends Activity implements HomeView.Host {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), null, entry.label);
     }
 
-    /** The TV's keyboard, typing into a hidden field that reports to the view as it changes. */
+    /** Opens the TV keyboard for a hidden field. The field sends each change to the view. */
     @Override
     public void editText(String text, HomeView.TextEdit edit) {
         finishTextEdit();
         input.setText(text);
         input.setSelection(input.length());
-        textEdit = edit; // after setText, which isn't a change the user made
+        textEdit = edit; // set after setText, so that setText is not a change
         input.setVisibility(View.VISIBLE);
         input.requestFocus();
-        input.post(() -> getSystemService(InputMethodManager.class).showSoftInput(input, 0)); // the user asked to type
+        input.post(() -> getSystemService(InputMethodManager.class).showSoftInput(input, 0)); // the user started the edit
     }
 
     private EditText textInput() {
         EditText field = new EditText(this) {
             @Override
             public boolean onKeyPreIme(int keyCode, KeyEvent event) {
-                // Back keeps what's typed, as Menu does on tvOS.
+                // Back keeps the text.
                 if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
                     finishTextEdit();
-                    return true; // done with: it mustn't go on to the home screen, now focused
+                    return true; // the key does not go to the home screen
                 }
                 return super.onKeyPreIme(keyCode, event);
             }

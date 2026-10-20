@@ -45,20 +45,17 @@ import java.util.function.Consumer;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
- * The profile picture in the clock pill: the Google account's profile photo, else its letter avatar
- * (what Google shows for accounts without one), or, as Settings &gt; Profile Picture chooses, just
- * the letter or nothing. The account is picked once with Android's own chooser; there's no other
- * source of pictures.
+ * The profile picture in the clock pill. Settings &gt; Profile Picture selects the photo of the Google account (else
+ * its letter avatar), the letter only, or nothing. The user selects the account in the account chooser of Android.
  * <p>
- * Google gives profile photos only to apps it knows: this one needs an Android OAuth client in a
- * Google Cloud project (see README). Until then the token request fails and the letter stays. The
- * token is only ever sent to Google over HTTPS and never stored; the photo is cached privately and
- * refreshed at most once a day.
+ * The photo needs an Android OAuth client in a Google Cloud project (see README). Without it, the token request fails
+ * and the letter shows. The token goes only to Google over HTTPS and is not stored. The photo is cached in the app
+ * storage and updated not more than once a day.
  */
 final class Profile {
 
     static final int REQUEST_ACCOUNT = 7;
-    /** Settings > Profile Picture: the account's photo (else its letter), its letter, or none. */
+    /** Settings > Profile Picture: the photo (else the letter), the letter, or none. */
     static final String PHOTO = "photo", INITIAL = "initial", NONE = "none";
     private static final String TAG = "atvOS";
     private static final String GOOGLE = "com.google";
@@ -66,7 +63,7 @@ final class Profile {
     private static final String SCOPE = "oauth2:https://www.googleapis.com/auth/userinfo.profile";
     private static final String USERINFO = "https://www.googleapis.com/oauth2/v3/userinfo";
     private static final long REFRESH_MS = 24 * 60 * 60_000L;
-    private static final int MAX_PHOTO = 4 << 20, MAX_FILE = 16 << 20; // a download; any picture we decode
+    private static final int MAX_PHOTO = 4 << 20, MAX_FILE = 16 << 20; // the maximum download and the maximum file to decode
 
     private final Activity activity;
     private final Executor io;
@@ -82,28 +79,28 @@ final class Profile {
         this.size = sizePx;
     }
 
-    /** The picture chosen in Settings: the account's Google photo, else its monogram; null for none. */
+    /** Loads the picture that is set in Settings: the photo, else the letter avatar, or null for none. */
     void load(Consumer<Bitmap> onAvatar) {
         String account = prefs.getString(KEY_ACCOUNT, null), picture = picture();
         io.execute(() -> {
             Bitmap result = shown(account, picture);
-            activity.runOnUiThread(() -> onAvatar.accept(result)); // null: the plain silhouette
+            activity.runOnUiThread(() -> onAvatar.accept(result)); // null shows the default avatar
         });
     }
 
-    /** IO thread. */
+    /** Returns the avatar for {@code account} and the setting {@code picture}. IO thread. */
     private Bitmap shown(String account, String picture) {
         if (account == null || NONE.equals(picture)) return null;
         Bitmap round = PHOTO.equals(picture) && photo.isFile() ? decodeCircle(photo, size) : null;
         return round != null ? round : monogram(account, size);
     }
 
-    /** The chosen Google account's name (its address), or null. */
+    /** Returns the name (the address) of the selected Google account, or null. */
     String account() {
         return prefs.getString(KEY_ACCOUNT, null);
     }
 
-    /** {@link #PHOTO}, {@link #INITIAL} or {@link #NONE}. */
+    /** Returns {@link #PHOTO}, {@link #INITIAL} or {@link #NONE}. */
     String picture() {
         return prefs.getString(KEY_PICTURE, PHOTO);
     }
@@ -114,20 +111,19 @@ final class Profile {
     }
 
     /**
-     * Fetches the account's Google photo if it's been a day since the last try, then shows it,
-     * quietly: if Google still needs your consent this does nothing, so a resume never pops up its
-     * screen (picking the account asks for it). UI thread.
+     * Downloads the photo if the last try was one day ago or more, then shows it. It does not show the consent screen.
+     * UI thread.
      */
     void refresh(Consumer<Bitmap> onAvatar) {
         refresh(onAvatar, false);
     }
 
-    /** With {@code ask}, Android may show its consent screen (to let the launcher see basic profile info). */
+    /** {@code ask}: Android can show its consent screen for basic profile data. */
     private void refresh(Consumer<Bitmap> onAvatar, boolean ask) {
         String name = prefs.getString(KEY_ACCOUNT, null);
         long now = System.currentTimeMillis();
         if (name == null || now - prefs.getLong(KEY_PHOTO_TRIED, 0) < REFRESH_MS) return;
-        // Waking from standby, the TV resumes before Wi-Fi is back, and a try then would wait a day.
+        // Tries only when the network is connected.
         if (!online()) return;
         prefs.edit().putLong(KEY_PHOTO_TRIED, now).apply();
         AccountManager am = AccountManager.get(activity);
@@ -136,16 +132,17 @@ final class Profile {
         if (account != null) fetchPhoto(am, account, onAvatar, ask, true);
     }
 
-    /** Asks for a token and fetches the photo with it; {@code retry}: once more with a fresh token if that one had expired. */
+    /**
+     * Gets a token and downloads the photo. {@code retry}: tries one more time with a new token if the token expired.
+     */
     private void fetchPhoto(AccountManager am, Account account, Consumer<Bitmap> onAvatar, boolean ask, boolean retry) {
         String name = account.name;
         AccountManagerCallback<Bundle> done = future -> io.execute(() -> {
             try {
                 String token = future.getResult().getString(AccountManager.KEY_AUTHTOKEN);
-                if (token == null) return; // consent still needed (only shown when asked)
+                if (token == null) return; // consent is necessary
                 if (!download(token)) {
-                    // Expired (Android hands out its cached token until told otherwise): get a fresh
-                    // one now rather than at the next try a day away.
+                    // The token expired. Removes it from the cache and gets a new token.
                     am.invalidateAuthToken(GOOGLE, token);
                     if (retry) activity.runOnUiThread(() -> fetchPhoto(am, account, onAvatar, false, false));
                     return;
@@ -153,7 +150,7 @@ final class Profile {
                 Bitmap round = shown(name, picture());
                 activity.runOnUiThread(() -> onAvatar.accept(round));
             } catch (OperationCanceledException | AuthenticatorException | IOException | RuntimeException e) {
-                // Typically "UnregisteredOnApiConsole" until the app has an OAuth client.
+                // The message is "UnregisteredOnApiConsole" when the app has no OAuth client.
                 Log.w(TAG, "No Google profile photo: " + e.getMessage());
             }
         });
@@ -169,12 +166,12 @@ final class Profile {
     }
 
     /**
-     * Reads the photo's address from Google's userinfo, then saves the photo (or removes the old one
-     * if there's none now). False if the token was refused. IO thread.
+     * Reads the photo address from the userinfo of Google, then saves the photo, or deletes the old photo if there is
+     * none. Returns false if Google refuses the token. IO thread.
      */
     private boolean download(String token) throws IOException {
         String picture;
-        HttpURLConnection http = (HttpsURLConnection) new URL(USERINFO).openConnection(); // HTTPS or it throws
+        HttpURLConnection http = (HttpsURLConnection) new URL(USERINFO).openConnection(); // throws if the URL is not HTTPS
         try {
             http.setConnectTimeout(8000);
             http.setReadTimeout(15000);
@@ -196,9 +193,8 @@ final class Profile {
             photo.delete();
             return true;
         }
-        // Google serves 96px by default; ask for the size it's shown at (a size suffix on the path,
-        // so not on an address with a query, which is fetched as it is). The address is checked on
-        // the very URL that's fetched, so no difference between two parsers can slip past it.
+        // Adds a size suffix to the path for the display size. An address with a query is used as it is. The host check
+        // uses the same URL object as the request.
         String sized = picture.indexOf('?') >= 0 ? picture
                 : picture.replaceAll("=s\\d+(-c)?$", "") + "=s" + Math.max(128, size * 2) + "-c";
         URL url = new URL(sized);
@@ -225,7 +221,7 @@ final class Profile {
         return true;
     }
 
-    /** The whole stream, refusing anything over {@code max} bytes. */
+    /** Reads all of the stream. Throws if it has more than {@code max} bytes. */
     private static byte[] read(InputStream in, int max) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] buf = new byte[8 << 10];
@@ -236,15 +232,15 @@ final class Profile {
         return out.toByteArray();
     }
 
-    /** Decodes the cached photo straight to about the size it's shown at, then rounds it. */
+    /** Decodes the cached photo at approximately its display size, then makes it round. */
     private static Bitmap decodeCircle(File f, int size) {
         if (f.length() <= 0 || f.length() > MAX_FILE) return null;
         try {
             Bitmap src = ImageDecoder.decodeBitmap(ImageDecoder.createSource(f), (decoder, info, source) -> {
-                decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE); // read by a shader on a software canvas
+                decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE); // a shader on a software canvas reads it
                 int w = info.getSize().getWidth(), h = info.getSize().getHeight();
-                // The circle shows the middle square, so the short side sets the scale; the long side
-                // is capped too, or a thin strip of a picture could still decode to hundreds of MB.
+                // The short side sets the scale because the circle shows the centre square. The long side has a limit
+                // too.
                 float k = Math.min((float) size / Math.min(w, h), 8f * size / Math.max(w, h));
                 if (k < 0.5f) {
                     decoder.setTargetSize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
@@ -258,16 +254,15 @@ final class Profile {
         }
     }
 
-    /** Whether an account has been chosen for the profile picture. */
+    /** Returns true if the user selected an account. */
     boolean hasAccount() {
         return prefs.getString(KEY_ACCOUNT, null) != null;
     }
 
-    /** Shows Android's account picker; the result arrives in {@link #onActivityResult}. */
+    /** Shows the account chooser of Android. The result goes to {@link #onActivityResult}. */
     void choose() {
         Intent pick = AccountManager.newChooseAccountIntent(null, null, new String[]{GOOGLE}, null, null, null, null);
-        // Google TV routes this to a Play services picker that hands off to the stock launcher (which
-        // we replace), so use Android's own chooser instead.
+        // Opens the account chooser activity of the Android system.
         pick.setComponent(new ComponentName("android", "android.accounts.ChooseTypeAndAccountActivity"));
         try {
             activity.startActivityForResult(pick, REQUEST_ACCOUNT);
@@ -279,16 +274,16 @@ final class Profile {
     void onActivityResult(int resultCode, Intent data, Consumer<Bitmap> onAvatar) {
         String name = data != null ? data.getStringExtra(AccountManager.KEY_ACCOUNT_NAME) : null;
         if (resultCode != Activity.RESULT_OK || name == null) return;
-        // A new pick also retries the photo now (say, after setting up the OAuth client). Another
-        // account's photo goes at once; the same account's stays until a new one replaces it.
+        // A new selection downloads the photo again immediately. The photo of a different account is deleted
+        // immediately.
         boolean other = !name.equals(prefs.getString(KEY_ACCOUNT, null));
         prefs.edit().putString(KEY_ACCOUNT, name).remove(KEY_PHOTO_TRIED).apply();
-        if (other) io.execute(photo::delete); // before load() reads it: the executor is single-threaded
+        if (other) io.execute(photo::delete); // the executor has one thread, so this runs before load()
         load(onAvatar);
         refresh(onAvatar, true);
     }
 
-    /** A round, centre-cropped copy at {@code size} px. */
+    /** Returns a round copy, cropped to the centre, at {@code size} px. */
     private static Bitmap circle(Bitmap src, int size) {
         if (src == null) return null;
         Bitmap out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
@@ -304,7 +299,7 @@ final class Profile {
         return out;
     }
 
-    /** Google-style letter avatar: the account's initial on a colour picked from the name. */
+    /** Returns a letter avatar: the first letter of the account on a colour from the name. */
     private static Bitmap monogram(String account, int size) {
         int[] colors = {0xFF1A73E8, 0xFFD93025, 0xFF188038, 0xFFE37400, 0xFF9334E6, 0xFF007B83};
         Bitmap out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);

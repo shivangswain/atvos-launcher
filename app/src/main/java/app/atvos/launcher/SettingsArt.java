@@ -14,22 +14,20 @@ import android.text.TextUtils;
 import java.util.Locale;
 
 /**
- * The pictures in setup: the TV's own Settings screens as the user will see them, drawn natively
- * (no atvOS styling) so they're sharp at any size and cost nothing to ship. Google TV and Android
- * TV each get their own look, measured from their Settings at 1920×1080 and drawn in those units,
- * filled in with this TV's real model, version and build. Each shows the screen's title, a couple
- * of rows and the one to select, close up, so they read at the size they're shown.
+ * Draws the pictures in setup: the Settings screens of the TV, with the model, version and build of this TV. Google TV
+ * and Android TV each have their own layout, in 1920×1080 units. Each picture shows the screen title, some rows and the
+ * row to select, enlarged.
  */
 final class SettingsArt {
 
     static final int ABOUT = 0, DEVELOPER = 1, PROMPT = 2;
 
-    // Google TV: two panes, the focused row a light card.
+    // Google TV: two panes. The focused row is a light card.
     private static final int GTV_LIST = 0xFF1E232C, GTV_PREVIEW = 0xFF222730, GTV_TEXT = 0xFFE8EAED,
             GTV_SUMMARY = 0xFFA8ACB2, GTV_CARD = 0xFFE8EAED, GTV_CARD_TEXT = 0xFF202124, GTV_CARD_SUMMARY = 0xFF5F6368,
             GTV_HEADER = 0xFF9AA0A6, GTV_BLUE = 0xFF3A75E2, GTV_ON_TRACK = 0xFFCBD7EE,
             GTV_OFF_TRACK = 0xFF444B57, GTV_THUMB = 0xFFF5F5F5;
-    // Android TV: a side panel over the dimmed home screen, the focused row a lighter band.
+    // Android TV: a side panel over the dimmed home screen. The focused row is a lighter band.
     private static final int ATV_DIM = 0xFF050505, ATV_PANEL = 0xFF202124, ATV_HEAD = 0xFF1B1C1E, ATV_FOCUS = 0xFF2E2F32,
             ATV_TEXT = 0xFFEEEEEE, ATV_SUMMARY = 0xFFB5B5B6, ATV_BLUE = 0xFF4FA6FA,
             ATV_ON_TRACK = 0xFF385470, ATV_OFF_TRACK = 0xFF5F6062, ATV_THUMB = 0xFFB9B9B9;
@@ -49,7 +47,7 @@ final class SettingsArt {
             condensed = Typeface.create("sans-serif-condensed", Typeface.NORMAL);
     private final RectF r = new RectF();
     private final Path clip = new Path(), check = new Path();
-    private float right; // where text on the screen being drawn is cut off
+    private float right; // the right edge of the text on the current screen
 
     SettingsArt(Context c) {
         googleTv = c.getPackageManager().hasSystemFeature("com.google.android.feature.AMATI_EXPERIENCE");
@@ -79,14 +77,14 @@ final class SettingsArt {
         check.lineTo(8f, -6f);
     }
 
-    /** Draws picture {@code kind} into {@code box}, rounded, at {@code alpha}. */
+    /** Draws the picture {@code kind} into {@code box} with rounded corners, at {@code alpha}. */
     void draw(Canvas c, int kind, RectF box, float radius, int alpha) {
         c.save();
         clip.rewind();
         clip.addRoundRect(box, radius, radius, Path.Direction.CW);
         c.clipPath(clip);
         c.translate(box.left, box.top);
-        // Close up on what matters: Google TV's list, Android TV's side panel, the prompt's dialog.
+        // Enlarges the important area: the Google TV list, the Android TV side panel, or the prompt dialog.
         float vx = kind == PROMPT ? 404f : googleTv ? 180f : 924f, vy = kind == PROMPT ? 224f : googleTv ? 90f : 16f;
         float vw = kind == PROMPT ? 1110f : 996f;
         float k = box.width() / vw;
@@ -106,7 +104,7 @@ final class SettingsArt {
         c.restore();
     }
 
-    // ---- Google TV ---------------------------------------------------------------------------
+    // Google TV
 
     private void gtvPanes(Canvas c, String title) {
         right = 880f;
@@ -120,7 +118,7 @@ final class SettingsArt {
         if (summary != null) draw(c, summary, 260f, baseline + 44f, 24f, regular, color == GTV_TEXT ? GTV_SUMMARY : color);
     }
 
-    /** The focused row: a light card, lifted, its text dark. */
+    /** Draws the focused row: a light, lifted card with dark text. */
     private void gtvCard(Canvas c, float top, float bottom, String title, String summary) {
         fill.setColor(0x40000000);
         r.set(209f, top + 8f, 913f, bottom + 10f);
@@ -161,12 +159,12 @@ final class SettingsArt {
         c.drawCircle(on ? 846f : 792f, cy, 18f, fill);
     }
 
-    // ---- Android TV --------------------------------------------------------------------------
+    // Android TV
 
     private void atvPanel(Canvas c, String title) {
         right = 1700f;
         rect(c, 0f, 0f, 1200f, 1080f, ATV_DIM);
-        // A hint of the home screen behind: its row of apps, dimmed.
+        // The row of apps of the home screen behind the panel, dimmed.
         fill.setColor(0xFF141517);
         for (int i = 0; i < 2; i++) {
             r.set(960f + i * 140f, 300f, 1080f + i * 140f, 380f);
@@ -214,9 +212,9 @@ final class SettingsArt {
         c.drawCircle(on ? 1782f : 1740f, cy, 18f, fill);
     }
 
-    // ---- The debugging prompt ----------------------------------------------------------------
+    // The debugging prompt
 
-    /** As it appears: "Always allow" ticked and Allow focused, the way setup asks for it. */
+    /** Draws the prompt with "Always allow" selected and Allow focused. */
     private void prompt(Canvas c) {
         right = 1420f;
         rect(c, 0f, 0f, 1920f, 1080f, PROMPT_SCRIM);
@@ -250,9 +248,9 @@ final class SettingsArt {
         drawCentred(c, label, (left + right) / 2f, 692f, right - left - 24f, 28f, medium, focused ? GTV_CARD_TEXT : GTV_TEXT);
     }
 
-    // ---- Helpers -----------------------------------------------------------------------------
+    // Helpers
 
-    /** "7×" in the settings' accent colour: select this row seven times. */
+    /** Draws "7×" in the accent colour of Settings: the number of times to select the row. */
     private void badge(Canvas c, float cx, float cy, int color) {
         fill.setColor(color);
         c.drawCircle(cx, cy, 34f, fill);
@@ -264,12 +262,12 @@ final class SettingsArt {
         c.drawRect(l, t, rr, b, fill);
     }
 
-    /** Text cut to the row's width, as the real screen would. */
+    /** Draws text, cut at the right edge of the row. */
     private void draw(Canvas c, String s, float x, float baseline, float size, Typeface face, int color) {
         fit(c, s, x, baseline, right - x, size, face, color);
     }
 
-    /** Text centred on {@code cx}, cut to {@code width} (a button's, say). */
+    /** Draws text centred on {@code cx}, cut at {@code width}. */
     private void drawCentred(Canvas c, String s, float cx, float baseline, float width, float size, Typeface face, int color) {
         text.setTextAlign(Paint.Align.CENTER);
         fit(c, s, cx, baseline, width, size, face, color);

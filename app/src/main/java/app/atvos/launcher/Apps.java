@@ -35,19 +35,18 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** Launchable apps, their tile artwork, and the user's order, folders and hidden set. */
+/** Loads the launchable apps and their tile art. Saves the order, the folders and the hidden apps of the user. */
 final class Apps {
 
-    /** The home screen's tiles in display order (apps and folders), and hidden apps (shown greyed out while editing). */
     /**
-     * The apps as loaded. {@code order} and {@code folders}: the saved layout with installs and
-     * removals applied, if that changed it, for {@link #saveLoaded}; else null. {@code revision}:
-     * see {@link #isLatest}.
+     * The tiles in display order (apps and folders) and the hidden apps. {@code order} and {@code folders}: the saved
+     * layout with the installs and removals applied, for {@link #saveLoaded}, or null if there is no change.
+     * {@code revision}: see {@link #isLatest}.
      */
     record Layout(List<Entry> visible, List<Entry> hidden, String order, String folders, int revision) {
     }
 
-    /** A folder of apps, as on tvOS. Its apps belong to the UI thread once loaded. */
+    /** A folder of apps. After the load, only the UI thread changes its apps. */
     static final class Folder {
         final String id;
         final List<Entry> apps = new ArrayList<>();
@@ -58,8 +57,8 @@ final class Apps {
     }
 
     /**
-     * One tile: an app, or a folder of them. Art fields are immutable; the label (a folder can be
-     * renamed) and the animation fields belong to the UI thread.
+     * One tile: an app or a folder. The art fields do not change. Only the UI thread changes the label and the
+     * animation fields.
      */
     static final class Entry {
         final String pkg;
@@ -69,17 +68,17 @@ final class Apps {
         final long updated;
         final Bitmap art;
         final BitmapShader shader;
-        /** The folder this tile opens, or null for an app. */
+        /** The folder that this tile opens, or null for an app. */
         final Folder folder;
-        /** An app the user can uninstall (not part of the system image). */
+        /** True if the user can uninstall the app (it is not in the system image). */
         final boolean removable;
-        /** Its {@link ApplicationInfo#category}, to name a folder made from it. */
+        /** The {@link ApplicationInfo#category} of the app, for the name of a new folder. */
         final int category;
 
         float focus;
         float x = Float.NaN;
         float y;
-        String shortLabel; // the label truncated to fit under its tile, worked out when first shown
+        String shortLabel; // the label, cut to the tile width at the first draw
 
         Entry(String pkg, String label, ComponentName component, boolean leanback, long updated, Bitmap art,
               boolean removable, int category) {
@@ -95,7 +94,7 @@ final class Apps {
             this.category = category;
         }
 
-        /** A folder's tile; its key in the saved order is {@link #FOLDER} plus its id. */
+        /** Makes the tile of a folder. Its key in the saved order is {@link #FOLDER} followed by its id. */
         Entry(Folder folder, String name) {
             this.pkg = FOLDER + folder.id;
             this.label = name;
@@ -110,10 +109,10 @@ final class Apps {
         }
     }
 
-    /** Folder tiles' keys in the saved order: this, then the folder's id. */
+    /** The prefix of a folder key in the saved order. The folder id follows it. */
     static final String FOLDER = "folder:";
 
-    // First-run order; everything else follows alphabetically, Settings last.
+    // The order on the first launch. Other apps follow in alphabetical order, with Settings last.
     private static final List<String> PREFERRED = Arrays.asList(
             "com.apple.atve.androidtv.appletv",
             "com.google.android.youtube.tv",
@@ -128,30 +127,30 @@ final class Apps {
 
     private static final String KEY_ORDER = "order";
     private static final String KEY_HIDDEN = "hidden";
-    /** Folders as JSON: [{"id": "1", "name": "Movies & Video", "apps": ["com.netflix.ninja", …]}, …]. */
+    /** The folders as JSON: [{"id": "1", "name": "Movies & Video", "apps": ["com.netflix.ninja", …]}, …]. */
     private static final String KEY_FOLDERS = "folders";
 
     private final String self;
     private final PackageManager pm;
     private final SharedPreferences prefs;
     private final int artW, artH;
-    private final AtomicInteger revision = new AtomicInteger(); // bumped by every saveLayout(): the user's arranging
+    private final AtomicInteger revision = new AtomicInteger(); // increments at each saveLayout()
 
     Apps(Context context, int screenWidth) {
         self = context.getPackageName();
         pm = context.getPackageManager();
         prefs = context.getSharedPreferences(HomeActivity.PREFS, Context.MODE_PRIVATE);
-        // Art is rendered at the largest on-screen size (a focused tile).
+        // The art has the size of a focused tile.
         artW = Math.round(HomeView.TILE_W * HomeView.FOCUS_SCALE * screenWidth / HomeView.W);
         artH = Math.round(artW * HomeView.TILE_H / HomeView.TILE_W);
     }
 
     /**
-     * Loads the apps in display order, with folders in their places. Reuses entries from
-     * {@code previous} (every app and folder, inside folders too) when unchanged. Background thread.
+     * Loads the apps in display order, with the folders at their positions. It uses the entries from {@code previous}
+     * again if they did not change. Background thread.
      */
     Layout load(List<Entry> previous) {
-        int seen = revision.get(); // before reading the saved layout
+        int seen = revision.get(); // read before the saved layout
         Map<String, Entry> old = new HashMap<>();
         for (Entry e : previous) old.put(e.pkg, e);
 
@@ -176,7 +175,7 @@ final class Apps {
                 Entry next = new Entry(ai.packageName, ri.loadLabel(pm).toString(), cn,
                         leanback.contains(ai.packageName), updated, renderArt(ri),
                         (app.flags & ApplicationInfo.FLAG_SYSTEM) == 0, app.category);
-                if (prev != null) { // an update: keep its place on screen and its focus animation
+                if (prev != null) { // an update: keeps the position and the focus animation
                     next.x = prev.x;
                     next.y = prev.y;
                     next.focus = prev.focus;
@@ -185,8 +184,8 @@ final class Apps {
             }
         }
 
-        // Folders hold the apps still installed; one left empty goes. Each is a new object (the UI
-        // thread owns the old ones), carrying over its tile's place on screen.
+        // A folder keeps only its installed apps, and an empty folder is removed. Each folder is a new object at the
+        // position of its old tile.
         Set<String> hiddenSet = hidden();
         Map<String, Entry> folders = new LinkedHashMap<>();
         Set<String> inFolders = new HashSet<>();
@@ -213,15 +212,15 @@ final class Apps {
                 folders.put(tile.pkg, tile);
             }
         } catch (JSONException ignored) {
-            // A damaged list: start without folders rather than without a home screen.
+            // JSON that is not valid gives no folders.
         }
 
-        // Saved order first, then new apps.
+        // The saved order first, then the new apps.
         LinkedHashSet<String> order = new LinkedHashSet<>();
         for (String p : savedOrder()) {
             if (folders.containsKey(p) || (entries.containsKey(p) && !inFolders.contains(p))) order.add(p);
         }
-        for (String p : folders.keySet()) order.add(p); // a folder missing from the order goes last
+        for (String p : folders.keySet()) order.add(p); // folders that are not in the order go last
         List<Entry> fresh = new ArrayList<>();
         for (Entry e : entries.values()) if (!order.contains(e.pkg) && !inFolders.contains(e.pkg)) fresh.add(e);
         fresh.sort(Comparator.comparingInt(Apps::rank).thenComparing(e -> e.label.toLowerCase(Locale.ROOT)));
@@ -239,23 +238,20 @@ final class Apps {
     }
 
     /**
-     * Saves what {@link #load} changed in the layout (installs and removals), once it's shown. Not
-     * a new revision: a load reading the layout from before this works the same changes out. UI thread.
+     * Saves the changes that {@link #load} made to the layout (installs and removals). The revision does not change. UI
+     * thread.
      */
     void saveLoaded(Layout layout) {
         if (layout.order() == null) return;
         prefs.edit().putString(KEY_ORDER, layout.order()).putString(KEY_FOLDERS, layout.folders()).apply();
     }
 
-    /**
-     * False if the home screen was arranged (and saved) while {@code layout} loaded: it was built
-     * from the arrangement before, and showing or saving it would undo the user's move. UI thread.
-     */
+    /** Returns false if the user changed the layout after the load of {@code layout} started. UI thread. */
     boolean isLatest(Layout layout) {
         return layout.revision() == revision.get();
     }
 
-    /** Persists the order, the folders and which apps are hidden, as arranged on the home screen. UI thread. */
+    /** Saves the order, the folders and the hidden apps from the home screen. UI thread. */
     void saveLayout(List<Entry> visible, List<Entry> hidden) {
         revision.incrementAndGet();
         LinkedHashSet<String> order = new LinkedHashSet<>();
@@ -283,14 +279,14 @@ final class Apps {
                 list.put(new JSONObject().put("id", tile.folder.id).put("name", tile.label).put("apps", members));
             }
         } catch (JSONException e) {
-            throw new IllegalStateException(e); // only for non-finite numbers, which this never puts
+            throw new IllegalStateException(e); // occurs only for numbers that are not finite
         }
         return list.toString();
     }
 
     /**
-     * A new folder holding {@code first}, named after its kind of app the way Android names it
-     * ("Movies & Video"), else "Folder". Its id is unused by any folder in {@code tiles}. UI thread.
+     * Makes a new folder that contains {@code first}. Its name comes from the category of the app (for example, "Movies
+     * & Video"), else it is "Folder". No folder in {@code tiles} has its id. UI thread.
      */
     static Entry newFolder(Context context, Entry first, List<Entry> tiles) {
         int next = 1;
@@ -299,7 +295,7 @@ final class Apps {
             try {
                 next = Math.max(next, Integer.parseInt(t.folder.id) + 1);
             } catch (NumberFormatException ignored) {
-                // not one of ours
+                // the id is not a number
             }
         }
         CharSequence kind = first.category != ApplicationInfo.CATEGORY_UNDEFINED
@@ -325,7 +321,7 @@ final class Apps {
         return i >= 0 ? i : PREFERRED.size();
     }
 
-    @SuppressWarnings("deprecation") // the int-flag overloads work on every version from Android 12
+    @SuppressWarnings("deprecation") // the int-flag methods are available on Android 12 and later
     private List<ResolveInfo> query(String category) {
         return pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(category), 0);
     }
@@ -339,7 +335,7 @@ final class Apps {
         }
     }
 
-    /** The app's TV banner, cropped to the tile; or its icon on a tile tinted with the icon's colour. */
+    /** Returns the TV banner of the app, cropped to the tile, or its icon on a tile in the colour of the icon. */
     private Bitmap renderArt(ResolveInfo ri) {
         Bitmap out = Bitmap.createBitmap(artW, artH, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(out);
@@ -347,7 +343,7 @@ final class Apps {
         try {
             banner = ri.activityInfo.loadBanner(pm);
         } catch (RuntimeException ignored) {
-            // Broken resources in another app shouldn't take the home screen down.
+            // The resources of the app did not load: no banner.
         }
         if (banner != null) {
             int iw = banner.getIntrinsicWidth(), ih = banner.getIntrinsicHeight();
@@ -379,7 +375,7 @@ final class Apps {
         return out;
     }
 
-    /** The alpha-weighted average colour of a drawable. */
+    /** Returns the average colour of a drawable, weighted by alpha. */
     private static int averageColor(Drawable d) {
         Bitmap b = Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888);
         d.setBounds(0, 0, 16, 16);

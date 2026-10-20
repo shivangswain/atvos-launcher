@@ -18,20 +18,18 @@ import com.android.billingclient.api.QueryPurchasesParams;
 import java.util.List;
 
 /**
- * Settings > Support > Donate, through Google Play billing: a consumable in-app product,
- * {@link #PRODUCT}, priced per country in Play Console (₹99, $4.99, £4.99, 9,99 zł, ¥499, ₱99,
- * ₩4,999). It's used up as soon as Play confirms it, so it can be given again, and it unlocks nothing.
- * <p>
- * Play is only contacted once Settings > Support is opened, until Settings closes ({@link #start}
- * to {@link #end}): nothing at launch, nothing in the background. If Play can't be reached it
- * reports itself unavailable. UI thread; Play's callbacks are handed back to it.
+ * Settings > Support > Donate, through Google Play Billing. {@link #PRODUCT} is a consumable in-app product. It is
+ * consumed immediately after the purchase, and it unlocks nothing.
+ *
+ * The connection to Google Play starts when the Support page opens ({@link #start}) and ends when Settings closes
+ * ({@link #end}). All calls are on the UI thread. Callbacks from Google Play go to the UI thread.
  */
 final class Donation {
 
-    /** The in-app product's id in Play Console. */
+    /** The id of the in-app product in Play Console. */
     static final String PRODUCT = "donation";
 
-    /** Where things stand, for the Settings row. */
+    /** The state that the Donate row shows. */
     enum State { CONNECTING, READY, UNAVAILABLE, PENDING, THANKS }
 
     interface Listener {
@@ -53,13 +51,13 @@ final class Donation {
         return state;
     }
 
-    /** The price as Play shows it in this country ("₹99"), once known. */
+    /** Returns the local price from Google Play (for example, "₹99"), or null before it is known. */
     String price() {
         ProductDetails.OneTimePurchaseOfferDetails offer = product != null ? product.getOneTimePurchaseOfferDetails() : null;
         return offer != null ? offer.getFormattedPrice() : null;
     }
 
-    /** Connects to Google Play and looks up the donation's price; {@code listener} hears of each change. */
+    /** Connects to Google Play and gets the price of the donation. {@code listener} receives each change of state. */
     void start(Listener listener) {
         this.listener = listener;
         if (client != null) return;
@@ -74,7 +72,7 @@ final class Donation {
                 @Override
                 public void onBillingSetupFinished(BillingResult result) {
                     main.post(() -> {
-                        if (client != connecting) return; // ended meanwhile
+                        if (client != connecting) return; // end() was called before the connection
                         if (result.getResponseCode() != BillingClient.BillingResponseCode.OK) {
                             set(State.UNAVAILABLE);
                             return;
@@ -88,7 +86,7 @@ final class Donation {
                 public void onBillingServiceDisconnected() {
                     main.post(() -> {
                         if (client != connecting) return;
-                        client = null; // connect again the next time Settings opens
+                        client = null; // connects again when Settings opens again
                         product = null;
                         if (state != State.THANKS) set(State.UNAVAILABLE);
                     });
@@ -96,11 +94,11 @@ final class Donation {
             });
         } catch (RuntimeException e) {
             client = null;
-            set(State.UNAVAILABLE); // Google Play isn't there to talk to
+            set(State.UNAVAILABLE); // Google Play is not available
         }
     }
 
-    /** Settings closed: let Play go. */
+    /** Ends the connection to Google Play. */
     void end() {
         listener = null;
         if (client != null) client.endConnection();
@@ -109,7 +107,9 @@ final class Donation {
         if (state != State.THANKS) state = State.UNAVAILABLE;
     }
 
-    /** Opens Google Play's own purchase sheet for the donation (first connecting again, if Play dropped us). */
+    /**
+     * Opens the purchase sheet of Google Play for the donation. It connects again first if the connection is closed.
+     */
     void give() {
         if (client == null && listener != null) {
             start(listener);
@@ -134,7 +134,7 @@ final class Donation {
             List<ProductDetails> list = found != null ? found.getProductDetailsList() : null;
             product = result.getResponseCode() == BillingClient.BillingResponseCode.OK && list != null && !list.isEmpty()
                     ? list.get(0) : null;
-            // A pending donation, or thanks for one, found meanwhile says more than the price does.
+            // A pending purchase or a completed donation replaces the price in the row.
             if (state == State.PENDING || state == State.THANKS) {
                 if (listener != null) listener.changed();
             } else {
@@ -143,7 +143,7 @@ final class Donation {
         }));
     }
 
-    /** A donation paid for earlier but never used up (the app closed first, or it was pending): finish it now. */
+    /** Consumes a donation that was paid before but not consumed. */
     private void finishEarlier() {
         BillingClient asked = client;
         client.queryPurchasesAsync(QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.INAPP).build(),
@@ -154,7 +154,7 @@ final class Donation {
 
     private void purchased(BillingResult result, List<Purchase> purchases) {
         if (result.getResponseCode() == BillingClient.BillingResponseCode.OK) consumeAll(purchases);
-        // Cancelled, or an error Play has already shown: nothing more to say.
+        // Other result codes: Google Play shows the error.
     }
 
     private void consumeAll(List<Purchase> purchases) {
@@ -162,7 +162,7 @@ final class Donation {
         for (Purchase p : purchases) {
             if (!p.getProducts().contains(PRODUCT)) continue;
             if (p.getPurchaseState() == Purchase.PurchaseState.PENDING) {
-                set(State.PENDING); // paid by a slower method: Play finishes it, then it's used up next time
+                set(State.PENDING); // Google Play completes it later. It is consumed at the next start.
                 continue;
             }
             if (p.getPurchaseState() != Purchase.PurchaseState.PURCHASED) continue;

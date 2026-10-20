@@ -15,52 +15,47 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * What apps recommend on the TV home screen, read from the system TV provider: each app's
- * "Watch Next" entries and the programs in its preview channels. A few landscape images per app
- * are kept, the best first: the full-screen top shelf pages through them, as tvOS's carousel does.
- * They stay still pictures (preview videos are ignored).
+ * Reads the recommendations of apps from the TV provider: the Watch Next programs and the preview channel programs of
+ * each app. It keeps the first landscape images of each app for the pages of the full-screen top shelf. Preview videos
+ * are ignored.
  * <p>
- * READ_TV_LISTINGS lets a launcher read every app's searchable programs; the provider forbids
- * selections, so rows are filtered here.
+ * READ_TV_LISTINGS gives access to the searchable programs of all apps. The provider does not accept selections, so
+ * this class filters the rows.
  */
 final class Recommendations {
 
-    /** The two sources, also the bits of {@link Backdrops#sources}. */
+    /** The two sources. They are also the bits of {@link Backdrops#sources}. */
     static final int WATCH_NEXT = 1, PREVIEWS = 2;
 
-    /** Programs kept per app, for the full-screen top shelf to page through and the row to show. */
+    /** The maximum number of programs for each app. */
     static final int MAX_PAGES = 8;
 
-    /**
-     * What was found: the programs to page through per app (the one to show first), and which apps
-     * publish each source at all.
-     */
+    /** The result: the programs of each app in page order, and the apps that publish each source. */
     static final class Found {
         final Map<String, List<Item>> pages = new HashMap<>();
         final Set<String> watchNext = new HashSet<>(), previews = new HashSet<>();
     }
 
-    /** A program and where it ranks among its app's: lower {@code a}, then lower {@code b}, first. */
+    /** A program and its rank in the programs of its app: lower {@code a} first, then lower {@code b}. */
     private record Ranked(Item item, long a, long b) {
     }
 
-    /** {@code v} as a rank that puts larger first: negated, but never overflowing (-Long.MIN_VALUE is itself). */
+    /** Returns {@code v} as a rank that puts larger values first. The negation does not overflow. */
     private static long descending(long v) {
         return v == Long.MIN_VALUE ? Long.MAX_VALUE : -v;
     }
 
     /**
-     * One program to show behind the dock or in its app's row. {@code section}: the row it's in,
-     * null for Watch Next ("Continue Watching"), "" for a preview program ("Recommended").
-     * {@code details}: a line like "S2, E4 · The Long Night" or "Movie · Drama · 2025 · 2 hr 3 min",
-     * or null. {@code progress}: how much has been watched, 0–1 (0 when unknown), and
-     * {@code remainingMillis} how long is left (0 when unknown).
+     * One program for the backdrop or for the row of its app. {@code section}: the row, null for Watch Next ("Continue
+     * Watching"), "" for a preview program ("Recommended"). {@code details}: a line such as "S2, E4 · The Long Night"
+     * or "Movie · Drama · 2025 · 2 hr 3 min", or null. {@code progress}: the watched fraction, 0 to 1 (0 if not known).
+     * {@code remainingMillis}: the time that remains (0 if not known).
      */
     record Item(String pkg, String title, String image, String intentUri, String section, String description,
                 String details, float progress, long remainingMillis) {
     }
 
-    // Columns shared by preview and Watch Next programs, in this order.
+    // Columns of the preview and Watch Next programs, in this order.
     private static final int PKG = 0, TITLE = 1, THUMB = 2, THUMB_RATIO = 3, POSTER = 4, POSTER_RATIO = 5,
             INTENT = 6, ORDER_A = 7, ORDER_B = 8, BROWSABLE = 9, SHORT_DESCRIPTION = 10, LONG_DESCRIPTION = 11,
             TYPE = 12, GENRES = 13, SEASON = 14, EPISODE = 15, EPISODE_TITLE = 16, DURATION = 17, RELEASED = 18,
@@ -115,9 +110,8 @@ final class Recommendations {
     private Recommendations() {}
 
     /**
-     * Each package's programs, best first, leaving out the sources switched off for each app: its
-     * Watch Next entries, most recently engaged first (what you're in the middle of), then its
-     * preview programs, first channel and heaviest first. IO thread.
+     * Returns the programs of each package in rank order, without the sources that are off for the app. Watch Next
+     * programs come first, the last engaged first. Preview programs follow, by channel and then by weight. IO thread.
      */
     static Found load(Context context, Set<String> noWatchNext, Set<String> noPreviews) {
         Found found = new Found();
@@ -125,7 +119,7 @@ final class Recommendations {
         Map<String, List<Ranked>> engaged = new HashMap<>(), channels = new HashMap<>();
         try (Cursor c = cr.query(TvContract.WatchNextPrograms.CONTENT_URI, WATCH_NEXT_COLUMNS, null, null, null)) {
             while (c != null && c.moveToNext()) {
-                try { // one app's odd row mustn't cost every other app theirs
+                try { // a bad row skips only that row
                     if (dismissed(c)) continue;
                     String pkg = c.getString(PKG);
                     if (pkg == null || cardImage(c) == null) continue;
@@ -136,31 +130,31 @@ final class Recommendations {
                     long when = c.isNull(ORDER_A) ? 0 : c.getLong(ORDER_A), id = c.isNull(ORDER_B) ? 0 : c.getLong(ORDER_B);
                     engaged.computeIfAbsent(pkg, k -> new ArrayList<>()).add(new Ranked(item, descending(when), descending(id))); // newest first
                 } catch (RuntimeException ignored) {
-                    // skip it
+                    // skips the row
                 }
             }
         } catch (RuntimeException ignored) {
-            // No TV provider, no permission, or an unexpected schema: just no recommendations.
+            // No TV provider, no permission or an unknown schema: no recommendations.
         }
         try (Cursor c = cr.query(TvContract.PreviewPrograms.CONTENT_URI, PREVIEW_COLUMNS, null, null, null)) {
             while (c != null && c.moveToNext()) {
-                try { // as above
+                try { // a bad row skips only that row
                     if (dismissed(c)) continue;
                     String pkg = c.getString(PKG);
                     if (pkg == null || cardImage(c) == null) continue;
                     found.previews.add(pkg);
                     if (noPreviews.contains(pkg)) continue;
                     long channel = c.isNull(ORDER_A) ? Long.MAX_VALUE : c.getLong(ORDER_A);
-                    Item item = item(context, c, ""); // "Recommended", whatever the app names its channels
+                    Item item = item(context, c, ""); // the section is "Recommended" for all channels
                     if (item == null) continue;
                     long weight = c.isNull(ORDER_B) ? 0 : c.getLong(ORDER_B);
                     channels.computeIfAbsent(pkg, k -> new ArrayList<>()).add(new Ranked(item, channel, descending(weight)));
                 } catch (RuntimeException ignored) {
-                    // skip it
+                    // skips the row
                 }
             }
         } catch (RuntimeException ignored) {
-            // As above.
+            // No TV provider, no permission or an unknown schema: no recommendations.
         }
         Comparator<Ranked> order = Comparator.comparingLong(Ranked::a).thenComparingLong(Ranked::b);
         Set<String> apps = new HashSet<>(engaged.keySet());
@@ -173,7 +167,7 @@ final class Recommendations {
                 if (ranked == null) continue;
                 ranked.sort(order);
                 for (Ranked r : ranked) {
-                    if (pages.size() < MAX_PAGES && images.add(r.item().image())) pages.add(r.item()); // one page per picture
+                    if (pages.size() < MAX_PAGES && images.add(r.item().image())) pages.add(r.item()); // one page for each image
                 }
             }
             found.pages.put(pkg, pages);
@@ -181,10 +175,7 @@ final class Recommendations {
         return found;
     }
 
-    /**
-     * Removed by the user (from Watch Next, or from a channel, in the TV's own home screen): the
-     * system clears the program's browsable flag and the row can stay on long after.
-     */
+    /** Returns true if the user removed the program. The system clears its browsable flag. */
     private static boolean dismissed(Cursor c) {
         return !c.isNull(BROWSABLE) && c.getInt(BROWSABLE) == 0;
     }
@@ -207,7 +198,10 @@ final class Recommendations {
         return s == null || s.trim().isEmpty() ? null : s.trim();
     }
 
-    /** "S2, E4 · The Long Night" for an episode; else "Movie · Drama · 2025 · 2 hr 3 min", as much as is known. */
+    /**
+     * Returns "S2, E4 · The Long Night" for an episode, else "Movie · Drama · 2025 · 2 hr 3 min", with the known parts
+     * only.
+     */
     private static String details(Context context, Cursor c, long durationMillis) {
         List<String> parts = new ArrayList<>();
         String season = text(c, SEASON), episode = text(c, EPISODE), episodeTitle = text(c, EPISODE_TITLE);
@@ -244,11 +238,11 @@ final class Recommendations {
         return parts.isEmpty() ? null : String.join(" · ", parts);
     }
 
-    /** A canonical genre ("TECH_SCIENCE") as words ("Tech & Science"). */
+    /** Returns a canonical genre ("TECH_SCIENCE") as words ("Tech & Science"). */
     private static String genreName(String g) {
         StringBuilder out = new StringBuilder();
         for (String word : g.split("_")) {
-            if (word.isEmpty()) continue; // any app can write any text here: "_DRAMA", "SCI__FI", ""
+            if (word.isEmpty()) continue; // the text can contain empty words, for example "_DRAMA"
             if (out.length() > 0) out.append(g.startsWith("TECH") || g.startsWith("ARTS") || g.startsWith("ANIMAL")
                     || g.startsWith("FAMILY") || g.startsWith("LIFE") ? " & " : " ");
             out.append(word.charAt(0)).append(word.substring(1).toLowerCase(Locale.ROOT));
@@ -257,12 +251,12 @@ final class Recommendations {
     }
 
     /**
-     * A wide image (16:9, 3:2 or 4:3), else a square one (music and podcasts: a square card in the
-     * row), else one of unknown shape; portrait posters work as neither backdrop nor card.
+     * Returns a wide image (16:9, 3:2 or 4:3), else a square image, else an image of unknown shape. Portrait posters
+     * are not used.
      */
     private static String cardImage(Cursor c) {
         String thumb = c.getString(THUMB), poster = c.getString(POSTER);
-        // Some apps write "" rather than leaving a column empty.
+        // An empty string is the same as no value.
         if (thumb != null && thumb.isEmpty()) thumb = null;
         if (poster != null && poster.isEmpty()) poster = null;
         int thumbRatio = c.isNull(THUMB_RATIO) ? -1 : c.getInt(THUMB_RATIO);

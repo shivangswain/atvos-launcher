@@ -4,9 +4,8 @@ plugins {
     id("com.android.application")
 }
 
-// Release signing (Google Play's upload key) comes from keystore.properties (never committed):
-// storeFile, storePassword, keyAlias, keyPassword. Without it, release builds are signed with the
-// local debug key, so a checkout without the key can still build and test them.
+// The release build reads storeFile, storePassword, keyAlias and keyPassword from keystore.properties. If the file is
+// not there, the release build uses the debug key.
 val keystore = rootProject.file("keystore.properties").takeIf { it.isFile }?.let { file ->
     Properties().apply { file.inputStream().use { load(it) } }
 }
@@ -17,7 +16,7 @@ android {
 
     defaultConfig {
         applicationId = "app.atvos.launcher"
-        minSdk = 31 // Android 12+
+        minSdk = 31 // Android 12 and later
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
@@ -52,8 +51,7 @@ android {
         buildConfig = false
     }
 
-    // The Google-encrypted dependency report: in the Play bundle (so Play can flag outdated SDKs),
-    // not in sideloaded APKs.
+    // Adds the encrypted dependency report to the app bundle only. APK files do not contain it.
     dependenciesInfo {
         includeInApk = false
         includeInBundle = true
@@ -61,9 +59,7 @@ android {
 }
 
 dependencies {
-    // Google Play billing, for the optional tip in Settings, and nothing it would bring along: the
-    // three AndroidX calls it makes are stood in for in src/main/java/androidx (no AndroidX, no
-    // Kotlin), its usage logging (datatransport) turns itself off when missing, and the one screen
-    // needing androidx.activity (alternative billing, unused) is taken out of the manifest.
+    // Google Play Billing without its transitive dependencies. The classes in src/main/java/androidx replace the
+    // AndroidX calls that it makes.
     implementation("com.android.billingclient:billing:9.1.0") { isTransitive = false }
 }

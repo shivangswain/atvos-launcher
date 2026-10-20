@@ -60,16 +60,16 @@ import java.util.concurrent.TimeUnit;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
- * Full-screen backgrounds. Behind the dock, for the focused app, in order of preference:
+ * Full-screen backgrounds. The backdrop for the focused app in the dock is, in order of priority:
  * <pre>
- *   the app's TV recommendation      see {@link Recommendations}, downloaded once and cached;
- *                                    under Full HD, the app's programs as a row of cards instead
- *   the app's splash image           when its launch screen is a real picture of 720p or more
- *   the app's own logo               large, as tvOS does: its icon's artwork, or its banner's
- *                                    logo cut from its background, over a glow in its colour
+ *   the TV recommendation of the app   see {@link Recommendations}, downloaded one time and cached;
+ *                                      below Full HD, a row of cards with the programs of the app
+ *   the splash image of the app        when its launch screen is a picture of 720p or more
+ *   the logo of the app                large: the art of its icon, or the logo of its banner cut
+ *                                      from its background, over a glow in its colour
  * </pre>
- * A built-in aurora covers the moment before apps load. Each backdrop is kept sharp at screen size
- * plus a tiny blurred copy for the glass and the grid's blur.
+ * A built-in aurora shows before the apps load. Each backdrop has a sharp picture at screen size and a small blurred
+ * copy for the glass and the grid.
  */
 final class Backdrops {
 
@@ -77,21 +77,24 @@ final class Backdrops {
         final Bitmap sharp;
         final Bitmap blur;
         final BitmapShader blurShader;
-        /** The blur's pixels, for the glass to mix two backdrops' on the CPU while they crossfade. */
+        /** The pixels of the blur. The glass mixes the pixels of two backdrops on the CPU during a crossfade. */
         final int[] blurPixels;
-        /** The full-screen shelf's darkening behind its details is in the picture already. */
+        /** True if the picture contains the details scrim of the full-screen shelf. */
         boolean details;
 
-        /** Set when the image is an app's recommendation. */
+        /** The recommendation of the app that the image shows, or null. */
         final Recommendations.Item program;
         /**
-         * For recommendations under Full HD: the app's programs as a row of cards over a plain dark
-         * background, as tvOS shows a Continue Watching row. Null for a full-screen picture.
+         * Below Full HD: the programs of the app as a row of cards over a plain background. Null for a full-screen
+         * picture.
          */
         final List<Card> row;
-        /** Brightness (0–1) behind the clock and the Control Center, so text can flip to dark. */
+        /**
+         * The brightness (0 to 1) behind the clock and behind the Control Center. Text changes to dark above a
+         * threshold.
+         */
         final float clockLight, controlsLight;
-        /** The colour behind the full-screen hint, which tints it as tvOS does. */
+        /** The colour behind the full-screen hint. It sets the tint of the hint. */
         final int hintColor;
 
         Backdrop(Bitmap sharp, Bitmap blur, Recommendations.Item program) {
@@ -107,13 +110,13 @@ final class Backdrops {
             this.program = program;
             this.row = row;
             int bw = blur.getWidth(), bh = blur.getHeight();
-            // Luminance is a weighted sum of the channels, so the mean colour's is the mean luminance.
+            // Luminance is a weighted sum of the channels, so the luminance of the mean colour is the mean luminance.
             this.clockLight = luminance(colour(blurPixels, bw, bh, 0.86f, 0.03f, 1f, 0.11f));
             this.controlsLight = luminance(colour(blurPixels, bw, bh, 0.72f, 0.10f, 1f, 0.53f));
             this.hintColor = colour(blurPixels, bw, bh, 0.40f, 0.62f, 0.60f, 0.70f);
         }
 
-        /** Mean colour of a region, given as fractions, of the (small, blurred) bw×bh pixels. */
+        /** Returns the mean colour of a region of the bw×bh pixels. The region edges are fractions of the size. */
         private static int colour(int[] px, int bw, int bh, float l, float t, float r, float bottom) {
             int x0 = Math.min((int) (l * bw), bw - 1), x1 = Math.min(Math.max(x0 + 1, (int) (r * bw)), bw);
             int y0 = Math.min((int) (t * bh), bh - 1), y1 = Math.min(Math.max(y0 + 1, (int) (bottom * bh)), bh);
@@ -133,44 +136,39 @@ final class Backdrops {
 
     static final String DEFAULT = "default";
     /**
-     * One card in a row: its program, its picture cropped to the card (16:9, or square for square
-     * art) at the card's size with its corners already rounded, so it's drawn as a plain bitmap (a
-     * hardware bitmap in a shader is twice as slow on the TV's Mali), and its width in design units.
+     * One card in a row: its program, its picture and its width in design units. The picture is cropped to the card
+     * (16:9, or square for square art) at the card size, with round corners. The home screen draws it as a plain
+     * bitmap.
      */
     record Card(Recommendations.Item item, Bitmap picture, float width) {
     }
 
-    /** A row's cards, in 1920-wide design units (tvOS's), and the row's background. */
+    /** The card size and the corner radius of a row, in design units (1920 wide). */
     static final float ROW_CARD_W = 840f, ROW_CARD_H = 472.5f, ROW_CARD_R = 22f;
-    private static final int ROW_DARK = 0xFF1E1E1E, ROW_LIGHT = 0xFFB1B0B1; // tvOS's, per Settings > Appearance
-    /**
-     * Every app's logo backdrop shows its logo at the area of a square this many design units wide,
-     * icon or banner, round badge or long wordmark: about what the smallest banners (Sony LIV's)
-     * allow at 1.5x their pixels, so all apps look the same size and none look soft.
-     */
+    private static final int ROW_DARK = 0xFF1E1E1E, ROW_LIGHT = 0xFFB1B0B1; // row backgrounds: dark, light
+    /** The visible logo of each app has the area of a square of this size in design units, for any shape. */
     private static final float LOGO_SIZE = 160f;
-    // Per-app switches for the two recommendation sources (sets of packages switched off).
+    // The packages that have each recommendation source off.
     private static final String NO_WATCH_NEXT = "no_watch_next", NO_PREVIEWS = "no_previews";
-    /** Keys: a recommendation behind the dock (scrims baked in), the same picture full screen (its details' darkening baked in), an app's logo, a row. */
+    /**
+     * Key prefixes. REMOTE: a recommendation behind the dock, with the dock scrim. FULL: the same picture full screen,
+     * with the details scrim. APP: the logo of an app. ROW: a row.
+     */
     private static final String REMOTE = "rec:", FULL = "full:", APP = "app:", ROW = "row:";
-    // The scrims behind the dock and the clock, in fractions of the screen's height: baked into each
-    // backdrop when it's made, so they cost nothing per frame (they were 0.75 of a screen of fill).
+    // The scrims behind the dock and the clock, as fractions of the screen height. They are drawn into each backdrop
+    // when the backdrop is made.
     private static final float SCRIM_BOTTOM_FROM = 0.45f;
     private static final int SCRIM_BOTTOM = 0x8C000000, SCRIM_TOP = 0x4D000000;
-    private static final float SCRIM_TOP_DESIGN = 220f; // the top one's depth, in 1920-wide design units
+    private static final float SCRIM_TOP_DESIGN = 220f; // the height of the top scrim in design units (1920 wide)
     private static final int MAX_DOWNLOAD = 16 << 20;
-    /**
-     * A download's whole time, after which it's cut off: an app's content that never finishes (a
-     * pipe it never writes to) or a server sending a byte at a time would otherwise hold up every
-     * other app's artwork behind it.
-     */
+    /** The maximum time for one download. After this time, the download stops. */
     private static final long FETCH_DEADLINE_S = 30;
     private static final ScheduledExecutorService DEADLINES = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "fetch-deadline");
         t.setDaemon(true);
         return t;
     });
-    private static final int MAX_CACHED = 72; // a few pages each for the apps with top shelves
+    private static final int MAX_CACHED = 72; // some pages for each app that has a top shelf
 
     private final ContentResolver resolver;
     private final PackageManager pm;
@@ -179,22 +177,26 @@ final class Backdrops {
     private final int width, height;
     private final Backdrop fallback;
 
-    // Written on the IO thread, read on the UI thread: each app's best program, and all its pages.
+    // The best program and all pages of each app. The IO thread writes it and the UI thread reads it.
     private volatile Map<String, Recommendations.Item> recommended = Collections.emptyMap();
     private volatile Map<String, List<Recommendations.Item>> pages = Collections.emptyMap();
-    // UI thread writes, any reads: the page last shown per app (its image), so the dock keeps it, as on tvOS.
+    // The image of the page that each app showed last, so that the dock keeps it. The UI thread writes it and all
+    // threads read it.
     private final Map<String, String> chosen = new ConcurrentHashMap<>();
-    // Images on disk that are Full HD or more, so they fill the screen (else a row of cards): read once each.
+    // True for each image on disk that is Full HD or more (a full-screen picture), else false (a row of cards). Each
+    // image is measured one time.
     private final Map<String, Boolean> hd = new ConcurrentHashMap<>();
-    // Both threads: images on disk. prefetch() adds as it downloads; scan() reconciles with the disk.
+    // The images on disk. prefetch() adds each download, and scan() makes the set agree with the disk. Both threads use
+    // it.
     private final Set<String> downloaded = ConcurrentHashMap.newKeySet();
     private volatile Set<String> watchNext = Collections.emptySet(), previews = Collections.emptySet();
 
-    // Network thread only: when each URL last failed, so a dead network isn't hammered.
+    // The time of the last failure of each URL, so that a failed URL is not tried again too soon. Network thread only.
     private final Map<String, Long> failedAt = new HashMap<>();
     private static final long RETRY_MS = 15 * 60_000L;
 
-    // UI thread only. Backdrops are ~8 MB each (1080p), so keep just a few: fewer on low-RAM TVs.
+    // The number of backdrops in the memory cache. Each backdrop is approximately 8 MB at 1080p, so a low-RAM TV keeps
+    // fewer. UI thread only.
     private final int cacheSize;
     private final Map<String, Backdrop> cache = new LinkedHashMap<>(8, 0.75f, true) {
         @Override
@@ -208,8 +210,7 @@ final class Backdrops {
         this.pm = context.getPackageManager();
         this.prefs = context.getSharedPreferences(HomeActivity.PREFS, Context.MODE_PRIVATE);
         this.downloads = new File(context.getCacheDir(), "shelf");
-        // Rendered at no more than 1080p: some TVs draw their UI at 4K, where each backdrop would be
-        // 33 MB of texture for no visible gain behind the UI.
+        // The backdrops are not larger than 1080p, also on a TV with a 4K UI.
         float k = Math.min(1f, 1920f / Math.max(1, width));
         this.width = Math.max(1, Math.round(width * k));
         this.height = Math.max(1, Math.round(height * k));
@@ -220,11 +221,14 @@ final class Backdrops {
         this.fallback = new Backdrop(toHardware(aurora), blurred, null);
     }
 
-    /** Re-reads app recommendations. Keys include the image URL, so a new image is picked up. IO thread. */
+    /**
+     * Reads the recommendations of the apps again. The keys contain the image URL, so a new image gets a new key. IO
+     * thread.
+     */
     void scan(Context context) {
         Recommendations.Found found = Recommendations.load(context, off(NO_WATCH_NEXT), off(NO_PREVIEWS));
-        // The cache is keyed by address alone, so drop images an app may not show before anything
-        // looks there: another app naming an image already on disk mustn't get it from the cache.
+        // The cache key is the address only. This removes the images that an app cannot show, so that a different app
+        // cannot get an image from the cache.
         Map<String, List<Recommendations.Item>> shown = new HashMap<>();
         Map<String, Recommendations.Item> best = new HashMap<>();
         for (Map.Entry<String, List<Recommendations.Item>> e : found.pages.entrySet()) {
@@ -234,8 +238,8 @@ final class Backdrops {
             shown.put(e.getKey(), ok);
             best.put(e.getKey(), ok.get(0));
         }
-        // Add what's on disk and drop what's gone, but never clear the set: a download finishing on
-        // the net thread meanwhile must not be lost.
+        // Adds the images that are on disk and removes the images that are not. The set is not cleared, so that a
+        // download that completes on the network thread at the same time is kept.
         for (List<Recommendations.Item> list : shown.values()) {
             for (Recommendations.Item item : list) {
                 if (cacheFile(item.image()).isFile()) {
@@ -245,7 +249,7 @@ final class Backdrops {
             }
         }
         downloaded.removeIf(url -> !cacheFile(url).isFile());
-        hd.keySet().retainAll(downloaded); // sizes only of images still cached
+        hd.keySet().retainAll(downloaded); // sizes only of the cached images
         watchNext = found.watchNext;
         previews = found.previews;
         pages = shown;
@@ -253,8 +257,8 @@ final class Backdrops {
     }
 
     /**
-     * The recommendation sources an app has, as {@link Recommendations#WATCH_NEXT} and
-     * {@link Recommendations#PREVIEWS} bits: the ones it publishes, and any switched off.
+     * Returns the recommendation sources of an app as {@link Recommendations#WATCH_NEXT} and
+     * {@link Recommendations#PREVIEWS} bits: the sources that it publishes, and the sources that are off.
      */
     int sources(String pkg) {
         int bits = 0;
@@ -267,7 +271,7 @@ final class Backdrops {
         return !off(source == Recommendations.WATCH_NEXT ? NO_WATCH_NEXT : NO_PREVIEWS).contains(pkg);
     }
 
-    /** Switches one of an app's sources on or off; takes effect on the next {@link #scan}. */
+    /** Turns one source of an app on or off. The change applies at the next {@link #scan}. */
     void setSource(String pkg, int source, boolean on) {
         String key = source == Recommendations.WATCH_NEXT ? NO_WATCH_NEXT : NO_PREVIEWS;
         Set<String> set = new HashSet<>(off(key));
@@ -280,8 +284,8 @@ final class Backdrops {
     }
 
     /**
-     * Downloads recommendation images that aren't cached yet, then trims the cache. A shelf only
-     * appears once its image is on disk, so {@code onReady} runs after each new download. Network thread.
+     * Downloads the recommendation images that are not cached, then trims the cache. A shelf shows only when its image
+     * is on disk, so {@code onReady} runs after each new download. Network thread.
      */
     void prefetch(Runnable onReady) {
         for (Recommendations.Item item : recommended.values()) {
@@ -297,8 +301,8 @@ final class Backdrops {
                 failedAt.put(url, System.currentTimeMillis());
             }
         }
-        // Trim to the most recently used images (fetch() touches a file on every use), never deleting
-        // one a current recommendation shows.
+        // Keeps the images that were used last (fetch() updates the time of a file at each use). An image that a
+        // current recommendation shows is never deleted.
         File[] cached = downloads.listFiles();
         if (cached != null && cached.length > MAX_CACHED) {
             Set<String> inUse = new HashSet<>();
@@ -321,8 +325,8 @@ final class Backdrops {
     }
 
     /**
-     * Downloads the rest of one app's pages (its first is fetched with everyone's), so the
-     * full-screen top shelf can page through them; {@code onReady} after each. Network thread.
+     * Downloads the other pages of one app for the full-screen top shelf. The first page downloads with the pages of
+     * all apps. {@code onReady} runs after each download. Network thread.
      */
     void prefetchPages(String pkg, Runnable onReady) {
         List<Recommendations.Item> list = pages.get(pkg);
@@ -342,7 +346,7 @@ final class Backdrops {
         }
     }
 
-    /** Notes whether a downloaded image fills the screen (Full HD), from its header. */
+    /** Records from the image header if a downloaded image is Full HD. */
     private void measure(String url) {
         if (hd.containsKey(url)) return;
         BitmapFactory.Options bounds = new BitmapFactory.Options();
@@ -351,7 +355,7 @@ final class Backdrops {
         if (bounds.outWidth > 0 && bounds.outHeight > 0) hd.put(url, fullHd(bounds.outWidth, bounds.outHeight));
     }
 
-    /** The program behind the dock for an app: the page last shown, else its best. */
+    /** Returns the program behind the dock for an app: the page that it showed last, else its best page. */
     private Recommendations.Item current(String pkg) {
         String url = chosen.get(pkg);
         List<Recommendations.Item> list = url != null && downloaded.contains(url) ? pages.get(pkg) : null;
@@ -359,7 +363,7 @@ final class Backdrops {
         return recommended.get(pkg);
     }
 
-    /** The app's full-screen pages ready to show (on disk, 720p or more), best first. */
+    /** Returns the full-screen pages of the app that are on disk and 720p or more, best first. */
     List<Recommendations.Item> pages(String pkg) {
         List<Recommendations.Item> list = pages.get(pkg), out = new ArrayList<>();
         if (list == null) return out;
@@ -369,32 +373,32 @@ final class Backdrops {
         return out;
     }
 
-    /** Shows this page behind the dock from now on (until the app's pages change). UI thread. */
+    /** Shows this page behind the dock until the pages of the app change. UI thread. */
     void choose(String pkg, Recommendations.Item item) {
         chosen.put(pkg, item.image());
     }
 
     /**
-     * 1080p, give or take 5%, and wide (4:3 or wider): enough to fill the screen sharply. A big
-     * square picture (album art) makes a square card instead of a cropped backdrop.
+     * Returns true for 1080p (±5%) or larger at an aspect ratio of 4:3 or wider. A large square picture makes a square
+     * card.
      */
     private static boolean fullHd(int w, int h) {
         return w >= 1824 && h >= 1026 && w * 10L >= h * 13L;
     }
 
     /**
-     * The app's top shelf: its picture full screen when that's Full HD, else a row of its programs
-     * (keyed by how many are on disk, so the row is redrawn as more arrive).
+     * Returns the key of the top shelf of the app: its full-screen picture if it is Full HD, else a row of its
+     * programs.
      */
     private String shelfKey(String pkg) {
         Recommendations.Item item = current(pkg);
         if (item == null || !downloaded.contains(item.image())) return null;
         if (!Boolean.FALSE.equals(hd.get(item.image()))) return REMOTE + item.image();
-        // What's in the row, not just how much: new programs, progress or titles at the same count build it afresh.
+        // The key contains the hash of the items, so new programs, progress or titles make a new row.
         return ROW + pkg + "#" + rowItems(pkg).hashCode() + (prefs.getBoolean(HomeActivity.KEY_LIGHT, false) ? "L" : "D");
     }
 
-    /** The app's programs on disk, in order: a row's cards. */
+    /** Returns the programs of the app that are on disk, in order: the cards of a row. */
     private List<Recommendations.Item> rowItems(String pkg) {
         List<Recommendations.Item> list = pages.get(pkg), out = new ArrayList<>();
         if (list != null) for (Recommendations.Item item : list) if (downloaded.contains(item.image())) out.add(item);
@@ -402,8 +406,8 @@ final class Backdrops {
     }
 
     /**
-     * What sits behind the dock for an app: its top shelf, else its splash picture or logo.
-     * {@code fullScreen}: its full-screen shelf, with the darkening behind its details instead of the dock's.
+     * Returns the key of the backdrop behind the dock for an app: its top shelf, else its splash picture or its logo.
+     * {@code fullScreen}: the full-screen shelf, with the details scrim instead of the dock scrim.
      */
     String backdropKey(String pkg, boolean fullScreen) {
         String shelf = shelfKey(pkg);
@@ -425,8 +429,8 @@ final class Backdrops {
 
 
     /**
-     * Prepares the backdrop behind {@code key} (images are already on disk), or null. Running out
-     * of memory (a huge image, a low-RAM TV) just means no backdrop this time. IO thread.
+     * Prepares the backdrop for {@code key}, or returns null. The images are on disk. Out of memory gives null. IO
+     * thread.
      */
     Backdrop load(String key, Recommendations.Item program) {
         try {
@@ -445,18 +449,18 @@ final class Backdrops {
         File file = cacheFile(key.substring((full ? FULL : REMOTE).length()));
         if (!file.isFile()) return null;
 
-        // Just the header first: the size decides between full screen and the row.
+        // Reads the header first. The size selects full screen or a row.
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(file.getPath(), bounds);
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
         if (!fullHd(bounds.outWidth, bounds.outHeight)) return program != null ? row(program.pkg()) : null;
 
-        // Halve while the picture still covers the screen, and while it's over four screens of pixels:
-        // a long thin strip, narrow one way and huge the other, would otherwise decode at full size.
+        // Halves the size while the picture is larger than the screen in both directions, and while it has more than
+        // four screens of pixels.
         BitmapFactory.Options opts = new BitmapFactory.Options();
         opts.inSampleSize = 1;
-        opts.inMutable = true; // a picture already screen-sized gets its scrims drawn in place, not on an 8 MB copy
+        opts.inMutable = true; // a screen-sized picture gets its scrims without a copy
         while (bounds.outWidth / (opts.inSampleSize * 2) >= width && bounds.outHeight / (opts.inSampleSize * 2) >= height
                 || (long) (bounds.outWidth / opts.inSampleSize) * (bounds.outHeight / opts.inSampleSize) > 4L * width * height) {
             opts.inSampleSize *= 2;
@@ -465,21 +469,19 @@ final class Backdrops {
         if (src == null) return null;
         Bitmap sharp = cover(src, width, height);
         if (sharp != src) src.recycle();
-        // The glass shows what's behind it, the darkening included (as tvOS's materials do): the
-        // dock's and the clock's here, the details' on the full-screen shelf (or white glass on a
-        // white picture, under white type).
+        // Each blur includes the scrims of its picture: the dock and clock scrims, or the details scrim on the
+        // full-screen shelf.
         sharp = full ? bakeDetails(sharp) : bake(sharp);
-        Bitmap blurred = blur(sharp); // before toHardware, which frees the software copy
+        Bitmap blurred = blur(sharp); // before toHardware, which recycles the software copy
         Backdrop b = new Backdrop(toHardware(sharp), blurred, program);
         b.details = full;
         return b;
     }
 
     /**
-     * For pictures under Full HD, which would look soft stretched across the screen: the app's
-     * programs as a row of cards over a plain dark background, as tvOS shows a Continue Watching
-     * row. Wide pictures make 16:9 cards; square ones (album and podcast art) square cards of the
-     * same height, as tvOS sizes its square items. The cards are drawn (and focused) by the home screen.
+     * Makes a row backdrop for pictures below Full HD: the programs of the app as cards over a plain background. Wide
+     * pictures make 16:9 cards. Square pictures make square cards of the same height. The home screen draws and focuses
+     * the cards.
      */
     private Backdrop row(String pkg) {
         float s = width / 1920f;
@@ -491,7 +493,7 @@ final class Backdrops {
             bounds.inJustDecodeBounds = true;
             BitmapFactory.decodeFile(file.getPath(), bounds);
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) continue;
-            // Square-ish (or taller): a square card; wider: 16:9, cropped from 4:3 or 3:2.
+            // Almost square or taller: a square card. Wider: a 16:9 card, cropped from 4:3 or 3:2.
             boolean square = bounds.outWidth * 4L < bounds.outHeight * 5L;
             float design = square ? ROW_CARD_H : ROW_CARD_W;
             int cw = Math.round(design * s);
@@ -502,7 +504,7 @@ final class Backdrops {
             }
             Bitmap src = BitmapFactory.decodeFile(file.getPath(), opts);
             if (src == null) continue;
-            Bitmap crop = cover(src, cw, ch); // centre-cropped to the card, which also drops letterbox bars
+            Bitmap crop = cover(src, cw, ch); // centre-cropped to the card, which also removes letterbox bars
             if (crop != src) src.recycle();
             Bitmap card = Bitmap.createBitmap(cw, ch, Bitmap.Config.ARGB_8888);
             Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -513,19 +515,19 @@ final class Backdrops {
         }
         if (cards.isEmpty()) return null;
         int colour = prefs.getBoolean(HomeActivity.KEY_LIGHT, false) ? ROW_LIGHT : ROW_DARK;
-        // The background: a strip the screen's height, stretched across it, with the scrims in it.
+        // The background: a strip with the height of the screen and the scrims, stretched across the screen.
         Bitmap strip = Bitmap.createBitmap(4, height, Bitmap.Config.ARGB_8888);
         strip.eraseColor(colour);
         strip = bake(strip);
-        // Its blur (scrims and all) as big as every other backdrop's, so the glass can mix them as they crossfade.
+        // Its blur has the size of all blurs, so that the glass can mix them during a crossfade.
         Bitmap blurred = Bitmap.createScaledBitmap(strip, BLUR_W, blurHeight(), true);
         return new Backdrop(strip, blurred, cards.get(0).item(), cards);
     }
 
     /**
-     * For apps without a top shelf, as tvOS does: the app's splash picture if it has one, else its
-     * logo large over a field of its colour: the icon's own artwork when that stands alone, else the
-     * banner's logo, cut from its background. Always from the highest-density resources the app ships.
+     * Makes the backdrop for an app with no top shelf: its splash picture, else its logo large over a field of its
+     * colour. The logo is the art of the icon, else the logo of the banner cut from its background. It uses the
+     * resources of the highest density.
      */
     private Backdrop appLogo(String pkg) {
         Bitmap out;
@@ -537,11 +539,11 @@ final class Backdrops {
             if (out == null) out = iconScene(res, ai);
             if (out == null) out = bannerScene(res, ai);
         } catch (PackageManager.NameNotFoundException | RuntimeException e) {
-            return null; // another app's resources: anything can go wrong, and the aurora still works
+            return null; // the resources of the app failed: no backdrop
         }
         if (out == null) return null;
         out = bake(out);
-        Bitmap blurred = blur(out); // before toHardware, which frees the software copy
+        Bitmap blurred = blur(out); // before toHardware, which recycles the software copy
         return new Backdrop(toHardware(out), blurred, null);
     }
 
@@ -553,10 +555,9 @@ final class Backdrops {
     }
 
     /**
-     * The icon's logo without its backdrop shape (an adaptive icon's foreground layer, or a legacy
-     * icon drawn on transparency), over a field lit in the brand colour of the app's tile. Null when
-     * the icon has no stand-alone logo (a full picture, or a logo on its own card) or too few pixels
-     * to show it large; the banner is used instead.
+     * Returns the logo of the icon without its background shape, over a field in the brand colour of the tile. The logo
+     * is the foreground layer of an adaptive icon, or a legacy icon on transparency. Returns null if the icon has no
+     * separate logo or has too few pixels. Then the banner is used.
      */
     private Bitmap iconScene(Resources res, ActivityInfo ai) {
         int iconId = ai.getIconResource();
@@ -565,25 +566,24 @@ final class Backdrops {
             Drawable icon = res.getDrawableForDensity(iconId, DisplayMetrics.DENSITY_XXXHIGH, null);
             boolean adaptive = icon instanceof AdaptiveIconDrawable;
             Drawable fg = adaptive ? ((AdaptiveIconDrawable) icon).getForeground() : icon;
-            // A legacy icon's canvas is the icon itself, so its logo fills more of it.
+            // The logo of a legacy icon fills more of its canvas.
             Glyph glyph = fg != null ? Glyph.measure(fg, adaptive ? 0.5f : 0.6f) : null;
             if (glyph == null) return null;
             int bitmap = bitmapWidth(fg);
-            float maxCanvas = bitmap > 0 ? bitmap * 1.5f : Float.MAX_VALUE; // enlarged no more than 1.5x, so it stays sharp
+            float maxCanvas = bitmap > 0 ? bitmap * 1.5f : Float.MAX_VALUE; // enlarged not more than 1.5x
             int bannerId = ai.banner != 0 ? ai.banner : ai.applicationInfo.banner;
             Drawable banner = bannerId != 0 ? res.getDrawable(bannerId, null) : null;
             int brand = brandColor(banner != null ? banner : icon);
             int[] gradient = gradientCorners(banner != null ? banner : adaptive ? ((AdaptiveIconDrawable) icon).getBackground() : null);
             return logoScene(fg, glyph, LOGO_SIZE, maxCanvas, 0.5f, brand, gradient, glyph.light < 0.25f); // a dark logo goes on a pale field
         } catch (RuntimeException e) {
-            return null; // another app's resources: anything can go wrong, and the banner still works
+            return null; // the resources of the app failed: the banner is used
         }
     }
 
     /**
-     * The banner (or, without one, the icon) the same way: its own background is cut away, so its
-     * logo floats over a field lit in that background's colour, light or dark as the tile is. Art
-     * that's a picture rather than a logo on a background is shown whole, as a card.
+     * Returns the banner (else the icon) with its background removed, over a field in the colour of that background.
+     * Art that is a picture, not a logo on a background, shows as a card.
      */
     private Bitmap bannerScene(Resources res, ActivityInfo ai) {
         int id = ai.banner != 0 ? ai.banner : ai.applicationInfo.banner;
@@ -592,19 +592,18 @@ final class Backdrops {
         Drawable art = res.getDrawableForDensity(id, DisplayMetrics.DENSITY_XXXHIGH, null);
         if (art == null) return null;
 
-        // Cut at the pixels the app shipped (enlarging first gains nothing); a vector at a size that
-        // needn't be enlarged at all. (Resources keep a bitmap at its own size and scale it on drawing.)
+        // Cuts at the pixel size of the app art. A vector is drawn at a size that needs no enlargement.
         int iw = art.getIntrinsicWidth(), ih = art.getIntrinsicHeight();
         float aspect = iw > 0 && ih > 0 ? (float) iw / ih : 16f / 9f;
         int bitmap = bitmapWidth(art);
-        int w = Math.max(64, Math.min(bitmap > 0 ? bitmap : 640, 720)); // plenty for a LOGO_SIZE logo
+        int w = Math.max(64, Math.min(bitmap > 0 ? bitmap : 640, 720)); // sufficient for a LOGO_SIZE logo
         int h = Math.max(36, Math.round(w / aspect));
         Bitmap work = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         art.setBounds(0, 0, w, h);
         art.draw(new Canvas(work));
         int[] px = new int[w * h];
         work.getPixels(px, 0, w, 0, 0, w, h);
-        float maxCanvas = w * (bitmap > 0 ? 1.5f : 1f); // as sharp as the icon
+        float maxCanvas = w * (bitmap > 0 ? 1.5f : 1f); // not more than the sharpness of the icon
 
         int bg = keyBackground(px, w, h);
         Glyph glyph = bg != BUSY ? Glyph.of(px, w, h, 0.6f, false) : null;
@@ -619,7 +618,7 @@ final class Backdrops {
             return out;
         }
 
-        // A picture: round its corners and show it as a card over its own colour.
+        // A picture: shows it as a card with round corners over its own colour.
         Bitmap card = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         p.setShader(new BitmapShader(work, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
@@ -632,16 +631,18 @@ final class Backdrops {
         return out;
     }
 
-    /** {@link #keyBackground} results that aren't a colour: art without a background of its own, and art whose edges are too busy to be one. */
+    /**
+     * The {@link #keyBackground} results that are not a colour: art with no background, and art with edges that are too
+     * busy to be a background.
+     */
     private static final int NO_BACKGROUND = 0, BUSY = 1;
 
     /**
-     * Makes the art's background transparent so its logo can float. The background is read from the
-     * art's edges (flat, or a smooth gradient between them), and each pixel becomes the most
-     * transparent colour that over that background gives the original (GIMP's "colour to alpha"),
-     * so anti-aliased edges keep no fringe of the old background. Returns the background's colour
-     * behind the middle of the art, {@link #NO_BACKGROUND} if it's already transparent around its
-     * logo (left as it is), or {@link #BUSY} if its edges are too busy to be a background.
+     * Makes the background of the art transparent. The background comes from the edges of the art (flat, or a smooth
+     * gradient between them). Each pixel becomes the most transparent colour that gives the original colour over that
+     * background ("colour to alpha"). Returns the background colour at the centre of the art. Returns
+     * {@link #NO_BACKGROUND} if the area around the logo is transparent. Returns {@link #BUSY} if the edges are too
+     * busy to be a background.
      */
     private static int keyBackground(int[] px, int w, int h) {
         int[][] edges = new int[4][];
@@ -654,7 +655,7 @@ final class Backdrops {
         int tl = mix(top[0], left[0]), tr = mix(top[w - 1], right[0]);
         int bl = mix(bottom[0], left[h - 1]), br = mix(bottom[w - 1], right[h - 1]);
 
-        // First guess: a Coons patch through the four edges, exact for flat and linear backgrounds.
+        // First estimate: a Coons patch through the four edges. It is exact for flat and linear backgrounds.
         int[] bg = new int[w * h];
         for (int y = 0; y < h; y++) {
             float v = h > 1 ? y / (h - 1f) : 0f;
@@ -671,8 +672,8 @@ final class Backdrops {
                 bg[y * w + x] = c;
             }
         }
-        // Then follow radial and uneven gradients too: re-estimate it from the pixels that look like
-        // background, first loosely, then strictly.
+        // Then refines the estimate for radial and uneven gradients. It uses the pixels that are near the background
+        // colour, first with a large tolerance, then with a small tolerance.
         refine(px, bg, w, h, 40);
         refine(px, bg, w, h, 16);
 
@@ -681,8 +682,8 @@ final class Backdrops {
     }
 
     /**
-     * Re-estimates the background {@code bg} as the average of the pixels within {@code near} of it,
-     * over a coarse grid (cells the logo covers take their neighbours' colour), smoothly interpolated.
+     * Calculates the background {@code bg} again as the mean of the pixels within {@code near} of it, on a coarse grid,
+     * with smooth interpolation. Cells that the logo covers get the colour of their neighbours.
      */
     private static void refine(int[] px, int[] bg, int w, int h, int near) {
         int gx = 16, gy = Math.max(2, Math.round(16f * h / w)), cells = gx * gy;
@@ -707,7 +708,7 @@ final class Backdrops {
             valid++;
         }
         if (valid == 0) return;
-        while (valid < cells) { // fill the gaps from their neighbours
+        while (valid < cells) { // fills the empty cells from their neighbours
             int[] next = grid.clone();
             int before = valid;
             for (int k = 0; k < cells; k++) {
@@ -753,8 +754,8 @@ final class Backdrops {
     }
 
     /**
-     * The most transparent colour that over {@code b} gives {@code p}. Differences within the
-     * background's own grain and compression noise stay fully transparent.
+     * Returns the most transparent colour that gives {@code p} over {@code b}. Differences at the level of the grain
+     * and the compression noise of the background stay fully transparent.
      */
     private static int unblend(int p, int b) {
         int diff = difference(p, b);
@@ -764,7 +765,7 @@ final class Backdrops {
             float d = ch(p, shift) - ch(b, shift), room = d > 0 ? 255f - ch(b, shift) : ch(b, shift);
             alpha = Math.max(alpha, room > 0 ? Math.abs(d) / room : 1f);
         }
-        alpha = Math.min(1f, alpha * Math.min(1f, (diff - 16) / 16f)); // fade in just above the noise
+        alpha = Math.min(1f, alpha * Math.min(1f, (diff - 16) / 16f)); // fades in above the noise level
         if (alpha <= 0.02f) return 0;
         int out = Math.round(alpha * (p >>> 24)) << 24;
         for (int shift = 16; shift >= 0; shift -= 8) {
@@ -774,16 +775,15 @@ final class Backdrops {
         return out;
     }
 
-    /** The largest difference between two colours in any channel. */
+    /** Returns the largest difference between two colours in one channel. */
     private static int difference(int a, int b) {
         return Math.max(Math.abs(ch(a, 16) - ch(b, 16)), Math.max(Math.abs(ch(a, 8) - ch(b, 8)), Math.abs(ch(a, 0) - ch(b, 0))));
     }
 
     /**
-     * One edge of the art's background, smoothed (side 0 top, 1 bottom, 2 left, 3 right): from each
-     * pixel along it, the first opaque colour going inward, as medians over short runs so a logo
-     * touching the edge doesn't count. Null if the art is mostly transparent there; empty if the
-     * edge varies too much to be a background.
+     * Returns one edge of the background of the art (side 0 top, 1 bottom, 2 left, 3 right), smoothed. For each pixel
+     * along the edge, it takes the first opaque colour toward the centre, as medians over short runs. Returns null if
+     * the art is almost transparent there, and an empty array if the edge varies too much.
      */
     private static int[] edge(int[] px, int w, int h, int side) {
         int n = side < 2 ? w : h, depth = Math.max(1, (side < 2 ? h : w) / 4);
@@ -819,7 +819,7 @@ final class Backdrops {
             }
             median[r] = m == 0 ? 0 : 0xFF000000 | color;
         }
-        for (int r = 0; r < runs; r++) { // runs with no opaque pixels take a neighbour's colour
+        for (int r = 0; r < runs; r++) { // a run with no opaque pixels gets the colour of a neighbour
             if (median[r] != 0) continue;
             for (int k = 1; k < runs && median[r] == 0; k++) {
                 if (r - k >= 0 && median[r - k] != 0) median[r] = median[r - k];
@@ -841,7 +841,7 @@ final class Backdrops {
                 for (int shift = 16; shift >= 0; shift -= 8) deviation += Math.abs(ch(raw[i], shift) - ch(c, shift));
             }
         }
-        // Mean difference from the smoothed edge, per channel: a photo's edge is far from smooth.
+        // The mean difference from the smoothed edge for each channel. The edge of a photo is not smooth.
         return deviation / (3f * found) > 14f ? new int[0] : smooth;
     }
 
@@ -854,16 +854,15 @@ final class Backdrops {
     }
 
     /**
-     * A logo (transparent around it) large and centred above the dock, with a soft shadow, over a
-     * field lit in the brand colour. Sized by its visible pixels, not its padded canvas: the area of
-     * a {@code size}-unit square for any shape, within the space above the dock, with the canvas at most
-     * {@code maxCanvas} pixels wide so a bitmap isn't enlarged too far. Null if that leaves the logo
-     * smaller than {@code minFill} of the size it should be.
+     * Returns a logo (transparent around it), large and centred above the dock with a soft shadow, over a field in the
+     * brand colour. The size comes from the visible pixels, not the canvas: the area of a {@code size}-unit square for
+     * any shape, in the space above the dock. The canvas is not more than {@code maxCanvas} pixels wide. Returns null
+     * if the logo is then smaller than {@code minFill} of its correct size.
      */
     private Bitmap logoScene(Drawable fg, Glyph glyph, float size, float maxCanvas, float minFill, int brand, int[] gradient, boolean pale) {
         float s = width / 1920f, cx = width / 2f, cy = 370f * s;
         RectF g = glyph.bounds;
-        float aspect = g.width() / g.height() * glyph.aspect; // the logo's own shape, in pixels
+        float aspect = g.width() / g.height() * glyph.aspect; // the shape of the logo, in pixels
         float want = Math.min(size * s * (float) Math.sqrt(aspect), Math.min(700f * s, size * s * aspect));
         float canvasW = Math.min(want / g.width(), maxCanvas), canvasH = canvasW / glyph.aspect;
         float lw = g.width() * canvasW, lh = g.height() * canvasH;
@@ -871,7 +870,7 @@ final class Backdrops {
 
         Bitmap out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(out);
-        // The field is all soft gradients: drawn at a quarter size and enlarged, it's the same and far quicker.
+        // The field has only soft gradients, so it is drawn at a quarter of the size and enlarged.
         Bitmap field = Bitmap.createBitmap(width / 4, height / 4, Bitmap.Config.ARGB_8888);
         brandField(new Canvas(field), field.getWidth(), field.getHeight(), brand, gradient, pale, glyph.light, cx / 4f, cy / 4f, s / 4f);
         c.drawBitmap(field, null, new RectF(0, 0, width, height), new Paint(Paint.FILTER_BITMAP_FLAG));
@@ -896,17 +895,18 @@ final class Backdrops {
     }
 
     /**
-     * Where a logo sits on its canvas, and how bright it is.
+     * The position and the brightness of a logo on its canvas.
      *
-     * @param bounds The visible pixels' bounds, as fractions of the canvas.
-     * @param aspect The canvas's width over its height.
-     * @param light  The visible pixels' mean luminance, 0–1.
+     * @param bounds The bounds of the visible pixels, as fractions of the canvas.
+     * @param aspect The width of the canvas divided by its height.
+     * @param light The mean luminance of the visible pixels, 0 to 1.
      */
     private record Glyph(RectF bounds, float aspect, float light) {
-        private static final int N = 216; // measuring size for icons
+        private static final int N = 216; // the measurement size for icons
 
         /**
-         * An icon layer's logo, or null unless it's a stand-alone one covering at most {@code maxCover} of the canvas.
+         * Returns the logo of an icon layer, or null if it is not a separate logo that covers not more than
+         * {@code maxCover} of the canvas.
          */
         static Glyph measure(Drawable fg, float maxCover) {
             Bitmap b = Bitmap.createBitmap(N, N, Bitmap.Config.ARGB_8888);
@@ -919,9 +919,9 @@ final class Backdrops {
         }
 
         /**
-         * The logo in w×h pixels, or null if there's nothing there, or it covers more than
-         * {@code maxCover} (a whole picture). With {@code noCards}, a large solid shape filling its
-         * bounds is refused too: a logo with its own background.
+         * Returns the logo in w×h pixels, or null if there is none or it covers more than {@code maxCover} (a full
+         * picture). With {@code noCards}, it also returns null for a large solid shape that fills its bounds (a logo
+         * with its own background).
          */
         static Glyph of(int[] px, int w, int h, float maxCover, boolean noCards) {
             int minX = w, minY = h, maxX = -1, maxY = -1, count = 0;
@@ -943,7 +943,7 @@ final class Backdrops {
             if (cover < 0.004f || cover > maxCover) return null;
             int bw = maxX - minX + 1, bh = maxY - minY + 1;
             if (noCards && count > 0.9f * bw * bh && bw > 0.4f * w && bh > 0.4f * h) return null;
-            // Leave out stray specks at the far edges: the few outermost visible pixels on each side.
+            // Ignores the few outermost visible pixels on each side.
             int[] cols = new int[w], rows = new int[h];
             for (int y = minY; y <= maxY; y++) {
                 for (int x = minX; x <= maxX; x++) {
@@ -962,7 +962,7 @@ final class Backdrops {
         }
     }
 
-    /** The pixel width of the bitmap behind a drawable, or 0 if it's a vector (sharp at any size). */
+    /** Returns the pixel width of the bitmap of a drawable, or 0 for a vector. */
     private static int bitmapWidth(Drawable d) {
         while (d instanceof DrawableWrapper) d = ((DrawableWrapper) d).getDrawable();
         return d instanceof BitmapDrawable ? ((BitmapDrawable) d).getBitmap().getWidth() : 0;
@@ -970,8 +970,8 @@ final class Backdrops {
 
 
     /**
-     * The colour a brand reads as: vivid pixels grouped by hue, each weighted by how vivid it is, and
-     * the best-represented hue averaged. Art with too little colour (white on black, say) gives grey.
+     * Returns the brand colour: vivid pixels grouped by hue, each weighted by its saturation, and the mean of the
+     * largest group. Art with too little colour gives grey.
      */
     private static int brandColor(Drawable d) {
         int iw = d.getIntrinsicWidth(), ih = d.getIntrinsicHeight();
@@ -988,8 +988,8 @@ final class Backdrops {
         for (int p : px) {
             if (p >>> 24 < 128) continue;
             opaque++;
-            // Greys, black and white (saturation under 0.2, value under 0.18), in integers: most
-            // of an icon, so most pixels never need the HSV call below.
+            // Greys, black and white (saturation below 0.2, value below 0.18), calculated with integers. Most pixels do
+            // not need the HSV call below.
             int pr = (p >> 16) & 255, pg = (p >> 8) & 255, pb = p & 255;
             int max = Math.max(pr, Math.max(pg, pb)), min = Math.min(pr, Math.min(pg, pb));
             if (max < 46 || (max - min) * 5 < max) continue;
@@ -1022,15 +1022,15 @@ final class Backdrops {
     }
 
     /**
-     * A field in the brand's colour, brightest behind the logo like light falling on it: deep for a
-     * light logo, pale for a dark one, grey for a brand without a colour.
+     * Draws a field in the brand colour, brightest behind the logo. The field is deep for a light logo, pale for a dark
+     * logo, and grey for a brand with no colour.
      */
     private static void brandField(Canvas c, int w, int h, int brand, int[] gradient, boolean pale, float logoLight,
                                    float cx, float cy, float s) {
         float[] hsv = new float[3];
         Color.colorToHSV(brand, hsv);
         float hue = hsv[0], sat = Math.min(hsv[1], 0.9f);
-        // Keep the glow below the logo's own brightness so the logo stands out from it.
+        // The glow stays below the brightness of the logo.
         float glow = pale ? 0.98f : sat < 0.12f ? 0.38f : 0.70f;
         while (!pale && glow > 0.30f && luminance(Color.HSVToColor(new float[]{hue, sat * 0.9f, glow})) > logoLight - 0.34f) {
             glow -= 0.02f;
@@ -1038,9 +1038,8 @@ final class Backdrops {
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         p.setDither(true);
         if (gradient != null) {
-            // The tile's own gradient across the screen: a 2x2 bitmap of its corners, stretched with
-            // bilinear filtering so each corner colour sits at a screen corner. Then darker toward
-            // the dock, as the flat field is.
+            // The gradient of the tile across the screen: a 2x2 bitmap of its corner colours, stretched with a bilinear
+            // filter. Then darker toward the dock, as the flat field is.
             Bitmap corners = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888);
             for (int i = 0; i < 4; i++) corners.setPixel(i % 2, i / 2, backdropShade(gradient[i], pale));
             Paint stretch = new Paint(Paint.FILTER_BITMAP_FLAG);
@@ -1056,13 +1055,13 @@ final class Backdrops {
             c.drawPaint(p);
         }
         int bloom = Color.HSVToColor(new float[]{hue, sat * (pale ? 0.6f : 0.9f), glow}) & 0x00FFFFFF;
-        int centre = gradient != null ? 0x99000000 : 0xE0000000; // softer over a gradient, which carries the colour
+        int centre = gradient != null ? 0x99000000 : 0xE0000000; // softer over a gradient
         int[] falloff = {bloom | centre, bloom | 0x80000000, bloom | 0x26000000, bloom};
         p.setShader(new RadialGradient(cx, cy, 1050f * s, falloff, new float[]{0f, 0.3f, 0.65f, 1f}, Shader.TileMode.CLAMP));
         c.drawPaint(p);
     }
 
-    /** A tile colour as a backdrop: its hue and most of its saturation, darkened behind a light logo. */
+    /** Returns a tile colour for a backdrop: its hue and most of its saturation, darker behind a light logo. */
     private static int backdropShade(int color, boolean pale) {
         float[] hsv = new float[3];
         Color.colorToHSV(color, hsv);
@@ -1072,9 +1071,8 @@ final class Backdrops {
     }
 
     /**
-     * The colours at the corners of art whose background is a gradient between clearly different
-     * colours (JioHotstar's blue to pink), as {top-left, top-right, bottom-left, bottom-right}. Null
-     * for a flat, transparent or busy background: that gets the brand colour's glow alone.
+     * Returns the corner colours of art with a gradient background between clearly different colours, as {top-left,
+     * top-right, bottom-left, bottom-right}. Returns null for a flat, transparent or busy background.
      */
     private static int[] gradientCorners(Drawable art) {
         if (art == null) return null;
@@ -1099,10 +1097,7 @@ final class Backdrops {
         return (0.2126f * ((p >> 16) & 255) + 0.7152f * ((p >> 8) & 255) + 0.0722f * (p & 255)) / 255f;
     }
 
-    /**
-     * Moves a finished full-screen image into GPU memory: one copy instead of a CPU copy plus its
-     * texture, and the upload happens here on the IO thread rather than in the first frame.
-     */
+    /** Copies a finished full-screen image to GPU memory on the IO thread and recycles the software copy. */
     private static Bitmap toHardware(Bitmap software) {
         Bitmap hardware = software.copy(Bitmap.Config.HARDWARE, false);
         if (hardware == null) return software;
@@ -1111,9 +1106,8 @@ final class Backdrops {
     }
 
     /**
-     * The app's launch screen (its launch theme's windowBackground), screen-sized, when that's a real
-     * picture of about 720p or more. Most TV apps launch on a flat colour or a small logo on black,
-     * which make a worse backdrop than the logo field, so those return null.
+     * Returns the launch screen of the app at screen size: the windowBackground of its launch theme. It must be a
+     * picture of approximately 720p or more. Returns null for a flat colour or a small logo.
      */
     private Bitmap splash(Resources res, ActivityInfo ai) {
         int themeId = ai.getThemeResource();
@@ -1129,7 +1123,7 @@ final class Backdrops {
             coverDraw(d, new Canvas(out), width, height);
             return out;
         } catch (RuntimeException e) {
-            return null; // another app's resources: anything can go wrong, and the logo still works
+            return null; // the resources of the app failed: the logo is used
         }
     }
 
@@ -1147,9 +1141,8 @@ final class Backdrops {
     }
 
     /**
-     * Whether the app {@code owner} may have us show this image: HTTPS only if it has network access
-     * itself (so it can't use us to reach the network for it), content:// and android.resource://
-     * only from its own package (so it can't make us read another app's data).
+     * Returns true if the app {@code owner} can show this image: HTTPS only if the app has network access, and
+     * content:// and android.resource:// only from its own package.
      */
     private boolean mayShow(String url, String owner) {
         if (owner == null) return false;
@@ -1163,11 +1156,11 @@ final class Backdrops {
     }
 
     /**
-     * The cached copy of a recommendation image, downloading it first if needed: HTTPS (no
-     * cleartext, no cookies, size-capped) or the app's own content, as {@link #mayShow} allows.
+     * Returns the cached copy of a recommendation image. If necessary, it downloads the image first: HTTPS (no
+     * cleartext, no cookies, limited size) or the content of the app, as {@link #mayShow} allows.
      */
     private File fetch(String url, String owner) {
-        // Checked before the cache too: another app naming the same URI mustn't get it from there.
+        // Checked before the cache, so that a different app with the same URI cannot get the cached image.
         if (!mayShow(url, owner)) return null;
         Uri uri = Uri.parse(url);
         String scheme = uri.getScheme() == null ? "" : uri.getScheme();
@@ -1176,7 +1169,7 @@ final class Backdrops {
         File out = cacheFile(url);
         if (out.isFile()) {
             //noinspection ResultOfMethodCallIgnored
-            out.setLastModified(System.currentTimeMillis()); // recently used, for the cache trim
+            out.setLastModified(System.currentTimeMillis()); // the time of use, for the cache trim
             return out;
         }
         HttpURLConnection http = null;
@@ -1185,7 +1178,7 @@ final class Backdrops {
         try {
             InputStream in;
             if (https) {
-                // What connects must be HTTPS whatever Uri.parse() made of the string: else this throws.
+                // The cast throws if the URL is not HTTPS.
                 http = (HttpsURLConnection) new URL(url).openConnection();
                 http.setConnectTimeout(8000);
                 http.setReadTimeout(15000);
@@ -1201,11 +1194,11 @@ final class Backdrops {
             }
             try (InputStream src = in) {
                 HttpURLConnection connection = http;
-                deadline = DEADLINES.schedule(() -> { // closing it ends a read that's waiting
+                deadline = DEADLINES.schedule(() -> { // the close stops a read that waits
                     try {
                         src.close();
                     } catch (IOException ignored) {
-                        // closed already
+                        // already closed
                     }
                     if (connection != null) connection.disconnect();
                 }, FETCH_DEADLINE_S, TimeUnit.SECONDS);
@@ -1227,16 +1220,15 @@ final class Backdrops {
 
     private boolean ownedBy(Uri uri, String scheme, String owner) {
         String authority = uri.getAuthority();
-        // Never a "user@": ContentResolver reads it as a user id and goes on to the authority after
-        // it, so the provider checked here wouldn't be the one read.
-        // ("%40" too: getUserInfo() misses an encoded one, but getAuthority() decodes it.)
+        // Refuses user info ("user@" and "%40"). ContentResolver reads it as a user id, and then the provider that it
+        // reads is not the provider that this check found.
         if (authority == null || owner == null || uri.getUserInfo() != null || authority.indexOf('@') >= 0) return false;
         if (scheme.equals(ContentResolver.SCHEME_ANDROID_RESOURCE)) return authority.equals(owner);
         ProviderInfo provider = pm.resolveContentProvider(authority, 0);
         return provider != null && provider.exported && owner.equals(provider.packageName);
     }
 
-    /** Copies at most MAX_DOWNLOAD bytes; false if the source is bigger than that. */
+    /** Copies not more than MAX_DOWNLOAD bytes. Returns false if the source is larger. */
     private static boolean copy(InputStream src, File to) throws IOException {
         try (OutputStream dst = new FileOutputStream(to)) {
             byte[] buf = new byte[16 << 10];
@@ -1265,7 +1257,7 @@ final class Backdrops {
         }
     }
 
-    /** Scales and centre-crops {@code src} to exactly w×h. */
+    /** Scales and centre-crops {@code src} to w×h. */
     private static Bitmap cover(Bitmap src, int w, int h) {
         if (src.getWidth() == w && src.getHeight() == h) return src;
         Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
@@ -1278,8 +1270,8 @@ final class Backdrops {
     }
 
     /**
-     * The scrims drawn into a screen-high software picture, once: darker toward the bottom for the
-     * dock, at the top for the clock. Mutable in place (a copy if it isn't). IO thread.
+     * Draws the scrims into a screen-high software picture: darker toward the bottom for the dock, and at the top for
+     * the clock. It draws in place if the picture is mutable, else on a copy. IO thread.
      */
     private Bitmap bake(Bitmap b) {
         if (!b.isMutable()) {
@@ -1292,15 +1284,15 @@ final class Backdrops {
         Paint p = new Paint();
         p.setShader(new LinearGradient(0, h * SCRIM_BOTTOM_FROM, 0, h, 0x00000000, SCRIM_BOTTOM, Shader.TileMode.CLAMP));
         c.drawRect(0, h * SCRIM_BOTTOM_FROM, b.getWidth(), h, p);
-        float top = SCRIM_TOP_DESIGN * h * width / (1920f * height); // design units to this picture's rows
+        float top = SCRIM_TOP_DESIGN * h * width / (1920f * height); // design units to picture rows
         p.setShader(new LinearGradient(0, 0, 0, top, SCRIM_TOP, 0x00000000, Shader.TileMode.CLAMP));
         c.drawRect(0, 0, b.getWidth(), top, p);
         return b;
     }
 
     /**
-     * The full-screen shelf's darkening behind its title, description and Play, baked in: darkest in
-     * the bottom-left corner (what HomeView would otherwise draw over the whole screen each frame).
+     * Draws the details scrim of the full-screen shelf into the picture, behind the title, the description and Play. It
+     * is darkest in the bottom-left corner.
      */
     private Bitmap bakeDetails(Bitmap b) {
         if (!b.isMutable()) {
@@ -1315,22 +1307,22 @@ final class Backdrops {
         return b;
     }
 
-    /** The full-screen shelf's darkening: its colours and its radius in design units (HomeView draws the same). */
+    /** The details scrim: its colours and its radius in design units. HomeView uses the same values. */
     static final int[] DETAILS_SCRIM = {0xB8000000, 0x66000000, 0x00000000};
     static final float DETAILS_SCRIM_RADIUS = 1500f;
 
-    /** Every blur's size: the screen's shape at {@link #BLUR_W} wide. */
+    /** Returns the height of each blur: the screen shape at {@link #BLUR_W} wide. */
     private int blurHeight() {
         return Math.max(1, Math.round(BLUR_W * (float) height / width));
     }
 
     static final int BLUR_W = 192;
 
-    /** A heavily blurred 192px-wide copy. Drawn scaled up with bilinear filtering it reads as a smooth blur. */
+    /** Returns a blurred copy, 192 px wide. A bilinear filter makes it smooth when it is drawn large. */
     static Bitmap blur(Bitmap src) {
         int w = BLUR_W;
         int h = Math.max(1, Math.round(w * (float) src.getHeight() / src.getWidth()));
-        // Two-step downscale so the bilinear sampling doesn't skip detail and sparkle.
+        // Two downscale steps, so that the bilinear filter does not skip detail.
         Bitmap mid = Bitmap.createScaledBitmap(src, w * 3, h * 3, true);
         Bitmap small = Bitmap.createScaledBitmap(mid, w, h, true);
         if (mid != src && mid != small) mid.recycle();
@@ -1340,7 +1332,10 @@ final class Backdrops {
         return out;
     }
 
-    /** {@code small} (blur-sized already) box-blurred three times over: mutable, {@code small} itself when it was. */
+    /**
+     * Applies three box blurs to {@code small}, which has the blur size. Returns {@code small} if it is mutable, else a
+     * new mutable bitmap.
+     */
     static Bitmap boxBlur(Bitmap small) {
         int w = small.getWidth(), h = small.getHeight();
         int[] px = new int[w * h], tmp = new int[w * h];
@@ -1356,7 +1351,10 @@ final class Backdrops {
 
     private static final int BLUR_RADIUS = 3;
 
-    /** Box-blurs each row of {@code src} (w×h) by {@link #BLUR_RADIUS}, writing the result transposed into {@code dst} (h×w). */
+    /**
+     * Box-blurs each row of {@code src} (w×h) by {@link #BLUR_RADIUS} and writes the result transposed into {@code dst}
+     * (h×w).
+     */
     private static void boxBlurTransposed(int[] src, int[] dst, int w, int h) {
         int r = BLUR_RADIUS, div = 2 * r + 1;
         for (int y = 0; y < h; y++) {
@@ -1381,9 +1379,9 @@ final class Backdrops {
         }
     }
 
-    /** The built-in wallpaper: soft blue / violet / teal light over near-black, in the spirit of tvOS. */
+    /** Returns the built-in wallpaper: soft blue, violet and teal light over near-black. */
     private static Bitmap aurora() {
-        int w = 640, h = 360; // small: it's blurred and drawn full screen anyway
+        int w = 640, h = 360; // small: it is blurred and drawn full screen
         Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(b);
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);

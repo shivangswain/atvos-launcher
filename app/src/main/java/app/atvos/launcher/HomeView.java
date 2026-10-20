@@ -51,11 +51,11 @@ import java.util.Locale;
 import java.util.TimeZone;
 
 /**
- * The whole home screen, drawn on one canvas. Everything is laid out in 1920-wide design units and
- * the canvas is scaled to the real width, so the layout is identical at any resolution.
+ * The home screen, drawn on one canvas. The layout is in design units (1920 wide), and the canvas is scaled to the
+ * screen width.
  *
- * Animations are critically-damped exponential approaches evaluated per frame, so they can be
- * interrupted at any point and the view only redraws while something is still moving.
+ * Each animation is an exponential approach, calculated for each frame. An animation can change its target at any time.
+ * The view draws only while a value moves.
  */
 @SuppressLint("ViewConstructor")
 final class HomeView extends View {
@@ -64,79 +64,90 @@ final class HomeView extends View {
         void onFocusChanged(Apps.Entry entry, boolean inDock);
         void launch(Apps.Entry entry, Rect from);
         void showInfo(Apps.Entry entry);
-        /** Persists the order and the hidden apps after Edit Home Screen. */
+        /** Saves the order and the hidden apps after Edit Home Screen. */
         void saveLayout(List<Apps.Entry> visible, List<Apps.Entry> hidden);
         void launchProgram(Recommendations.Item program, Rect from);
-        /** The focused app's full-screen top shelf pages ready to show, best first. */
+        /** Returns the full-screen top shelf pages of the app that are ready, best first. */
         List<Recommendations.Item> shelfPages(Apps.Entry entry);
-        /** Shows one of them behind the dock (and keeps it there, as tvOS does). */
+        /** Shows one of these pages behind the dock and keeps it there. */
         void showShelfPage(Apps.Entry entry, Recommendations.Item page);
-        /** The app's recommendation sources worth a menu switch, as {@link Recommendations#WATCH_NEXT} / {@link Recommendations#PREVIEWS} bits. */
+        /**
+         * Returns the recommendation sources of the app that get a menu switch, as {@link Recommendations#WATCH_NEXT}
+         * and {@link Recommendations#PREVIEWS} bits.
+         */
         int shelfSources(Apps.Entry entry);
         boolean shelfSourceOn(Apps.Entry entry, int source);
         void setShelfSource(Apps.Entry entry, int source, boolean on);
         Controls.State controlState();
-        /** Runs a Control Center action; returns true to keep the Control Center open. */
+        /** Runs a Control Center action. Returns true to keep the Control Center open. */
         boolean control(int id);
-        /** Gives up power control (the device admin), so the app can be uninstalled. */
+        /** Removes the device admin, so that the user can uninstall the app. */
         void releasePower();
-        /** How the home screen is set up: system calls, so read when the sheet opens, not per frame. */
+        /**
+         * Returns the home screen configuration. It makes system calls, so it is read when the sheet opens, not for
+         * each frame.
+         */
         Controls.Setup setupState();
-        /** Asks Android to make this the home app. */
+        /** Asks Android to make this app the home app. */
         void requestDefaultHome();
-        /** Turns off this TV's own locked home apps over its own adb (the user approves the on-screen prompt). */
+        /** Disables the locked home apps of this TV over self-adb. The user accepts the prompt on the screen. */
         void selfSetupHome(SelfSetup progress);
-        /** Puts back the home apps a previous self-setup turned off. */
+        /** Enables the home apps that self-adb disabled. */
         void restoreTvHome(SelfSetup progress);
-        /** The setup steps closed; the first time, that ends first-run setup. */
+        /** The setup steps closed. The first time, this ends the first-launch setup. */
         void setupDone();
-        /** Settings' About screen (select the build number to turn on Developer options). */
+        /** Opens the About screen of Settings. */
         void openAbout();
-        /** Developer options (turn on USB debugging). */
+        /** Opens Developer options. */
         void openDeveloperOptions();
-        /** Android's account picker, for the profile picture. */
+        /** Opens the account chooser of Android for the profile picture. */
         void chooseAccount();
         boolean hasAccount();
-        /** The chosen Google account's address, or null. */
+        /** Returns the address of the selected Google account, or null. */
         String account();
         /** Settings > Profile Picture: {@link Profile#PHOTO}, {@link Profile#INITIAL} or {@link Profile#NONE}. */
         String profilePicture();
         void setProfilePicture(String picture);
-        /** Settings > Time Format: the clock in 24-hour time (by default, as the TV has it). */
+        /** Settings > Time Format: true for 24-hour time. The default is the setting of the TV. */
         boolean use24Hour();
         void setUse24Hour(boolean on);
-        /** The full-screen top shelf went up or down: show its pictures without (or with) the dock's scrims. */
+        /**
+         * The full-screen top shelf opened or closed. Shows its pictures with the details scrim or with the dock scrim.
+         */
         void setFullScreen(boolean on);
-        /** An app just moved to Hidden: a toast on how to get back to it. */
+        /** Shows the Hidden toast after an app moves to Hidden. */
         void showHiddenHint();
-        /** Settings > Support: opens {@link SettingsScreen#WEBSITE}, {@link SettingsScreen#STORE} or {@link SettingsScreen#APP_INFO}. */
+        /**
+         * Settings > Support: opens {@link SettingsScreen#WEBSITE}, {@link SettingsScreen#STORE} or
+         * {@link SettingsScreen#APP_INFO}.
+         */
         boolean openFromSettings(int what);
-        /** Whether the TV has an app for it (many TVs have no web browser). */
+        /** Returns true if the TV has an app that can open it. */
         boolean canOpenFromSettings(int what);
-        /** Uninstalls an app the user chose to delete (they've already confirmed it). */
+        /** Uninstalls an app after the user confirms the deletion. */
         void deleteApp(Apps.Entry entry);
-        /** Settings > Appearance: the rows of programs (and Settings) light rather than dark. */
+        /** Settings > Appearance: true for light rows and Settings, else dark. */
         boolean lightAppearance();
         void setLightAppearance(boolean light);
-        /** The optional tip through Google Play, for Settings. */
+        /** Returns the Google Play donation for Settings. */
         Donation donation();
-        /** Shows the TV's keyboard to edit {@code text} (a folder's name), reporting what's typed. */
+        /** Shows the TV keyboard to edit {@code text} (a folder name) and sends each change to {@code edit}. */
         void editText(String text, TextEdit edit);
     }
 
-    /** What's typed on the TV's keyboard. Called on the UI thread. */
+    /** Receives the text from the TV keyboard. UI thread. */
     interface TextEdit {
         void changed(String text);
         void done(String text);
     }
 
-    /** Progress for the on-TV setup, so the sheet can show where it's up to. Called on the UI thread. */
+    /** Receives the progress of the on-TV setup for the sheet. UI thread. */
     interface SelfSetup {
         void status(int messageRes);
         void done(boolean ok, int messageRes);
     }
 
-    // Layout in design units, measured from the tvOS home screen.
+    // The layout in design units.
     static final float W = 1920f;
     static final float TILE_W = 250f, TILE_H = 150f;
     static final float FOCUS_SCALE = 1.2f;
@@ -146,137 +157,138 @@ final class HomeView extends View {
     private static final float GRID_X = (W - COLS * TILE_W - (COLS - 1) * GAP_X) / 2f;
     private static final float DOCK_ROW_Y = 800f;
     private static final float DOCK_PAD_X = 48f, DOCK_PAD_Y = 36f;
-    private static final float EDGE = W - GRID_X + DOCK_PAD_X;      // right edge shared by dock and clock
-    // Below the dock the apps fill the screen, as on tvOS: the top row rises to here, near the top
-    // edge (the clock fades away), and deeper rows scroll only to keep the focused one above the line.
+    private static final float EDGE = W - GRID_X + DOCK_PAD_X;      // the right edge of the dock and the clock
+    // Below the dock, the top row of apps goes up to GRID_TOP and the clock fades out. Lower rows scroll only to keep
+    // the focused row above FOCUS_LINE.
     private static final float GRID_TOP = 95f, FOCUS_LINE = 640f;
     private static final float SHADOW_PAD = 60f, SHADOW_DY = 20f, SHADOW_BLUR = 30f;
     private static final float CLOCK_TOP = 50f, CLOCK_H = 56f, AVATAR = 40f;
-    private static final float HIDDEN_GAP = 84f; // room for the "Hidden" title above the hidden apps
-    private static final long HOLD_MS = 800;     // holding Down on the last row this long reveals Hidden
+    private static final float HIDDEN_GAP = 84f; // the space for the "Hidden" title above the hidden apps
+    private static final long HOLD_MS = 800;     // a long press of Down on the last row for this time opens Hidden
     private static final int INK = 0xFF141416, TV_RED = 0xFFFF4245;
-    // An open folder: a glass panel under its name, its apps four to a row, as on tvOS.
+    // An open folder: a glass panel below its name, with four apps in each row.
     private static final int FOLDER_COLS = 4;
     private static final float FOLDER_W = 1200f, FOLDER_TOP = 150f, FOLDER_PAD = 48f, FOLDER_GAP = 35f;
     private static final float FOLDER_R = 48f, FOLDER_NAME_Y = 78f, FOLDER_NAME_H = 84f;
-    // The Delete alert
+    // The Delete alert.
     private static final float ALERT_W = 660f, ALERT_PAD = 40f, ALERT_BUTTON_H = 70f;
     private static final float PLAY_H = 64f, PLAY_PAD = 34f, PLAY_ICON = 22f, PLAY_GAP = 14f, PLAY_BAR = 88f;
-    // The one glass for the controls over the backdrop (the dock, the clock pill, Play, the pager's
-    // arrows and dots): its tint, and the light over which what's on it turns dark.
+    // The glass of the controls over the backdrop: the dock, the clock pill, Play, and the pager arrows and dots.
+    // GLASS_TINT is its tint. The ink on the glass changes to dark between INK_FROM and INK_TO.
     private static final int GLASS_TINT = 0x1AFFFFFF, INK_DARK = 28;
     private static final float INK_FROM = 0.55f, INK_TO = 0.70f;
-    // The full-screen top shelf's paging controls, as tvOS shows them for a click remote: arrows at
-    // the sides, page dots at the bottom, shown on arrival and on each page, then fading away.
+    // The page controls of the full-screen top shelf: arrows at the sides and page dots at the bottom. They show on
+    // arrival and at each page change, then fade out.
     private static final float PAGER_ARROW_D = 80f, PAGER_ARROW_X = 130f, PAGER_DOT = 8f, PAGER_DOT_STEP = 21f,
             PAGER_DOTS_H = 26f, PAGER_DOTS_BOTTOM = 24f;
     private static final long PAGER_SHOWN_MS = 1600;
-    // A row shelf (programs under Full HD), laid out as tvOS lays out a Continue Watching row
+    // A row shelf (programs below Full HD).
     private static final float ROW_X = 90f, ROW_TOP = 180.5f, ROW_GAP = 60f, ROW_FOCUS_SCALE = 1.048f,
             ROW_HEADER_Y = 157f, ROW_HEADER_LIFT = 21f, ROW_BAR_INSET = 41f, ROW_BAR_BOTTOM = 28f, ROW_BAR_H = 6f;
-    // A focused card's title too long for it scrolls in place, as tvOS's does (measured): a second
-    // after focus arrives, at 45 units a second, a copy following 44 units behind, both edges faded,
-    // then two seconds' rest at the start each time round.
+    // A title that is too long for its focused card scrolls in place. The scroll starts one second after the focus
+    // arrives, at 45 units per second, with a copy 44 units behind. Both edges fade. Each cycle starts with a rest of
+    // two seconds.
     private static final float MARQUEE_SPEED = 45f, MARQUEE_GAP = 44f, MARQUEE_FADE = 24f;
     private static final long MARQUEE_DELAY_MS = 1000, MARQUEE_REST_MS = 2000;
-    // The full-screen shelf's details at the bottom left: title, a line of facts, the description, Play
+    // The details of the full-screen shelf at the bottom left: the title, a line of facts, the description and Play.
     private static final float DETAILS_X = 92f, DETAILS_W = 820f, DETAILS_BOTTOM = 104f;
-    /** What the focused app's top shelf is: nothing, a full-screen picture, or a smaller one on a card. */
-    private static final int NO_SHELF = 0, FULL_SHELF = 1, ROW_SHELF = 2; // FULL: a Full HD picture; ROW: cards
+    /** The kind of top shelf of the focused app: none, a full-screen picture (Full HD), or a row of cards. */
+    private static final int NO_SHELF = 0, FULL_SHELF = 1, ROW_SHELF = 2;
 
     private final Host host;
     private final List<Apps.Entry> apps = new ArrayList<>();   // visible, in order
-    private final List<Apps.Entry> hidden = new ArrayList<>(); // greyed out below, while editing or revealed
-    private int focus;                                          // index into apps, then hidden (when shown)
+    private final List<Apps.Entry> hidden = new ArrayList<>(); // greyed out below, during an edit or when Hidden is open
+    private int focus;                                          // the index into apps, then into hidden when Hidden is open
 
     private float scale = 1f, height = 1080f;
     private long lastFrame;
     private boolean animating;
 
-    // Animated values and the states that drive them
+    // Animated values and the states that set their targets.
     private float scroll, expand, hint, menuAnim, pillAnim, ccAnim, editAnim, fade = 1f;
-    private float rowAnim; // the row shelf focused (the headers rise, the focused card shows its title)
-    private float playFocus; // the full-screen shelf's Play button focused (else glass: focus is on the clock pill)
-    private float away; // 0 in the dock, 1 once focus is in the grid: blurs and dims the backdrop
-    private int dim; // black overlay alpha once focus leaves the dock
-    // Liquid-glass text colour over the backdrop: 0 = white, 1 = dark (on bright images)
+    private float rowAnim; // the row shelf has the focus (the section titles go up, the focused card shows its title)
+    private float playFocus; // 1 when Play has the focus, 0 when Play is glass
+    private float away; // 0 in the dock, 1 when the focus is in the grid: blurs and dims the backdrop
+    private int dim; // the alpha of the black overlay when the focus is not in the dock
+    // The ink of the clock and of the Control Center: 0 for white, 1 for dark (on bright images).
     private float clockInk, ccInk;
     private boolean expanded, menuOpen, longPressed, pillFocused, ccOpen;
-    private boolean rowFocused; // a card in the row shelf is focused (Up from the dock)
-    private int rowIndex;          // which card
-    private float rowScroll;       // how far the row has scrolled left, design units
-    private float[] rowFocus = new float[0]; // each card's focus, easing
-    private String[] rowHeaders = new String[0]; // the section title over each card that starts one, else null
+    private boolean rowFocused; // a card in the row shelf has the focus (Up from the dock)
+    private int rowIndex;          // the focused card
+    private float rowScroll;       // the scroll of the row to the left, in design units
+    private float[] rowFocus = new float[0]; // the focus value of each card
+    private String[] rowHeaders = new String[0]; // the section title above each card that starts a section, else null
     private float[] rowHeaderWidths = new float[0];
-    private float[] rowLefts = new float[0]; // each card's left edge before scrolling: cards are 16:9 or square
-    private String[] rowTitles = new String[0]; // each card's title
+    private float[] rowLefts = new float[0]; // the left edge of each card before the scroll (cards are 16:9 or square)
+    private String[] rowTitles = new String[0]; // the title of each card
     private float[] rowTitleWidths = new float[0];
-    private int marqueeCard = -1;  // the focused card whose title is too long for it, scrolling
-    private long marqueeSince;     // when focus came to it
-    private float marqueeOffset;   // how far its title has scrolled
-    private final Runnable marqueeWake = this::kick; // the end of a rest: scroll again
-    private List<Backdrops.Card> rowCards = Collections.emptyList(); // the row shown
-    // The full-screen shelf's details, laid out when the program shown changes (not per frame)
+    private int marqueeCard = -1;  // the focused card with a title that is too long, or -1
+    private long marqueeSince;     // the time when the focus came to it
+    private float marqueeOffset;   // the scroll of its title
+    private final Runnable marqueeWake = this::kick; // the end of a rest: the title scrolls again
+    private List<Backdrops.Card> rowCards = Collections.emptyList(); // the row that shows
+    // The details of the full-screen shelf, laid out when the program changes.
     private Recommendations.Item detailsFor;
     private String detailsTitle, detailsLine;
     private StaticLayout detailsBody;
-    // Its Play button: "Play", or for something partly watched, a progress bar and the time left (as tvOS does)
+    // The label of the Play button: "Play", or for a program that is partly watched, a progress bar and the time that
+    // remains.
     private String detailsPlay = "";
     private float detailsProgress, detailsPlayWidth;
-    private boolean motion = true; // animations are on (off: Remove animations, or an animator scale of 0)
-    // The full-screen top shelf's pages (the focused app's programs), which one is shown, and its controls
+    private boolean motion = true; // true when animations are on (false for Remove animations or an animator scale of 0)
+    // The pages of the full-screen top shelf (the programs of the focused app), the page that shows, and its controls.
     private List<Recommendations.Item> pages = Collections.emptyList();
     private int page;
     private boolean pagerShown;
     private float pagerAnim;
-    private int hintTint = Color.WHITE; // the full-screen hint's colour: the backdrop's own, lightened (or darkened)
+    private int hintTint = Color.WHITE; // the colour of the full-screen hint: the colour of the backdrop, lighter or darker
     private final Runnable hidePager = () -> {
         pagerShown = false;
         kick();
     };
-    private boolean editing;          // Edit Home Screen: the focused app is picked up and moving
-    private boolean editFromHidden;   // ...and it was picked up in Hidden
-    private boolean showHidden;       // the Hidden section, revealed by holding Down on the last row
-    private boolean downHeld, swallowDown; // Down held on the last row; its repeats after the reveal
+    private boolean editing;          // Edit Home Screen: the focused app moves with the arrow keys
+    private boolean editFromHidden;   // true if the moved app came from Hidden
+    private boolean showHidden;       // the Hidden section is open (a long press of Down on the last row)
+    private boolean downHeld, swallowDown; // Down is held on the last row, and its repeats after Hidden opens are ignored
     private long downAt, bounceAt;
     private float downAppear, downProgress, bounce, menuSelAnim;
     private Backdrops.Backdrop backdrop, previous;
 
-    // Screen readers: a tree of virtual items, since everything is drawn on this one view
+    // Screen readers: a tree of virtual items for the items on this view.
     private final A11y a11y;
     private static final int A11Y_PILL = 1, A11Y_PLAY = 2, A11Y_ALERT = 10, A11Y_ROW = 20, A11Y_CC = 100, A11Y_MENU = 200, A11Y_SUB = 250,
-            A11Y_SETUP = 300, A11Y_SETTINGS = 350, A11Y_FOLDER = 400, A11Y_APP = 1000; // A11Y_FOLDER is its name, its apps follow
+            A11Y_SETUP = 300, A11Y_SETTINGS = 350, A11Y_FOLDER = 400, A11Y_APP = 1000; // the folder name, then its apps
 
-    // Control Center (opened from the clock pill)
+    // Control Center (opened from the clock pill).
     private final ControlCenter cc;
     private final ControlCenter.Glass ccGlass = (c, rect, radius, tint, alpha) -> drawGlass(c, rect, radius, 0f, tint, alpha, ccAnim > 0f);
 
-    // Long-press menu, as on tvOS: options beside the tile, and a second list beside them for the
-    // options that open one (Move to…, Top Shelf…).
+    // Long-press menu: options next to the tile, and a second list next to them for the options that open one (Move
+    // to…, Top Shelf…).
     private static final int ROW_PLAIN = 0, ROW_DANGER = 1, ROW_SUBMENU = 2;
-    /** One option. {@code checked} is a switch's state (in Top Shelf…), null for anything else. */
+    /** One option. {@code checked}: the state of a switch (in Top Shelf…), or null. */
     private record MenuRow(String label, Drawable icon, int kind, Runnable action, Boolean checked) {
     }
     private final List<MenuRow> menuRows = new ArrayList<>(), subRows = new ArrayList<>();
     private static final float MENU_ITEM_H = 66f, MENU_PAD = 12f;
-    private final RectF menuBox = new RectF(), subBox = new RectF(); // where they were last drawn, for screen readers
+    private final RectF menuBox = new RectF(), subBox = new RectF(); // the bounds at the last draw, for screen readers
     private final Drawable editIcon, newFolderIcon, deleteIcon, checkIcon, chevronIcon;
-    private Apps.Entry menuEntry;            // the tile the menu is for
+    private Apps.Entry menuEntry;            // the tile of the menu
     private int menuSel, subSel, subOf = -1; // subOf: the option whose list is open, or -1
     private float menuWidth, subWidth, subAnim, subSelAnim;
-    private int subFrom;                     // the option the second list last opened from (it fades out there)
-    private boolean subLeft;                 // no room on the right: the second list opens to the left
-    private Runnable subBuilder;             // fills the open list again (a switch changed)
+    private int subFrom;                     // the option that the second list opened from last (it fades out there)
+    private boolean subLeft;                 // no space at the right: the second list opens to the left
+    private Runnable subBuilder;             // builds the open list again (after a switch changes)
 
-    // An open folder, over the home screen gone out of focus
-    private Apps.Entry openFolder, shownFolder; // shown: still drawn while it fades away
-    private int folderFocus;                    // index into its apps, or -1 for its name
+    // An open folder, over the home screen.
+    private Apps.Entry openFolder, shownFolder; // shown: drawn while it fades out
+    private int folderFocus;                    // the index into its apps, or -1 for its name
     private float folderAnim, folderNameFocus, folderScroll;
-    private boolean renaming;                   // its name is being typed on the TV's keyboard
-    private float tileFade = 1f;                // tiles drawn now fade by this (an open folder's, as it opens)
-    private String folderName = "";             // the name shown (and typed)
+    private boolean renaming;                   // the user types its name on the TV keyboard
+    private float tileFade = 1f;                // the fade of the tiles that draw now (the tiles of a folder as it opens)
+    private String folderName = "";             // the name that shows (and that the user types)
 
-    // The Delete alert, as on tvOS
+    // The Delete alert.
     private Apps.Entry alertEntry;
     private int alertSel;                       // 0 Cancel, 1 Delete
     private float alertAnim, alertSelAnim;
@@ -285,27 +297,27 @@ final class HomeView extends View {
     private final String cancelLabel, deleteLabel;
     private final RectF alertBox = new RectF();
 
-    // The setup steps: on first run, and from Settings while another app has the Home button
+    // The setup steps: on the first launch, and from Settings when another app has the Home button.
     private final SetupFlow setupFlow;
     private boolean setupOpen;
     private float setupAnim;
-    // Settings (the switches in Control Center): full screen, as tvOS Settings
+    // Settings (the switches in Control Center), full screen.
     private final SettingsScreen settings;
     private boolean settingsOpen;
     private float settingsAnim;
     private boolean light; // Settings > Appearance: Light
 
-    // Clock
+    // Clock.
     private String time = "";
     private float timeWidth;
     private final Runnable tick = this::tick;
 
-    // Drawing objects, allocated once
+    // Drawing objects, allocated one time.
     private final Paint image = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint backdropPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
-    // Behind an open folder: the blurred backdrop, darkened as it's drawn.
+    // Behind an open folder: the blurred backdrop, darker.
     private final Paint folderBlur = new Paint(Paint.FILTER_BITMAP_FLAG);
-    private final LightingColorFilter[] dimFilters = new LightingColorFilter[256]; // by alpha, made as needed
+    private final LightingColorFilter[] dimFilters = new LightingColorFilter[256]; // by alpha, made when necessary
     private final Paint art = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint hiddenArt = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG); // greyscale
     private final TextPaint headerText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
@@ -329,9 +341,8 @@ final class HomeView extends View {
     private final TextPaint rowMarqueeText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Path playTriangle = new Path();
     private final Paint cardPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-    // The glass: one pass per shape, its tint and the dim folded into the blur's colour matrix
-    // (cached per tint and dim level); while backdrops crossfade, their blurs mixed on the CPU into
-    // one small bitmap, so the glass is one pass then too.
+    // The glass: one pass for each shape. The tint and the dim are in the colour matrix of the blur, cached for each
+    // tint and dim level. During a crossfade, the CPU mixes the two blurs into one small bitmap.
     private final int[] glassTints = new int[32], glassDims = new int[32];
     private final ColorFilter[] glassFilters = new ColorFilter[32];
     private int glassFilterNext;
@@ -340,14 +351,14 @@ final class HomeView extends View {
     private int[] mixedPixels = new int[0];
     private Backdrops.Backdrop mixedFrom, mixedTo;
     private int mixedLevel = -1;
-    // The home screen frozen into a layer under the Control Center (see drawFrozenHome), and a
-    // fingerprint of everything it shows, to tell when it moved and must be drawn again.
+    // The home screen in a layer under the Control Center (see drawFrozenHome), and a fingerprint of the values that it
+    // shows. A different fingerprint draws the layer again.
     private RenderNode homeNode;
     private final Paint homePaint = new Paint();
     private double homeSig, frozenSig = Double.NaN;
-    // That home screen small and blurred, for the Control Center's glass to show the cards and tiles
-    // under it (see snapHome): drawn offscreen by a renderer of its own, at most every SNAP_MS, and
-    // ahead of time while the clock pill has focus and nothing moves.
+    // The home screen, small and blurred, for the glass of the Control Center (see snapHome). A separate renderer draws
+    // it offscreen, not more than once in SNAP_MS. It is also drawn while the clock pill has the focus and nothing
+    // moves.
     private HardwareRenderer snapRenderer;
     private ImageReader snapReader;
     private RenderNode snapNode;
@@ -359,7 +370,7 @@ final class HomeView extends View {
     private static final long SNAP_MS = 120;
     private final Runnable snapAhead = this::snapAhead;
     private final LinearGradient rimGradient, sheenGradient;
-    private LinearGradient marqueeFade;  // the edges' fade, made for the focused card's width
+    private LinearGradient marqueeFade;  // the fade of the title edges, made for the width of the focused card
     private float marqueeFadeFor;
     private final Path chevron = new Path(), hintChevron = new Path(), pagerChevron = new Path();
     private final RectF r = new RectF(), r2 = new RectF(), playRect = new RectF();
@@ -406,7 +417,7 @@ final class HomeView extends View {
         bodyText.setTextSize(23f);
         playText.setTypeface(semibold);
         playText.setTextSize(30f);
-        // tvOS's play.fill: a triangle with softened corners (drawn with a round join)
+        // The play glyph: a triangle with soft corners (a round join).
         playTriangle.moveTo(0f, 0f);
         playTriangle.lineTo(19f, 11f);
         playTriangle.lineTo(0f, 22f);
@@ -437,14 +448,14 @@ final class HomeView extends View {
         cc = new ControlCenter(context, EDGE,
                 new RectF(EDGE - 8f - AVATAR, CLOCK_TOP + (CLOCK_H - AVATAR) / 2f, EDGE - 8f, CLOCK_TOP + (CLOCK_H + AVATAR) / 2f));
 
-        // Liquid-glass: the blurred backdrop, more saturated (see glassFilter), with a light rim brighter at the top.
+        // Glass: the blurred backdrop, more saturated (see glassFilter), with a light rim that is brighter at the top.
         rimGradient = new LinearGradient(0, 0, 0, 1, new int[]{0x73FFFFFF, 0x14FFFFFF, 0x2EFFFFFF},
                 new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP);
         rim.setStyle(Paint.Style.STROKE);
         rim.setStrokeWidth(1.5f);
         rim.setShader(rimGradient);
 
-        // Specular highlight across the top of a focused icon.
+        // The highlight across the top of a focused icon.
         sheenGradient = new LinearGradient(0, 0, 0, 1, 0x3DFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP);
         sheen.setShader(sheenGradient);
 
@@ -457,10 +468,10 @@ final class HomeView extends View {
         chevron.moveTo(-17f, 5f);
         chevron.lineTo(0f, -4f);
         chevron.lineTo(17f, 5f);
-        hintChevron.moveTo(-24.5f, 4f); // tvOS's: wide and shallow
+        hintChevron.moveTo(-24.5f, 4f); // wide and shallow
         hintChevron.lineTo(0f, -4f);
         hintChevron.lineTo(24.5f, 4f);
-        pagerChevron.moveTo(-5f, -10f); // pointing right; mirrored for left
+        pagerChevron.moveTo(-5f, -10f); // points right (mirrored for the left arrow)
         pagerChevron.lineTo(5f, 0f);
         pagerChevron.lineTo(-5f, 10f);
         a11y = new A11y(this, new Accessible());
@@ -509,15 +520,15 @@ final class HomeView extends View {
         light = host.lightAppearance();
     }
 
-    /** Settings > Appearance changed (or was read): the rows of programs and Settings follow. */
+    /** Sets the appearance (Settings > Appearance) of the rows of programs and of Settings. */
     void setLight(boolean on) {
         light = on;
         kick();
     }
 
-    // ---- State from the activity -------------------------------------------------------------
+    // State from the activity
 
-    /** False while editing: the arrangement being edited wins, and the caller retries later. */
+    /** Sets the apps. Returns false during an edit. Then the caller tries again later. */
     boolean setApps(List<Apps.Entry> visible, List<Apps.Entry> hiddenApps) {
         if (editing || renaming) return false;
         Apps.Entry was = focused(), wasInFolder = folderEntry();
@@ -527,14 +538,14 @@ final class HomeView extends View {
         hidden.clear();
         hidden.addAll(hiddenApps);
         if (apps.isEmpty() && !hidden.isEmpty()) {
-            // Everything hidden would leave nothing to focus, and no way back to Hidden: keep one out.
+            // If all apps are hidden, one app stays visible, so that the focus has a target.
             apps.add(hidden.remove(0));
             host.saveLayout(new ArrayList<>(apps), new ArrayList<>(hidden));
         }
         if (hidden.isEmpty()) showHidden = false;
         focus = Math.max(0, Math.min(focus, apps.size() - 1));
         if (was != null) {
-            // Back on the same app, among the hidden ones too while Hidden is open.
+            // Keeps the focus on the same app, also on the hidden apps while Hidden is open.
             for (int i = 0; i < total(); i++) {
                 if (entry(i).pkg.equals(was.pkg)) {
                     focus = i;
@@ -550,7 +561,7 @@ final class HomeView extends View {
         return true;
     }
 
-    /** After a reload: the same folder (a new object now), on the same app, or closed if it's gone. */
+    /** After a reload: opens the same folder (a new object) on the same app, or closes it if it is gone. */
     private void reopenFolder(String key, Apps.Entry was) {
         Apps.Entry tile = null;
         for (Apps.Entry e : apps) if (e.pkg.equals(key)) tile = e;
@@ -565,7 +576,7 @@ final class HomeView extends View {
         folderFocus = at >= 0 ? at : Math.min(folderFocus, in.size() - 1);
     }
 
-    /** Whether a tile is still on the home screen, in Hidden, or in a folder. */
+    /** Returns true if a tile is on the home screen, in Hidden or in a folder. */
     private boolean onScreen(Apps.Entry e) {
         if (e == null) return false;
         if (apps.contains(e) || hidden.contains(e)) return true;
@@ -578,7 +589,8 @@ final class HomeView extends View {
         previous = backdrop;
         backdrop = b;
         fade = previous == null ? 1f : 0f;
-        // Not from a full-screen picture: the darkening baked into it would dull the hint fading out.
+        // A full-screen picture does not set the hint colour, because its details scrim makes the hint darker as it
+        // fades out.
         if (!b.details) hintTint = vibrant(b.hintColor);
         if (expanded) page = pageOf(b.program);
         setRow(b.row != null ? b.row : Collections.<Backdrops.Card>emptyList());
@@ -586,8 +598,8 @@ final class HomeView extends View {
     }
 
     /**
-     * A new row of cards: keep the focused card where it was if it's still there (more cards just
-     * arrived), else start again at the first. Section titles are worked out here, not per frame.
+     * Sets a new row of cards. The focus stays on the same card if it is in the new row, else it goes to the first
+     * card. The section titles are calculated here.
      */
     private void setRow(List<Backdrops.Card> cards) {
         if (cards == rowCards) return;
@@ -618,7 +630,7 @@ final class HomeView extends View {
             rowTitleWidths[i] = rowTitleText.measureText(rowTitles[i]);
         }
         if (!same) {
-            marqueeCard = -1; // more cards arriving for the same row leave a scrolling title alone
+            marqueeCard = -1; // a new row with more cards keeps a title that scrolls
             rowIndex = 0;
             rowScroll = 0f;
         } else {
@@ -627,7 +639,7 @@ final class HomeView extends View {
         }
     }
 
-    /** The focused app's top shelf has more pages ready (downloaded since). */
+    /** The top shelf of the focused app has more pages ready. */
     void shelfPagesChanged() {
         if (!expanded) return;
         Apps.Entry e = focused();
@@ -641,7 +653,7 @@ final class HomeView extends View {
         return 0;
     }
 
-    /** The paging controls appear, and fade a moment later. */
+    /** Shows the page controls. They fade out after PAGER_SHOWN_MS. */
     private void showPager() {
         pagerShown = true;
         removeCallbacks(hidePager);
@@ -650,8 +662,8 @@ final class HomeView extends View {
     }
 
     /**
-     * Text over the backdrop the way tvOS tints it: the colour behind, much lighter and a little
-     * less saturated (green field, pale green text); over a bright picture, much darker instead.
+     * Returns the text colour over the backdrop: the colour behind, much lighter and a little less saturated. Over a
+     * bright picture, it is much darker.
      */
     private static int vibrant(int behind) {
         float[] hsv = new float[3];
@@ -665,15 +677,15 @@ final class HomeView extends View {
         return (0.2126f * Color.red(c) + 0.7152f * Color.green(c) + 0.0722f * Color.blue(c)) / 255f;
     }
 
-    /** The account's avatar (already round), shown in the clock pill. */
+    /** Sets the round avatar of the account in the clock pill. */
     void setAvatar(Bitmap round) {
         avatar = round;
         kick();
     }
 
-    /** Home pressed while already home: back to the top row, everything closed. */
+    /** The Home key on the home screen: goes to the top row and closes all overlays. */
     void goHome() {
-        if (setupOpen && !setupFlow.staysOnHome()) closeSetup(); // setup waits for the user to come back to it
+        if (setupOpen && !setupFlow.staysOnHome()) closeSetup(); // setup stays open until the user goes back to it
         closeSettings();
         alertEntry = null;
         closeMenu();
@@ -689,7 +701,7 @@ final class HomeView extends View {
         focusChanged();
     }
 
-    /** Opens the Control Center (the clock pill was selected). */
+    /** Opens the Control Center. */
     void openControlCenter() {
         closeMenu();
         if (editing) finishEditing();
@@ -729,12 +741,12 @@ final class HomeView extends View {
     }
 
     private void tick() {
-        // "9:41 AM" as on tvOS, in the TV's own language and conventions, 12- or 24-hour as Settings says.
+        // "9:41 AM" in the language and conventions of the TV, 12-hour or 24-hour as set in Settings.
         Locale locale = Locale.getDefault();
         String pattern = DateFormat.getBestDateTimePattern(locale, host.use24Hour() ? "Hm" : "hm");
-        SimpleDateFormat format = new SimpleDateFormat(pattern, locale); // once a minute: cheap
-        format.setTimeZone(TimeZone.getDefault()); // follow time-zone changes
-        // AM and PM in capitals, as tvOS writes them, whatever the language's own case ("pm" in English (India)).
+        SimpleDateFormat format = new SimpleDateFormat(pattern, locale); // made once a minute
+        format.setTimeZone(TimeZone.getDefault()); // applies time zone changes
+        // AM and PM in capital letters, in all languages.
         DateFormatSymbols symbols = format.getDateFormatSymbols();
         String[] ampm = symbols.getAmPmStrings();
         for (int i = 0; i < ampm.length; i++) ampm[i] = ampm[i].toUpperCase(locale);
@@ -742,15 +754,15 @@ final class HomeView extends View {
         format.setDateFormatSymbols(symbols);
         time = format.format(new Date());
         timeWidth = clockText.measureText(time);
-        if (ccOpen) cc.setState(host.controlState()); // sleep-timer countdown, network changes
+        if (ccOpen) cc.setState(host.controlState()); // sleep timer countdown, network changes
         kick();
         long now = System.currentTimeMillis();
         postDelayed(tick, 60_000 - now % 60_000 + 20);
     }
 
-    // ---- Input -------------------------------------------------------------------------------
+    // Input
 
-    /** Every key can move focus or change what's on screen, so screen readers hear about it after each. */
+    /** Each key can move the focus or change the screen, so screen readers get an update after each key. */
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
         boolean handled = super.dispatchKeyEvent(e);
@@ -771,22 +783,22 @@ final class HomeView extends View {
 
     @Override
     public boolean onKeyDown(int code, KeyEvent e) {
-        if (downHeld && code != KeyEvent.KEYCODE_DPAD_DOWN) downHeld = false; // another key cancels the reveal
+        if (downHeld && code != KeyEvent.KEYCODE_DPAD_DOWN) downHeld = false; // another key cancels the long press
         if (setupOpen) {
-            if (isSelect(code)) return true; // acts on release, like the menu
+            if (isSelect(code)) return true; // acts on release
             return setupFlow.key(code) || super.onKeyDown(code, e);
         }
         if (settingsOpen) {
-            if (isSelect(code)) return true; // acts on release, like the menu
+            if (isSelect(code)) return true; // acts on release
             return settings.key(code) || super.onKeyDown(code, e);
         }
         if (alertEntry != null) {
-            if (isSelect(code)) return true; // acts on release, like the menu
+            if (isSelect(code)) return true; // acts on release
             return alertKey(code) || super.onKeyDown(code, e);
         }
         if (menuOpen) {
-            // Select acts on release (see onKeyUp): a held remote key repeats, and those repeats
-            // must not pick a menu item the moment the long press opens the menu.
+            // Select acts on release (see onKeyUp). The repeats of a held key do not select a menu option when the long
+            // press opens the menu.
             if (isSelect(code)) return true;
             return menuKey(code) || super.onKeyDown(code, e);
         }
@@ -825,7 +837,7 @@ final class HomeView extends View {
         }
         if (pillFocused) {
             switch (code) {
-                case KeyEvent.KEYCODE_DPAD_DOWN: // back where Up came from: the shelf's Play button, or the dock
+                case KeyEvent.KEYCODE_DPAD_DOWN: // back to the origin of Up: the Play button of the shelf, or the dock
                     navSound(0, 1);
                     pillFocused = false;
                     kick();
@@ -862,7 +874,7 @@ final class HomeView extends View {
                 case KeyEvent.KEYCODE_DPAD_RIGHT:
                     int d = code == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1;
                     if (expanded) turnPage(d);
-                    else if (rowIndex + d >= 0 && rowIndex + d < rowCards.size()) { // along the row, no wrapping
+                    else if (rowIndex + d >= 0 && rowIndex + d < rowCards.size()) { // along the row, with no wrap
                         navSound(d, 0);
                         rowIndex += d;
                         kick();
@@ -877,9 +889,9 @@ final class HomeView extends View {
             case KeyEvent.KEYCODE_DPAD_RIGHT: move(1, 0); return true;
             case KeyEvent.KEYCODE_DPAD_UP: move(0, -1); return true;
             case KeyEvent.KEYCODE_DPAD_DOWN:
-                if (swallowDown && e.getRepeatCount() > 0) return true; // still held from the reveal
+                if (swallowDown && e.getRepeatCount() > 0) return true; // Down is still held from the reveal of Hidden
                 if (canRevealHidden()) {
-                    // Held on the last row: an arrow appears, a ring fills round it, then Hidden opens.
+                    // Down held on the last row: an arrow shows, a ring fills around it, then Hidden opens.
                     if (e.getRepeatCount() == 0) {
                         downHeld = true;
                         downAt = SystemClock.uptimeMillis();
@@ -898,7 +910,7 @@ final class HomeView extends View {
     @Override
     public boolean onKeyLongPress(int code, KeyEvent e) {
         if (isSelect(code) && ccOpen && cc.selected == ControlCenter.POWER) {
-            longPressed = true; // so the release doesn't also power off
+            longPressed = true; // the release does not also power off
             playSoundEffect(SoundEffectConstants.CLICK);
             host.releasePower();
             return true;
@@ -922,7 +934,7 @@ final class HomeView extends View {
             } else if (alertEntry != null) {
                 if (!longPressed) activateAlert();
             } else if (menuOpen) {
-                if (!longPressed) activateMenu(); // the release of the opening long press picks nothing
+                if (!longPressed) activateMenu(); // the release of the long press that opened the menu selects nothing
             } else if (e.isTracking() && !e.isCanceled() && !longPressed) {
                 select();
             }
@@ -944,13 +956,12 @@ final class HomeView extends View {
     }
 
     /**
-     * D-pad movement over the grid. The hidden apps form a second section below the visible ones,
-     * shown while an app is being moved or once revealed; moving a picked-up app between the
-     * sections hides or unhides it.
+     * Moves the focus in the grid with the D-pad. The hidden apps are a second section below the visible apps. It shows
+     * while an app moves or after a reveal. An app that moves between the sections becomes hidden or visible.
      */
     private void move(int dx, int dy) {
         int v = apps.size(), total = total();
-        if (total == 0) { // nothing to focus (it shouldn't happen): Up still reaches the clock pill
+        if (total == 0) { // no tile to focus: Up goes to the clock pill
             if (dy < 0 && !editing) {
                 navSound(0, -1);
                 focusPill();
@@ -973,7 +984,7 @@ final class HomeView extends View {
                 if (editing) list.add(to, list.remove(local));
                 focus = base + to;
             } else if (!inHidden && (editing ? v > 1 && apps.get(local).folder == null : showHidden && !hidden.isEmpty())) {
-                // Into the hidden section (moving an app there hides it; at least one app stays).
+                // Into the hidden section. An app that moves there becomes hidden. At least one app stays visible.
                 int to = Math.min(col, hidden.size() - (editing ? 0 : 1));
                 if (editing) hidden.add(to, apps.remove(local));
                 focus = apps.size() + to;
@@ -985,7 +996,7 @@ final class HomeView extends View {
             if (editing) list.add(to, list.remove(local));
             focus = base + to;
         } else if (inHidden) {
-            // Up out of the hidden section, into the last row of apps (unhides a held app).
+            // Up from the hidden section to the last row of apps. A held app becomes visible.
             int lastRow = v == 0 ? 0 : ((v - 1) / COLS) * COLS;
             if (editing) {
                 int to = Math.min(lastRow + col, v);
@@ -993,12 +1004,12 @@ final class HomeView extends View {
                 focus = to;
             } else if (v > 0) {
                 focus = Math.min(lastRow + col, v - 1);
-                showHidden = false; // leaving Hidden folds it away again
+                showHidden = false; // Hidden closes
             } else {
                 return;
             }
         } else if (!editing) {
-            // Up from the dock: a full-screen top shelf, or a small one's card, else the clock pill.
+            // Up from the dock: the full-screen top shelf, the card of a row shelf, else the clock pill.
             navSound(0, -1);
             int shelf = shelf();
             if (shelf == FULL_SHELF) {
@@ -1023,7 +1034,7 @@ final class HomeView extends View {
         kick();
     }
 
-    /** The system's navigation click (silent when System sounds are off in Settings). */
+    /** Plays the navigation sound of the system. It is silent when System sounds are off in Settings. */
     private void navSound(int dx, int dy) {
         playSoundEffect(dx < 0 ? SoundEffectConstants.NAVIGATION_LEFT
                 : dx > 0 ? SoundEffectConstants.NAVIGATION_RIGHT
@@ -1064,7 +1075,7 @@ final class HomeView extends View {
         if (e == null) return;
         playSoundEffect(SoundEffectConstants.CLICK);
         if (editing) {
-            finishEditing(); // drop it here, and that's the edit done
+            finishEditing(); // drops the app and ends the edit
             return;
         }
         if (e.folder != null) {
@@ -1074,7 +1085,7 @@ final class HomeView extends View {
         Recommendations.Item program = rowFocused && rowIndex < rowCards.size() ? rowCards.get(rowIndex).item()
                 : backdrop != null ? backdrop.program : null;
         if ((expanded || rowFocused) && program != null && program.pkg().equals(e.pkg)) {
-            // Play on the top shelf: what's shown (as on tvOS), zooming out of the picture, or the focused card.
+            // Play on the top shelf: the launch animation starts from the picture or from the focused card.
             RectF out = expanded ? new RectF(0, 0, W, height) : rowCardRect(rowIndex, 1f, new RectF());
             Rect from = new Rect(Math.round(out.left * scale), Math.round(out.top * scale),
                     Math.round(out.right * scale), Math.round(out.bottom * scale));
@@ -1086,7 +1097,7 @@ final class HomeView extends View {
         host.launch(e, tileRect(e, lift() - scroll));
     }
 
-    /** A focused tile's on-screen rect, so the system zooms the app it launches out of it. */
+    /** Returns the bounds of a focused tile on the screen, for the launch animation of the app. */
     private Rect tileRect(Apps.Entry e, float offset) {
         float w = TILE_W * FOCUS_SCALE, h = TILE_H * FOCUS_SCALE;
         float cx = e.x + TILE_W / 2f, cy = e.y + TILE_H / 2f + offset;
@@ -1103,7 +1114,7 @@ final class HomeView extends View {
         if (editing) {
             finishEditing();
         } else if (focus >= apps.size()) {
-            // Out of Hidden, back to the dock.
+            // Closes Hidden and goes back to the dock.
             showHidden = false;
             focus = Math.max(0, Math.min((focus - apps.size()) % COLS, apps.size() - 1));
             focusChanged();
@@ -1114,21 +1125,21 @@ final class HomeView extends View {
     }
 
     /**
-     * The full-screen top shelf, as on tvOS: the dock and clock slide away and the picture fills the
-     * screen. With pages to turn, arrows and page dots show for a moment. Select plays what's shown.
+     * Opens or closes the full-screen top shelf: the dock and the clock move off the screen and the picture fills the
+     * screen. If there are pages, the arrows and page dots show for a short time. Select plays the program.
      */
     private void setExpanded(boolean on) {
         if (on == expanded) {
-            kick(); // the caller may have changed focus around it (Down out of the row, say): redraw
+            kick(); // the caller can change the focus around it: draw again
             return;
         }
         expanded = on;
-        host.setFullScreen(on); // its pictures without the dock's scrims
+        host.setFullScreen(on); // its pictures have the details scrim
         if (on) {
             Apps.Entry e = focused();
             pages = e != null ? host.shelfPages(e) : Collections.emptyList();
             page = pageOf(backdrop != null ? backdrop.program : null);
-            playRect.setEmpty(); // placed when first drawn, for this program's width: screen readers wait
+            playRect.setEmpty(); // set at the first draw: screen readers wait
             showPager();
         } else {
             removeCallbacks(hidePager);
@@ -1137,7 +1148,7 @@ final class HomeView extends View {
         kick();
     }
 
-    /** Left or Right on the full-screen shelf: the app's previous or next page (no wrapping, as on tvOS). */
+    /** Left or Right on the full-screen shelf: the previous or next page of the app, with no wrap. */
     private void turnPage(int d) {
         Apps.Entry e = focused();
         int to = page + d;
@@ -1149,7 +1160,7 @@ final class HomeView extends View {
         showPager();
     }
 
-    /** The top shelf showing for the focused dock app (only once its backdrop is the one on screen). */
+    /** Returns the kind of top shelf of the focused dock app, when its backdrop shows. */
     private int shelf() {
         Apps.Entry e = focused();
         Backdrops.Backdrop b = backdrop;
@@ -1158,8 +1169,8 @@ final class HomeView extends View {
     }
 
     /**
-     * Edit Home Screen, as on tvOS: the chosen app is picked up and wiggles, the arrows move it (into
-     * or out of Hidden too), and select (or Back) drops it and ends the edit.
+     * Starts Edit Home Screen. The selected app moves with the arrow keys, also into or out of Hidden. Select or Back
+     * drops it and ends the edit.
      */
     private void startEditing() {
         editing = true;
@@ -1174,14 +1185,14 @@ final class HomeView extends View {
             kick();
             return;
         }
-        // Dropped among the hidden apps: stay there. Otherwise, Hidden folds away.
+        // An app dropped in the hidden section keeps Hidden open. Else, Hidden closes.
         showHidden = focus >= apps.size() && !hidden.isEmpty();
         if (showHidden && !editFromHidden) host.showHiddenHint();
         if (focus >= total()) focus = Math.max(0, apps.size() - 1);
         focusChanged();
     }
 
-    /** Held Down long enough on the last row: drop into the Hidden section with a little bounce. */
+    /** Opens the Hidden section after a long press of Down on the last row, with a small bounce. */
     private void revealHidden() {
         downHeld = false;
         swallowDown = true;
@@ -1190,7 +1201,7 @@ final class HomeView extends View {
         bounceAt = SystemClock.uptimeMillis();
         navSound(0, 1);
         focusChanged();
-        a11y.sync(); // the hold finishes between key events
+        a11y.sync(); // the long press ends between key events
     }
 
     private boolean canRevealHidden() {
@@ -1198,15 +1209,15 @@ final class HomeView extends View {
         return !editing && !showHidden && !hidden.isEmpty() && focus < v && focus / COLS == (v - 1) / COLS;
     }
 
-    // ---- Folders -----------------------------------------------------------------------------
+    // Folders
 
-    /** Opens a folder over the home screen, as on tvOS, focused on one of its apps. */
+    /** Opens a folder over the home screen, with the focus on one of its apps. */
     private void openFolder(Apps.Entry tile, int at) {
         openFolder = shownFolder = tile;
         folderName = tile.label;
         folderFocus = Math.max(0, Math.min(at, tile.folder.apps.size() - 1));
         folderScroll = 0f;
-        for (Apps.Entry e : tile.folder.apps) e.x = Float.NaN; // laid out afresh inside it
+        for (Apps.Entry e : tile.folder.apps) e.x = Float.NaN; // laid out again in the folder
         closeMenu();
         kick();
         a11y.sync();
@@ -1218,13 +1229,13 @@ final class HomeView extends View {
         focusChanged();
     }
 
-    /** The app focused inside the open folder, or null (none open, or its name is focused). */
+    /** Returns the focused app in the open folder, or null if no folder is open or its name has the focus. */
     private Apps.Entry folderEntry() {
         return openFolder != null && folderFocus >= 0 && folderFocus < openFolder.folder.apps.size()
                 ? openFolder.folder.apps.get(folderFocus) : null;
     }
 
-    /** Keys inside an open folder (select is handled on release, in {@link #select}). */
+    /** Handles the keys in an open folder. {@link #select} handles Select on release. */
     private boolean folderKey(int code) {
         switch (code) {
             case KeyEvent.KEYCODE_DPAD_LEFT -> folderMove(-1, 0);
@@ -1244,7 +1255,9 @@ final class HomeView extends View {
         return true;
     }
 
-    /** Arrows in a folder: its apps four to a row, its name above them. A picked-up app moves along. */
+    /**
+     * Moves the focus in a folder: four apps in each row, with the name above them. A held app moves with the focus.
+     */
     private void folderMove(int dx, int dy) {
         List<Apps.Entry> in = openFolder.folder.apps;
         int n = in.size(), at = folderFocus;
@@ -1276,7 +1289,7 @@ final class HomeView extends View {
         kick();
     }
 
-    /** Selecting a folder's name: type a new one on the TV's keyboard, shown live in its place. */
+    /** Starts the rename of a folder: the user types a new name on the TV keyboard, and the name updates in place. */
     private void startRename() {
         Apps.Entry tile = openFolder;
         renaming = true;
@@ -1321,11 +1334,11 @@ final class HomeView extends View {
         return FOLDER_TOP + 44f + (i / FOLDER_COLS) * ROW_PITCH;
     }
 
-    // ---- Move to… ----------------------------------------------------------------------------
+    // Move to…
 
     /**
-     * Takes an app out of wherever it is: the home screen, Hidden, or a folder (a folder left
-     * empty goes too). Returns where it was in that list.
+     * Removes an app from its location: the home screen, Hidden or a folder. An empty folder is removed too. Returns
+     * the index of the app in that list.
      */
     private int detach(Apps.Entry e) {
         int at = apps.indexOf(e);
@@ -1351,7 +1364,7 @@ final class HomeView extends View {
         host.saveLayout(new ArrayList<>(apps), new ArrayList<>(hidden));
     }
 
-    /** New Folder: a folder in the app's place holding it, opened on it, as on tvOS. */
+    /** New Folder: puts a new folder that contains the app at the position of the app, and opens it. */
     private void moveToNewFolder(Apps.Entry e) {
         boolean wasHidden = hidden.contains(e);
         int at = detach(e);
@@ -1364,7 +1377,7 @@ final class HomeView extends View {
         openFolder(folder, 0);
     }
 
-    /** Into a folder: added at its end, and the folder opens on it. */
+    /** Adds the app to the end of a folder and opens the folder on it. */
     private void moveToFolder(Apps.Entry e, Apps.Entry folder) {
         boolean wasHidden = hidden.contains(e);
         detach(e);
@@ -1377,8 +1390,8 @@ final class HomeView extends View {
     }
 
     /**
-     * Whether {@code e} can go to Hidden and still leave a tile on the home screen: not the last
-     * tile, nor the only app of a folder that's the last tile (the folder would go with it).
+     * Returns true if {@code e} can move to Hidden and one tile stays on the home screen. It cannot be the last tile,
+     * or the only app of a folder that is the last tile.
      */
     private boolean canHide(Apps.Entry e) {
         if (hidden.contains(e)) return false;
@@ -1388,7 +1401,7 @@ final class HomeView extends View {
         return last.folder != null && last.folder.apps.size() > 1;
     }
 
-    /** Into Hidden: greyed out at its end; at least one tile stays on the home screen. */
+    /** Moves the app to the end of Hidden, greyed out. At least one tile stays on the home screen. */
     private void moveToHidden(Apps.Entry e) {
         if (!canHide(e)) return;
         Apps.Entry folder = openFolder;
@@ -1398,7 +1411,7 @@ final class HomeView extends View {
         host.showHiddenHint();
         if (folder != null) {
             if (!apps.contains(folder)) {
-                openFolder = null; // that was its last app
+                openFolder = null; // the folder had no other app
             } else {
                 folderFocus = Math.min(folderFocus, folder.folder.apps.size() - 1);
             }
@@ -1408,8 +1421,8 @@ final class HomeView extends View {
     }
 
     /**
-     * Back onto the home screen, from a folder (next to it, or in its place if it was the last app)
-     * or from Hidden (at the end). As on tvOS it lands picked up, to be put where it belongs.
+     * Moves the app back to the home screen. From a folder, the app goes next to the folder (or to its position if it
+     * was the last app). From Hidden, the app goes to the end. The app is then held, so that the user can move it.
      */
     private void moveToHome(Apps.Entry e) {
         int at;
@@ -1433,7 +1446,7 @@ final class HomeView extends View {
         startEditing();
     }
 
-    // ---- Long-press menu ---------------------------------------------------------------------
+    // Long-press menu
 
     private void openMenu() {
         Apps.Entry e = openFolder != null ? folderEntry() : focused();
@@ -1444,7 +1457,7 @@ final class HomeView extends View {
         menuSelAnim = 0f;
         subOf = -1;
         subAnim = 0f;
-        menuBox.setEmpty(); // placed when first drawn: till then screen readers wait (see A11y.drawn)
+        menuBox.setEmpty(); // set at the first draw: screen readers wait (see A11y.drawn)
         subBox.setEmpty();
         menuOpen = true;
         kick();
@@ -1457,9 +1470,8 @@ final class HomeView extends View {
     }
 
     /**
-     * tvOS's options first (Edit Home Screen, Move to…), then the two top-shelf sources for apps
-     * that publish them, App Info, and Delete App for apps that can be uninstalled. A folder can
-     * only be moved.
+     * Builds the menu: Edit Home Screen and Move to…, then the two top shelf sources for apps that publish them. Then
+     * App Info, and Delete App for apps that the user can uninstall. A folder has only Move to….
      */
     private void buildMenu(Apps.Entry e) {
         menuRows.clear();
@@ -1475,7 +1487,9 @@ final class HomeView extends View {
         menuWidth = listWidth(menuRows);
     }
 
-    /** Where the app can go: the home screen (from a folder or Hidden), a new folder, other folders, Hidden. */
+    /**
+     * Builds the Move to… list: the home screen (from a folder or Hidden), a new folder, the other folders, and Hidden.
+     */
     private void buildMoveTo(Apps.Entry e) {
         subRows.clear();
         boolean inFolder = openFolder != null, isHidden = hidden.contains(e);
@@ -1488,7 +1502,10 @@ final class HomeView extends View {
         subWidth = listWidth(subRows);
     }
 
-    /** The top shelf's two sources, each a switch: the shelf shows either, both, or neither (then the app's logo). */
+    /**
+     * Builds the Top Shelf… list: one switch for each source. The shelf shows one, both or none (then the logo of the
+     * app).
+     */
     private void buildTopShelf(Apps.Entry e) {
         subRows.clear();
         int sources = host.shelfSources(e);
@@ -1510,7 +1527,7 @@ final class HomeView extends View {
         rows.add(new MenuRow(fit(label, menuText, 640f), icon, kind, action, checked));
     }
 
-    /** Wide enough for the longest option in any language: the icon column, its text, a chevron. */
+    /** Returns the width for the longest option: the icon column, the text and a chevron. */
     private float listWidth(List<MenuRow> rows) {
         float w = 0f;
         for (MenuRow row : rows) w = Math.max(w, menuText.measureText(row.label()) * 1.04f);
@@ -1528,7 +1545,7 @@ final class HomeView extends View {
         kick();
     }
 
-    /** Keys while the menu is open; false lets anything else (volume…) through. */
+    /** Handles the keys while the menu is open. Returns false for other keys (for example, volume). */
     private boolean menuKey(int code) {
         boolean sub = subOf >= 0;
         switch (code) {
@@ -1540,7 +1557,7 @@ final class HomeView extends View {
                 if (sub) subSel = to; else menuSel = to;
             }
             case KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                // Toward the second list opens it; away from it (or from the menu) closes.
+                // The arrow toward the second list opens it. The arrow away from it closes it, or closes the menu.
                 boolean toward = (code == KeyEvent.KEYCODE_DPAD_RIGHT) != subLeftGuess();
                 if (sub) {
                     if (!toward) subOf = -1;
@@ -1562,7 +1579,9 @@ final class HomeView extends View {
         return true;
     }
 
-    /** Whether the second list would open to the left: not enough room to the right of the menu. */
+    /**
+     * Returns true if the second list opens to the left because there is not sufficient space at the right of the menu.
+     */
     private boolean subLeftGuess() {
         return subOf >= 0 ? subLeft : menuBox.right - 24f + Math.max(subWidth, 380f) > W - 30f;
     }
@@ -1573,7 +1592,7 @@ final class HomeView extends View {
             MenuRow row = subRows.get(subSel);
             if (row.checked() != null) {
                 row.action().run();
-                subBuilder.run(); // a switch: show its new state, and stay open
+                subBuilder.run(); // a switch: shows its new state and stays open
             } else {
                 closeMenu();
                 row.action().run();
@@ -1590,9 +1609,9 @@ final class HomeView extends View {
         kick();
     }
 
-    // ---- Delete alert ------------------------------------------------------------------------
+    // Delete alert
 
-    /** "Delete “App”?", as on tvOS: Cancel first and focused, Delete in red. */
+    /** Opens the alert "Delete “App”?": Cancel first and focused, Delete in red. */
     private void openAlert(Apps.Entry e) {
         alertEntry = e;
         alertSel = 0;
@@ -1632,9 +1651,9 @@ final class HomeView extends View {
         kick();
     }
 
-    // ---- Setup and Settings ------------------------------------------------------------------
+    // Setup and Settings
 
-    /** First run: the setup steps, from Welcome. */
+    /** Opens the first-launch setup at Welcome. */
     void openSetup() {
         closeAll();
         setupOpen = true;
@@ -1642,7 +1661,7 @@ final class HomeView extends View {
         kick();
     }
 
-    /** From Settings: the steps this TV still needs to hand atvOS the Home button. */
+    /** Opens the setup steps that this TV needs to give the Home button to atvOS. */
     private void openSetupSteps() {
         closeAll();
         setupOpen = true;
@@ -1651,7 +1670,7 @@ final class HomeView extends View {
         a11y.sync();
     }
 
-    /** Settings, full screen, from the switches in Control Center. */
+    /** Opens Settings full screen. */
     void openSettings() {
         closeAll();
         setExpanded(false);
@@ -1678,7 +1697,7 @@ final class HomeView extends View {
         if (editing) finishEditing();
     }
 
-    /** Back from Settings, Android's home or account picker, or a package change: the setup moves on. */
+    /** Updates the setup after Settings, the home or account chooser of Android, or a package change. */
     void refreshSetup() {
         if (settingsOpen) settings.refresh();
         if (setupOpen) setupFlow.refresh();
@@ -1709,7 +1728,10 @@ final class HomeView extends View {
         kick();
     }
 
-    /** Tiles on screen: the visible apps, plus the hidden ones while editing or revealed. */
+    /**
+     * Returns the number of tiles on the screen: the visible apps, and the hidden apps during an edit or after a
+     * reveal.
+     */
     private int total() {
         return apps.size() + (editing || showHidden ? hidden.size() : 0);
     }
@@ -1728,20 +1750,20 @@ final class HomeView extends View {
     }
 
     private float slotY(int i) {
-        // Whole rows: the integer division is the row number.
+        // The integer division gives the row number.
         if (i < apps.size()) return DOCK_ROW_Y + (i / COLS) * ROW_PITCH;
         return hiddenTop() + ((i - apps.size()) / COLS) * ROW_PITCH;
     }
 
-    /** Top of the hidden section: below the last row of apps, with room for its title. */
+    /** Returns the top of the hidden section: below the last row of apps, with space for its title. */
     private float hiddenTop() {
         int rows = Math.max(1, (apps.size() + COLS - 1) / COLS);
         return DOCK_ROW_Y + rows * ROW_PITCH + HIDDEN_GAP;
     }
 
-    // ---- Animation ---------------------------------------------------------------------------
+    // Animation
 
-    /** Starts the frame loop; resets the clock if it was idle so the first step isn't a jump. */
+    /** Starts the frame loop. If the view was idle, it resets the frame time, so that the first step is small. */
     private void kick() {
         if (!animating) lastFrame = SystemClock.uptimeMillis() - 16;
         postInvalidateOnAnimation();
@@ -1760,7 +1782,7 @@ final class HomeView extends View {
         if (!dock && total() > 0) scrollTo = Math.max(DOCK_ROW_Y - GRID_TOP, slotY(focus) - FOCUS_LINE);
         scroll = ease(scroll, scrollTo, 10f, dt, 0.2f);
         away = ease(away, dock ? 0f : 1f, 8f, dt, 0.002f);
-        // A shelf that went away (its source switched off, say) can't stay selected.
+        // A shelf that is gone (for example, its source is off) cannot keep the focus.
         int shelf = shelf();
         if (expanded && shelf != FULL_SHELF) setExpanded(false);
         if (rowFocused && shelf != ROW_SHELF) rowFocused = false;
@@ -1770,12 +1792,12 @@ final class HomeView extends View {
         for (int i = 0; i < rowFocus.length; i++) {
             rowFocus[i] = ease(rowFocus[i], rowFocused && i == rowIndex && !pillFocused && !ccOpen ? 1f : 0f, 14f, dt, 0.002f);
         }
-        // tvOS keeps the focused card in the second place (the first, for the first card).
-        // (and finishes getting there after focus goes back down to the dock)
+        // The focused card stays in the second position (the first card in the first position). The scroll continues
+        // after the focus goes back to the dock.
         if (rowIndex < rowLefts.length) rowScroll = ease(rowScroll, rowLefts[Math.max(0, rowIndex - 1)] - ROW_X, 10f, dt, 0.2f);
         stepMarquee();
         boolean pager = expanded && pagerShown && pages.size() > 1 && !pillFocused && !ccOpen && !menuOpen && !setupOpen;
-        pagerAnim = ease(pagerAnim, pager ? 1f : 0f, pager ? 14f : 5f, dt, 0.002f); // fades away slowly
+        pagerAnim = ease(pagerAnim, pager ? 1f : 0f, pager ? 14f : 5f, dt, 0.002f); // fades out slowly
         editAnim = ease(editAnim, editing || showHidden ? 1f : 0f, 10f, dt, 0.002f);
         long now = SystemClock.uptimeMillis();
         if (downHeld) {
@@ -1831,11 +1853,11 @@ final class HomeView extends View {
         pillAnim = ease(pillAnim, pillFocused ? 1f : 0f, 16f, dt, 0.002f);
         ccAnim = ease(ccAnim, ccOpen ? 1f : 0f, 14f, dt, 0.002f);
         if (ccAnim > 0f && cc.step(dt)) animating = true;
-        // Bright backdrops get dark text. Account for what's layered over the image at each spot.
+        // Bright backdrops get dark text. The calculation includes the layers over the image at each location.
         float shade = 1f - 0.39f * away;
         Backdrops.Backdrop b = backdrop;
-        float clockLight = b == null ? 0f : (b.clockLight * shade) * 0.9f + 0.1f;   // + the pill's white tint
-        float ccLight = b == null ? 0f : b.controlsLight * 0.86f + 0.14f;            // + the tiles' white tint
+        float clockLight = b == null ? 0f : (b.clockLight * shade) * 0.9f + 0.1f;   // plus the white tint of the pill
+        float ccLight = b == null ? 0f : b.controlsLight * 0.86f + 0.14f;            // plus the white tint of the tiles
         clockInk = ease(clockInk, clockLight > 0.6f ? 1f : 0f, 6f, dt, 0.002f);
         ccInk = ease(ccInk, ccLight > 0.62f ? 1f : 0f, 6f, dt, 0.002f);
         fade = ease(fade, 1f, 9f, dt, 0.002f);
@@ -1851,11 +1873,13 @@ final class HomeView extends View {
             e.y = ease(e.y, sy, 14f, dt, 0.2f);
             e.focus = ease(e.focus, i == focus && !expanded && !rowFocused && !pillFocused ? 1f : 0f, 14f, dt, 0.002f);
         }
-        if (editing && motion) animating = true; // the picked-up app wiggles
+        if (editing && motion) animating = true; // the held app wiggles
         homeSig = homeFingerprint();
     }
 
-    /** Everything the home screen under the overlays shows, summed: it changes whenever any of it moves. */
+    /**
+     * Returns the sum of all values that the home screen under the overlays shows. It changes when one of them changes.
+     */
     private double homeFingerprint() {
         double f = scroll + away * 3 + expand * 5 + rowAnim * 7 + playFocus * 11 + rowScroll * 13 + pagerAnim * 17
                 + editAnim * 19 + downProgress * 23 + downAppear * 29 + bounce * 31 + hint * 37 + fade * 41
@@ -1870,9 +1894,8 @@ final class HomeView extends View {
     }
 
     /**
-     * The focused card's title, if it's too long for the card: still for a second, then scrolling
-     * round once, then resting two seconds at the start, and again. Frames are drawn only while it
-     * moves; a rest ends with a wake-up call.
+     * Scrolls the title of the focused card if it is too long. The cycle is one second of rest, one full scroll, two
+     * seconds of rest at the start, then again. Frames draw only while it moves. A delayed callback ends each rest.
      */
     private void stepMarquee() {
         int card = rowFocused && !pillFocused && !ccOpen && rowIndex < rowTitles.length
@@ -1901,19 +1924,19 @@ final class HomeView extends View {
         }
     }
 
-    /** How far the UI has slid down for the full-screen top shelf: the dock all the way off the screen. */
+    /** Returns the downward offset of the UI for the full-screen top shelf: the dock moves fully off the screen. */
     private float lift() {
         return expand * (height - (DOCK_ROW_Y - DOCK_PAD_Y) + 40f);
     }
 
-    // ---- Drawing -----------------------------------------------------------------------------
+    // Drawing
 
     @Override
     protected void onSizeChanged(int w, int h, int oldW, int oldH) {
         scale = w / W;
         height = h / scale;
-        frozenSig = homeBlurSig = Double.NaN; // the frozen home and its picture are the old size
-        // Behind the full-screen shelf's details: darkest at the bottom-left corner, in one pass.
+        frozenSig = homeBlurSig = Double.NaN; // the frozen home and its snapshot have the old size
+        // The details scrim of the full-screen shelf: darkest at the bottom-left corner, in one pass.
         detailsScrim.setShader(new RadialGradient(0f, height, Backdrops.DETAILS_SCRIM_RADIUS, Backdrops.DETAILS_SCRIM,
                 new float[]{0f, 0.5f, 1f}, Shader.TileMode.CLAMP));
         defaultAvatar = makeAvatar(Math.max(1, Math.round(AVATAR * scale)));
@@ -1928,12 +1951,12 @@ final class HomeView extends View {
         animating = false;
         motion = ValueAnimator.areAnimatorsEnabled();
         step(dt);
-        a11y.invalidate(); // things may have moved: TalkBack's next look gets them afresh
+        a11y.invalidate(); // items can move: screen readers list them again
 
         c.save();
         c.scale(scale, scale);
-        // An open folder covers the home screen with its blurred backdrop, and Settings covers
-        // everything: nothing under them shows.
+        // An open folder covers the home screen with its blurred backdrop, and Settings covers all. Nothing below them
+        // shows.
         if (settingsAnim > 0.999f) {
             settings.draw(c, 1f, height);
             c.restore();
@@ -1963,14 +1986,12 @@ final class HomeView extends View {
             removeCallbacks(snapAhead);
             post(snapAhead);
         }
-        a11y.drawn(); // what just opened has bounds now, for screen readers
+        a11y.drawn(); // an item that opened now has bounds, for screen readers
     }
 
     /**
-     * Under the Control Center the home screen holds still, so it's drawn once into a layer and that
-     * layer is drawn each frame, dimmed by its paint: one screen of pixels instead of the backdrop,
-     * the dock and its tiles plus a full-screen dimming pass. Drawn again only while something under
-     * it is still moving (a tile losing focus as the Control Center opens, say).
+     * Draws the home screen under the Control Center from a layer. The layer is recorded one time and drawn each frame,
+     * dimmed by its paint. It is recorded again only when the fingerprint changes.
      */
     private void drawFrozenHome(Canvas c, boolean covered) {
         if (homeNode == null) homeNode = new RenderNode("home");
@@ -1987,7 +2008,7 @@ final class HomeView extends View {
             if (wait <= 0) snapHome(covered, frozenSig);
             else postInvalidateDelayed(wait);
         }
-        homePaint.setColorFilter(dimFilter(Math.round(110 * ccAnim))); // the Control Center's dim
+        homePaint.setColorFilter(dimFilter(Math.round(110 * ccAnim))); // the dim of the Control Center
         homeNode.setUseCompositingLayer(true, homePaint);
         c.save();
         c.scale(1f / scale, 1f / scale);
@@ -1996,15 +2017,14 @@ final class HomeView extends View {
     }
 
     /**
-     * The home screen under the Control Center, cards and all, blurred like a backdrop for its glass:
-     * drawn by a second renderer into a buffer the blur's size, read back and blurred on the CPU.
-     * Some milliseconds, so taken ahead while the clock pill has focus and nothing moves (the
-     * home under the Control Center is the same), or as it opens, and again if the home moves.
-     * {@code sig} is the fingerprint of the home being drawn.
+     * Makes a blurred snapshot of the home screen under the Control Center, cards included, for its glass. A second
+     * renderer draws it into a buffer of the blur size. The CPU reads and blurs it. It runs while the clock pill has
+     * the focus and nothing moves, or when the Control Center opens, and again when the home screen changes.
+     * {@code sig}: the fingerprint of the home screen that it draws.
      */
     private void snapHome(boolean covered, double sig) {
         int w = Backdrops.BLUR_W, h = Math.max(1, Math.round(w * height / W));
-        homeBlurAt = SystemClock.uptimeMillis(); // tried, at least: the next try waits SNAP_MS
+        homeBlurAt = SystemClock.uptimeMillis(); // the next try waits SNAP_MS
         try {
             if (snapReader == null || snapReader.getWidth() != w || snapReader.getHeight() != h) {
                 releaseSnap();
@@ -2034,7 +2054,7 @@ final class HomeView extends View {
                 }
             }
             if (pixels == null) {
-                homeBlurShader = null; // the backdrop alone, rather than another home's
+                homeBlurShader = null; // the glass shows the backdrop only
                 return;
             }
             homeBlur = Backdrops.boxBlur(pixels);
@@ -2042,13 +2062,13 @@ final class HomeView extends View {
             homeBlurShader = new android.graphics.BitmapShader(homeBlur, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
             homeBlurSig = sig;
         } catch (RuntimeException e) {
-            // No offscreen rendering here: the glass shows the backdrop alone, as it used to.
+            // No offscreen renderer: the glass shows the backdrop only.
             snapUnavailable = true;
             releaseSnap();
         }
     }
 
-    /** The Control Center is likely next: its glass's picture of the home, taken while nothing moves. */
+    /** Makes the snapshot of the home screen while nothing moves, before the Control Center opens. */
     private void snapAhead() {
         if (animating || !pillFocused || ccAnim > 0f || homeBlurSig == homeSig || !isAttachedToWindow()) return;
         snapHome(folderCover() > 0.999f, homeSig);
@@ -2062,7 +2082,7 @@ final class HomeView extends View {
         snapNode = null;
     }
 
-    /** The home screen under the overlays: the backdrop, the row or details, the dock and grid, the pager. */
+    /** Draws the home screen under the overlays: the backdrop, the row or details, the dock and grid, and the pager. */
     private void drawHome(Canvas c, boolean covered) {
         if (!covered) drawBackground(c);
 
@@ -2071,7 +2091,7 @@ final class HomeView extends View {
             drawRow(c, offset);
             if (expand > 0.01f) drawDetails(c);
         }
-        // The dock and grid, unless covered by a folder or slid off the screen for the full-screen shelf.
+        // The dock and the grid, unless a folder covers them or they are off the screen for the full-screen shelf.
         if (!covered && expand < 0.999f) {
             c.save();
             c.translate(0, offset);
@@ -2079,7 +2099,7 @@ final class HomeView extends View {
             drawHiddenSection(c);
             int n = total();
             for (int i = 0; i < n; i++) if (i != focus) drawHomeTile(c, i, offset);
-            // The menu dims everything but its tile, as on tvOS.
+            // The menu dims all items except its tile.
             if (menuAnim > 0f && openFolder == null) c.drawColor(Color.argb(Math.round(100 * menuAnim), 0, 0, 0));
             if (focus < n) drawHomeTile(c, focus, offset);
             drawHint(c);
@@ -2090,11 +2110,8 @@ final class HomeView extends View {
     }
 
     /**
-     * The backdrop is the costliest thing on screen (each layer covers all 2 million pixels, and the
-     * TV's GPU manages about six a frame), so layers that can't be seen are skipped, the grid's
-     * dimming is folded into the image draw as a colour filter rather than a separate pass, and the
-     * scrims behind the dock and clock are baked into the pictures (the full-screen shelf shows
-     * them without: see {@link Host#setFullScreen}).
+     * Draws the backdrop and, during a crossfade, the previous backdrop. Layers that are not visible are skipped. The
+     * grid dim is a colour filter on the image draw. The scrims are in the pictures (see {@link Host#setFullScreen}).
      */
     private void drawBackground(Canvas c) {
         dim = Math.round(away * 100);
@@ -2104,7 +2121,7 @@ final class HomeView extends View {
         if (backdrop != null) drawBackdrop(c, backdrop, crossfading ? Math.round(255 * fade) : 255);
     }
 
-    /** Sharp, blurred, or (mid-transition) the blurred copy faded in over the sharp one. */
+    /** Draws the backdrop sharp, blurred, or during a transition the blurred copy over the sharp one. */
     private void drawBackdrop(Canvas c, Backdrops.Backdrop b, int alpha) {
         r.set(0, 0, W, height);
         if (away < 0.97f) {
@@ -2117,7 +2134,7 @@ final class HomeView extends View {
         }
     }
 
-    /** Darkens by {@code alpha}/255, exactly like a black overlay of that alpha. */
+    /** Returns a filter that darkens by {@code alpha}/255, as a black overlay with that alpha does. */
     private ColorFilter dimFilter(int alpha) {
         int a = Math.max(0, Math.min(255, alpha));
         if (a == 0) return null;
@@ -2129,15 +2146,17 @@ final class HomeView extends View {
     }
 
     /**
-     * A liquid-glass shape: the blurred backdrop, more saturated, under its tint and the screen's
-     * dim, and a rim. One pass for the glass however many backdrops are showing, then the rim.
-     * {@code offsetY} is the canvas' current y translation.
+     * Draws a glass shape: the blurred backdrop, more saturated, with its tint and the screen dim, then a rim. The
+     * glass is one pass for any number of backdrops. {@code offsetY}: the current y translation of the canvas.
      */
     private void drawGlass(Canvas c, RectF rect, float radius, float offsetY, int tint, int alpha) {
         drawGlass(c, rect, radius, offsetY, tint, alpha, false);
     }
 
-    /** {@code overHome}: glass over the whole home screen (the Control Center's), showing all of it, not just the backdrop. */
+    /**
+     * {@code overHome}: glass over the full home screen (the Control Center). It shows the snapshot of the home screen,
+     * not only the backdrop.
+     */
     private void drawGlass(Canvas c, RectF rect, float radius, float offsetY, int tint, int alpha, boolean overHome) {
         Bitmap blur = null;
         android.graphics.BitmapShader shader = null;
@@ -2156,7 +2175,7 @@ final class HomeView extends View {
             m.postTranslate(0f, -offsetY);
             shader.setLocalMatrix(m);
             glass.setShader(shader);
-            glass.setColorFilter(glassFilter(tint, overHome && blur == homeBlur ? 0 : dim)); // the home's picture is dimmed already
+            glass.setColorFilter(glassFilter(tint, overHome && blur == homeBlur ? 0 : dim)); // the snapshot is already dimmed
             glass.setAlpha(alpha);
             c.drawRoundRect(rect, radius, radius, glass);
         }
@@ -2168,20 +2187,22 @@ final class HomeView extends View {
     }
 
     /**
-     * The grey for type and glyphs on the controls' glass over {@code rect}: white, turning dark
-     * as the glass comes out bright (a white picture with no darkening there, say), as tvOS does.
+     * Returns the grey for text and glyphs on the glass over {@code rect}: white, and darker as the glass becomes
+     * brighter.
      */
     private int glassInk(RectF rect) {
         float light = lightUnder(backdrop, rect);
         if (previous != null) light = light * fade + lightUnder(previous, rect) * (1f - fade);
         float ta = Color.alpha(GLASS_TINT) / 255f;
-        light = light * (1f - ta) + ta; // under the glass's white tint
+        light = light * (1f - ta) + ta; // under the white tint of the glass
         float t = Math.max(0f, Math.min(1f, (light - INK_FROM) / (INK_TO - INK_FROM)));
         t = t * t * (3f - 2f * t);
         return Math.round(255 - (255 - INK_DARK) * t);
     }
 
-    /** Mean luminance (0–1) of a backdrop's blur under {@code rect}, in design units on the screen. */
+    /**
+     * Returns the mean luminance (0 to 1) of the blur of a backdrop under {@code rect}, in design units on the screen.
+     */
     private float lightUnder(Backdrops.Backdrop b, RectF rect) {
         if (b == null) return 0f;
         int bw = b.blur.getWidth(), bh = b.blur.getHeight();
@@ -2197,11 +2218,11 @@ final class HomeView extends View {
     }
 
     /**
-     * The glass's colour filter: the blur 30% more saturated, then the tint and the black dim laid
-     * over it as one fill would be (out = blur × (1 − a) + tint × its alpha), all in one matrix.
+     * Returns the colour filter of the glass. The filter makes the blur 30% more saturated, then adds the tint and the
+     * black dim as one fill: out = blur × (1 − a) + tint × its alpha. It is one matrix.
      */
     private ColorFilter glassFilter(int tint, int dimAlpha) {
-        int level = dimAlpha / 4; // the dim in 26 steps, as dimFilter
+        int level = dimAlpha / 4; // the dim in steps of 4
         for (int i = 0; i < glassFilters.length; i++) {
             if (glassFilters[i] != null && glassTints[i] == tint && glassDims[i] == level) return glassFilters[i];
         }
@@ -2223,9 +2244,8 @@ final class HomeView extends View {
     }
 
     /**
-     * The two backdrops' blurs mixed as far as the crossfade has gone, into {@link #mixedBlur}: 20
-     * thousand pixels on the CPU (well under a millisecond), so the glass draws one texture, not
-     * two. Done once a frame however many glass shapes there are. False if the blurs don't match.
+     * Mixes the blurs of the two backdrops into {@link #mixedBlur} for the progress of the crossfade, so that the glass
+     * draws one texture. It runs once a frame. Returns false if the blurs do not have the same size.
      */
     private boolean mixBlurs() {
         int[] from = previous.blurPixels, to = backdrop.blurPixels;
@@ -2260,7 +2280,7 @@ final class HomeView extends View {
         drawGlass(c, r, TILE_R + DOCK_PAD_Y, offset, GLASS_TINT, 255);
     }
 
-    /** A home-screen tile: greyed in Hidden, named when focused below the dock. */
+    /** Draws a home screen tile: greyed out in Hidden, with its name when it has the focus below the dock. */
     private void drawHomeTile(Canvas c, int i, float offset) {
         boolean isHidden = i >= apps.size();
         drawTile(c, entry(i), editing && openFolder == null && i == focus, isHidden, i >= COLS || isHidden, offset);
@@ -2276,12 +2296,12 @@ final class HomeView extends View {
 
         int save = c.save();
         if (held && motion) {
-            // The picked-up app wiggles, as on tvOS.
+            // The held app wiggles.
             double t = SystemClock.uptimeMillis() / 1000.0;
             c.rotate((float) Math.sin(t * Math.PI * 2 * 3.2) * 1.4f, cx, cy);
         }
         if (f > 0.01f && shadowMask != null) {
-            // Pre-blurred mask, scaled with the tile: no per-frame GPU blur.
+            // A blurred mask, scaled with the tile.
             float pad = SHADOW_PAD * w / (TILE_W * FOCUS_SCALE), dy = SHADOW_DY * f;
             r2.set(r.left - pad, r.top - pad + dy, r.right + pad, r.bottom + pad + dy);
             shadow.setAlpha(Math.round(165 * f * tileFade));
@@ -2311,7 +2331,7 @@ final class HomeView extends View {
         }
         c.restoreToCount(save);
 
-        // Names show under focused icons in the grid (not in the dock), as on tvOS.
+        // The name shows below a focused icon in the grid, not in the dock.
         if (f > 0.01f && named) {
             int a = Math.round(240 * f * tileFade);
             labelText.setColor(Color.argb(a, 255, 255, 255));
@@ -2323,7 +2343,7 @@ final class HomeView extends View {
         }
     }
 
-    /** A folder's tile, as on tvOS: frosted glass holding its first apps in miniature, three to a row. */
+    /** Draws the tile of a folder: frosted glass with its first apps in miniature, three in each row. */
     private void drawFolderTile(Canvas c, Apps.Entry e, RectF box, float radius, float offset) {
         drawGlass(c, box, radius, offset, 0x33FFFFFF, 255);
         List<Apps.Entry> in = e.folder.apps;
@@ -2342,15 +2362,15 @@ final class HomeView extends View {
     }
 
     /**
-     * An open folder, as on tvOS: the home screen out of focus behind it (the blurred backdrop over
-     * everything), its name in a pill above a large glass panel, its apps four to a row.
+     * Draws an open folder: the blurred backdrop over the home screen, and the name in a pill above a large glass
+     * panel. The panel shows the apps with four in each row.
      */
     private void drawFolder(Canvas c) {
         Apps.Entry tile = shownFolder;
         int alpha = Math.round(255 * folderAnim);
         if (alpha <= 2 || tile == null) return;
-        // The home screen goes out of focus first, quickly, so it can stop being drawn under the
-        // folder early on; the blur is darkened as it's drawn (one pass, not a blur and a dim).
+        // The blur of the home screen covers it first, quickly, so that the home screen stops early. The blur is
+        // darkened in the same draw.
         Backdrops.Backdrop b = backdrop;
         if (b != null) {
             r.set(0f, 0f, W, height);
@@ -2361,11 +2381,10 @@ final class HomeView extends View {
         float k = 0.94f + 0.06f * folderAnim, left = (W - FOLDER_W) / 2f, bottom = folderBottom();
         c.scale(k, k, W / 2f, height / 2f);
         r.set(left, FOLDER_TOP, left + FOLDER_W, bottom);
-        drawFrost(c, r, FOLDER_R, 0x55FFFFFF, alpha); // over the blur already: no second blur
+        drawFrost(c, r, FOLDER_R, 0x55FFFFFF, alpha); // over the blur: no second blur
         drawFolderName(c, alpha);
 
-        // Its apps, scrolled within the panel, each faded in as it opens (no offscreen layer). The
-        // menu dims all but its app.
+        // The apps scroll in the panel and each fades in as the folder opens. The menu dims all except its app.
         c.save();
         c.clipRect(left, FOLDER_TOP, left + FOLDER_W, bottom);
         tileFade = folderAnim;
@@ -2381,12 +2400,12 @@ final class HomeView extends View {
         c.restore();
     }
 
-    /** How opaque the out-of-focus home screen behind a folder is: ahead of the folder itself. */
+    /** Returns the opacity of the blurred home screen behind a folder. It leads the folder animation. */
     private float folderCover() {
         return Math.min(1f, folderAnim * 1.6f);
     }
 
-    /** Frosted glass over what's already blurred (an open folder's panel): its tint and rim, no second blur. */
+    /** Draws frosted glass over a blur (the panel of an open folder): its tint and rim, with no second blur. */
     private void drawFrost(Canvas c, RectF rect, float radius, int tint, int alpha) {
         fill.setColor(tint);
         fill.setAlpha(Color.alpha(tint) * alpha / 255);
@@ -2398,7 +2417,7 @@ final class HomeView extends View {
         c.drawRoundRect(rect, radius, radius, rim);
     }
 
-    /** The folder's name: dark glass, or white while focused (select to rename it); a caret while typing. */
+    /** Draws the folder name: dark glass, or white when it has the focus. A caret shows during the rename. */
     private void drawFolderName(Canvas c, int alpha) {
         float f = folderNameFocus, grow = 1f + 0.08f * f, size = titleText.getTextSize();
         titleText.setTextSize(38f * grow);
@@ -2422,7 +2441,7 @@ final class HomeView extends View {
         titleText.setTextSize(size);
     }
 
-    /** "Press up for full screen" above the dock, as tvOS words and places it, tinted by the picture behind. */
+    /** Draws "Press up for full screen" above the dock, in the tint from the picture behind. */
     private void drawHint(Canvas c) {
         float a = hint * (1f - expand);
         if (a <= 0.01f) return;
@@ -2437,8 +2456,7 @@ final class HomeView extends View {
         stroke.clearShadowLayer();
         stroke.setStrokeWidth(3f);
         c.restore();
-        // tvOS tints the text from each pixel behind it; one colour can't, so a soft shadow keeps it
-        // legible over a busy or bright picture.
+        // One colour for all of the text, so a soft shadow keeps it legible over a busy or bright picture.
         boolean light = luminance(hintTint) > 0.5f;
         hintText.setColor(tint);
         hintText.setShadowLayer(10f, 0f, 1f, light ? Color.argb(Math.round(alpha * 0.55f), 0, 0, 0) : 0);
@@ -2446,8 +2464,8 @@ final class HomeView extends View {
     }
 
     /**
-     * The full-screen shelf's paging controls, as tvOS draws them: dark glass circles with a chevron
-     * at either side (where there's a page that way), and the page dots in a dark glass capsule.
+     * Draws the page controls of the full-screen shelf. A glass circle with a chevron shows at each side that has a
+     * page. The page dots are in a glass capsule.
      */
     private void drawPager(Canvas c) {
         int alpha = Math.round(255 * pagerAnim);
@@ -2481,8 +2499,8 @@ final class HomeView extends View {
     }
 
     /**
-     * The clock: a glass pill (white while focused). With the Control Center open it becomes the
-     * tvOS status row instead: time on the left, status glyphs, the Control Center button, profile.
+     * Draws the clock: a glass pill, white when it has the focus. When the Control Center is open, it is the status
+     * row: the time at the left, the status glyphs, the Control Center buttons and the profile.
      */
     private void drawClock(Canvas c) {
         int alpha = Math.round(255 * Math.max(Math.max((1f - expand) * (1f - away), pillAnim), ccAnim));
@@ -2518,7 +2536,9 @@ final class HomeView extends View {
         }
     }
 
-    /** Where card {@code i} of the row is, scaled by {@code k} about its centre (before the dock's offset). */
+    /**
+     * Returns the bounds of card {@code i} of the row, scaled by {@code k} about its centre, before the dock offset.
+     */
     private RectF rowCardRect(int i, float k, RectF out) {
         float x = rowLefts[i] - rowScroll, w = rowCards.get(i).width(), h = Backdrops.ROW_CARD_H;
         float cx = x + w / 2f, cy = ROW_TOP + h / 2f;
@@ -2527,10 +2547,10 @@ final class HomeView extends View {
     }
 
     /**
-     * The row shelf, as tvOS draws a Continue Watching row: 16:9 (or square) cards over the plain background,
-     * each section's title above its first card (held at the left while its cards scroll by), a
-     * progress bar on what's partly watched, and the focused card a little larger with its title
-     * under it. It moves up with the dock as focus goes into the grid.
+     * Draws the row shelf: 16:9 or square cards over the plain background. The title of each section is above its first
+     * card, and stays at the left while its cards scroll. A program that is partly watched has a progress bar. The
+     * focused card is larger and has its title below it. The row moves up with the dock when the focus goes into the
+     * grid.
      */
     private void drawRow(Canvas c, float offset) {
         Backdrops.Backdrop b = backdrop;
@@ -2540,7 +2560,7 @@ final class HomeView extends View {
         c.save();
         c.translate(0f, offset);
         float headerY = ROW_HEADER_Y - ROW_HEADER_LIFT * rowAnim;
-        rowHeaderText.setColor(light ? 0xFF4D4C4E : 0xFF6A6A6A); // tvOS's, light or dark
+        rowHeaderText.setColor(light ? 0xFF4D4C4E : 0xFF6A6A6A); // for light and for dark
         rowHeaderText.setAlpha(alpha);
         for (int i = 0; i < rowCards.size(); i++) {
             if (rowHeaders[i] == null) continue;
@@ -2553,7 +2573,7 @@ final class HomeView extends View {
             if (x + rowHeaderWidths[i] > 0f && x < W) c.drawText(rowHeaders[i], x, headerY, rowHeaderText);
         }
         for (int i = 0; i < rowCards.size(); i++) if (i != rowIndex) drawRowCard(c, i, alpha);
-        if (rowIndex < rowCards.size()) drawRowCard(c, rowIndex, alpha); // the focused one on top
+        if (rowIndex < rowCards.size()) drawRowCard(c, rowIndex, alpha); // the focused card last, on top
         c.restore();
     }
 
@@ -2562,9 +2582,9 @@ final class HomeView extends View {
         float f = rowFocus[i];
         RectF rect = rowCardRect(i, 1f + (ROW_FOCUS_SCALE - 1f) * f, r);
         if (rect.right < 0f || rect.left > W) return;
-        float k = rect.height() / Backdrops.ROW_CARD_H; // by height: a square card's bar and corners match a wide one's
-        if (f > 0.01f && shadowMask != null) { // the focused card lifts on a soft drop shadow
-            // The mask's soft edge is sized for a focused tile, so scale it to the card on each axis.
+        float k = rect.height() / Backdrops.ROW_CARD_H; // by height: a square card has the same bar and corners as a wide card
+        if (f > 0.01f && shadowMask != null) { // a soft drop shadow below the focused card
+            // The edge of the mask has the size for a focused tile, so it is scaled to the card on each axis.
             float padX = SHADOW_PAD * rect.width() / (TILE_W * FOCUS_SCALE), padY = SHADOW_PAD * rect.height() / (TILE_H * FOCUS_SCALE);
             float dy = SHADOW_DY * 2f * f;
             r2.set(rect.left - padX, rect.top - padY + dy, rect.right + padX, rect.bottom + padY + dy);
@@ -2572,8 +2592,8 @@ final class HomeView extends View {
             c.drawBitmap(shadowMask, null, r2, shadow);
         }
         cardPaint.setAlpha(alpha);
-        c.drawBitmap(card.picture(), null, rect, cardPaint); // its corners are rounded already
-        if (f > 0.01f) { // and the same glass rim as the dock, the pill and the buttons, as on tvOS
+        c.drawBitmap(card.picture(), null, rect, cardPaint); // the picture has round corners
+        if (f > 0.01f) { // the same glass rim as the dock, the pill and the buttons
             float radius = Backdrops.ROW_CARD_R * k;
             m.setScale(1f, rect.height());
             m.postTranslate(0f, rect.top);
@@ -2592,7 +2612,7 @@ final class HomeView extends View {
             c.drawRoundRect(left, bottom - h, left + Math.max(h, (right - left) * p), bottom, h / 2f, h / 2f, fill);
         }
         if (f > 0.01f && !rowTitles[i].isEmpty()) {
-            // White on the light background too, as tvOS does, with a shadow to stand off it.
+            // White, also on the light background, with a shadow.
             TextPaint text = rowTitleWidths[i] <= rect.width() ? rowTitleText : rowMarqueeText;
             text.setColor(Color.WHITE);
             text.setAlpha(Math.round(alpha * f * rowAnim));
@@ -2600,10 +2620,10 @@ final class HomeView extends View {
             float y = rect.bottom + 31f;
             if (text == rowTitleText) {
                 c.drawText(rowTitles[i], rect.centerX(), y, rowTitleText);
-            } else { // too long: from the card's left edge, faded out at its right, and scrolling while focused
+            } else { // too long: starts at the left edge of the card, fades out at its right, and scrolls while focused
                 float off = i == marqueeCard ? marqueeOffset : 0f;
                 fitMarqueeFade(card.width() * ROW_FOCUS_SCALE);
-                float left = rect.left - MARQUEE_FADE * (1f - Math.min(1f, off / MARQUEE_FADE)); // the left fade, once moving
+                float left = rect.left - MARQUEE_FADE * (1f - Math.min(1f, off / MARQUEE_FADE)); // the left fade, while it moves
                 m.setScale(rect.right - left, 1f);
                 m.postTranslate(left, 0f);
                 marqueeFade.setLocalMatrix(m);
@@ -2616,7 +2636,10 @@ final class HomeView extends View {
         }
     }
 
-    /** The marquee's edge fades, MARQUEE_FADE wide across a focused card this wide: made again only when that changes (wide, square). */
+    /**
+     * Makes the edge fades of the marquee, MARQUEE_FADE wide, for a focused card of this width. It makes them again
+     * only when the width changes.
+     */
     private void fitMarqueeFade(float width) {
         if (width == marqueeFadeFor) return;
         float edge = MARQUEE_FADE / width; // across the card, 0 to 1
@@ -2626,7 +2649,7 @@ final class HomeView extends View {
         marqueeFadeFor = width;
     }
 
-    /** The full-screen shelf's details, laid out for the program shown (once per program, not per frame). */
+    /** Lays out the details of the full-screen shelf for the program, once for each program. */
     private void layOutDetails(Recommendations.Item item) {
         detailsFor = item;
         String title = item.title() == null ? "" : item.title();
@@ -2647,9 +2670,8 @@ final class HomeView extends View {
     }
 
     /**
-     * The full-screen shelf's details at the bottom left, as the Apple TV app shows them: the title,
-     * a line of facts (the episode, or type, genre, year and length), the description, and Play,
-     * over a shade so they read on any picture. Select plays it.
+     * Draws the details of the full-screen shelf at the bottom left, over the scrim. The details are the title, a line
+     * of facts, the description and Play. Select plays the program.
      */
     private void drawDetails(Canvas c) {
         Backdrops.Backdrop b = backdrop;
@@ -2657,9 +2679,8 @@ final class HomeView extends View {
         if (item == null) return;
         if (item != detailsFor) layOutDetails(item);
         int alpha = Math.round(255 * expand);
-        // The darkening behind the details is baked into the full-screen picture: drawn here only for
-        // what the pictures on screen don't carry yet of the share the details need (fading in after
-        // Up, say, before the full-screen picture is ready).
+        // The details scrim is in the full-screen picture. This draws only the part that the pictures on the screen do
+        // not have yet (for example, before the full-screen picture is ready).
         float baked = (b.details ? 1f : 0f) * (previous != null ? fade : 1f)
                 + (previous != null && previous.details ? 1f - fade : 0f);
         int scrim = Math.round(255 * Math.max(0f, expand - baked));
@@ -2689,9 +2710,9 @@ final class HomeView extends View {
     }
 
     /**
-     * Play as the Apple TV app draws it: a white capsule with a black play.fill triangle and "Play";
-     * for something partly watched, a progress bar and the time left instead of the word. Liquid
-     * glass with white ink while focus is elsewhere (the clock pill, say).
+     * Draws Play: a white capsule with a black play triangle and "Play". For a program that is partly watched, a
+     * progress bar and the time that remains replace the word. It is glass with adaptive ink when the focus is not on
+     * it.
      */
     private void drawPlayButton(Canvas c, float x, float y, int alpha) {
         float f = playFocus;
@@ -2734,9 +2755,9 @@ final class HomeView extends View {
     }
 
     /**
-     * The long-press menu, as on tvOS: a glass list beside the tile (to its right, or left where
-     * there's no room), the selected option a white capsule gliding between them (red on Delete
-     * App). An option with a chevron opens a second list beside it, and keeps a faint capsule.
+     * Draws the long-press menu: a glass list next to the tile (at its right, or at its left if there is no space). The
+     * selected option is a white capsule that moves between the options (red on Delete App). An option with a chevron
+     * opens a second list next to it and keeps a faint capsule.
      */
     private void drawMenu(Canvas c) {
         Apps.Entry e = menuEntry;
@@ -2765,11 +2786,11 @@ final class HomeView extends View {
         }
     }
 
-    /** One list of the menu. {@code openRow} is the option whose list is open (a faint capsule), or -1. */
+    /** Draws one list of the menu. {@code openRow}: the option whose list is open (a faint capsule), or -1. */
     private void drawList(Canvas c, RectF box, List<MenuRow> rows, float selAnim, int openRow, int alpha, boolean active) {
         float pad = MENU_PAD, itemH = MENU_ITEM_H, radius = itemH / 2f;
-        // Frosted glass whose corners follow the capsules: light over the dimmed grid, as on tvOS,
-        // and darker over a bright backdrop in the dock so the white text still reads.
+        // Frosted glass with corners that follow the capsules. It is light over the dimmed grid, and darker over a
+        // bright backdrop in the dock, so that the white text is legible.
         int tint = Color.argb(Math.round(0x8C + (0x30 - 0x8C) * away), towardWhite(0x1C, away),
                 towardWhite(0x1C, away), towardWhite(0x22, away));
         drawGlass(c, box, radius + pad, 0f, tint, alpha);
@@ -2817,7 +2838,7 @@ final class HomeView extends View {
         d.draw(c);
     }
 
-    /** The Delete alert, as on tvOS: frosted glass in the middle, Cancel and Delete side by side. */
+    /** Draws the Delete alert: frosted glass at the centre, with Cancel and Delete next to each other. */
     private void drawAlert(Canvas c) {
         int alpha = Math.round(255 * alertAnim);
         if (alpha <= 2 || alertMessage == null) return;
@@ -2859,7 +2880,7 @@ final class HomeView extends View {
         c.restore();
     }
 
-    /** A colour channel moved a fraction {@code t} of the way to white. */
+    /** Returns a colour channel moved by the fraction {@code t} toward white. */
     private static int towardWhite(int a, float t) {
         return Math.round(a + (255 - a) * t);
     }
@@ -2879,8 +2900,8 @@ final class HomeView extends View {
     }
 
     /**
-     * Down held on the last row: an arrow below it, encircled as the hold goes on; once the ring
-     * closes, focus drops into the Hidden section.
+     * Draws the hint for a long press of Down on the last row: an arrow below the row, with a ring that closes during
+     * the press. When the ring closes, the focus goes into the Hidden section.
      */
     private void drawRevealHint(Canvas c) {
         if (downAppear <= 0.01f || apps.isEmpty()) return;
@@ -2893,12 +2914,12 @@ final class HomeView extends View {
         c.drawArc(r, -90f, 360f * downProgress, false, stroke);
         c.save();
         c.translate(cx, cy + 1f);
-        c.scale(0.8f, -0.8f); // the hint's up chevron, turned down
+        c.scale(0.8f, -0.8f); // the up chevron of the hint, turned down
         c.drawPath(chevron, stroke);
         c.restore();
     }
 
-    /** With Hidden shown: its title, and a drop target while editing when nothing is hidden yet. */
+    /** Draws the Hidden section: its title, and a drop target during an edit when no app is hidden. */
     private void drawHiddenSection(Canvas c) {
         int a = Math.round(255 * editAnim);
         if (a <= 2) return;
@@ -2917,7 +2938,10 @@ final class HomeView extends View {
         }
     }
 
-    /** A soft drop shadow for a focused tile, blurred once in software. Drawn tinted by the paint's alpha. */
+    /**
+     * Returns a soft drop shadow for a focused tile, blurred one time in software. The alpha of the paint sets its
+     * strength.
+     */
     private static Bitmap makeShadowMask(float scale) {
         float w = TILE_W * FOCUS_SCALE, h = TILE_H * FOCUS_SCALE;
         int bw = Math.round((w + 2 * SHADOW_PAD) * scale), bh = Math.round((h + 2 * SHADOW_PAD) * scale);
@@ -2929,7 +2953,7 @@ final class HomeView extends View {
         return b;
     }
 
-    /** The default profile picture: a grey disc with a person glyph. */
+    /** Returns the default profile picture: a grey disc with a person glyph. */
     static Bitmap makeAvatar(int size) {
         Bitmap b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(b);
@@ -2938,17 +2962,17 @@ final class HomeView extends View {
         c.drawCircle(size / 2f, size / 2f, size / 2f, p);
         p.setShader(null);
         p.setColor(0xF2FFFFFF);
-        p.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)); // clip the glyph to the disc
+        p.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)); // clips the glyph to the disc
         c.drawCircle(size / 2f, size * 0.39f, size * 0.19f, p);
         c.drawOval(new RectF(size * 0.17f, size * 0.66f, size * 0.83f, size * 1.30f), p);
         return b;
     }
 
-    // ---- Screen readers ----------------------------------------------------------------------
+    // Screen readers
 
     /**
-     * What TalkBack can reach: the open menu or Control Center on its own (they take all input),
-     * otherwise the clock pill, the Play button when a shelf shows one, and the app tiles.
+     * The items for TalkBack. An open menu or Control Center gives its items only, because it takes all input. Else,
+     * the items are the clock pill, the Play button of a shelf, and the app tiles.
      */
     private final class Accessible implements A11y.Source {
         @Override
@@ -2962,7 +2986,7 @@ final class HomeView extends View {
                 settings.items(out, A11Y_SETTINGS);
                 return;
             }
-            if (alertEntry != null) { // Cancel reads out the question too
+            if (alertEntry != null) { // Cancel also reads the question
                 float bw = (ALERT_W - 2 * ALERT_PAD - 20f) / 2f, by = alertBox.bottom - ALERT_PAD - ALERT_BUTTON_H;
                 for (int i = 0; i < 2; i++) {
                     float bx = alertBox.left + ALERT_PAD + i * (bw + 20f);
@@ -3037,7 +3061,7 @@ final class HomeView extends View {
             }
         }
 
-        /** A menu list's options, with a switch's state. */
+        /** Adds the options of a menu list to {@code out}, with the state of each switch. */
         private void rows(List<A11y.Item> out, List<MenuRow> rows, RectF box, int base, int selected) {
             Context c = getContext();
             for (int i = 0; i < rows.size(); i++) {

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The app's icon: the atvOS wordmark in dark grey on a lighter grey tile, as tvOS Settings shows its own logo. -->
+<!-- App icon: the atvOS wordmark in dark grey on a light grey tile. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="48dp"
     android:height="48dp"

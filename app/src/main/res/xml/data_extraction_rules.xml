@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Nothing leaves the TV: no cloud backup and no device-to-device transfer. -->
+<!-- No cloud backup and no device-to-device transfer. -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="root" />

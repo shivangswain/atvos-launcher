@@ -26,71 +26,70 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * atvOS Launcher's own Settings, laid out as tvOS lays out Settings: the page's title at the top,
- * atvOS's logo on the left with a few words on the focused row under it, and the rows on the right
- * (the focused one white), each with its value and a chevron where it opens another page.
+ * atvOS Settings, with the layout of tvOS Settings. The page title is at the top, and the rows are at the right. The
+ * atvOS logo is at the left, with a description of the focused row. The focused row is white. A row that opens a page
+ * has a chevron.
  * <pre>
- *   Home Screen ›            (only while another app has the Home button)
+ *   Home Screen ›            (only when another app has the Home button)
  *   General ›                About › (Model, atvOS, Android TV) · Appearance › · Privacy ·
  *                            Acknowledgements · DATE &amp; TIME: Time Format
  *   Profiles and Accounts ›  Account · Profile Picture ›
  *   Uninstall ›              Restore Default Launcher · Remove Power Control
  *   Support ›                Website › · Open Play Store › · App Info › · Donate ›
  * </pre>
- * Light or dark, as Appearance says (the top shelf's rows follow it too). Opened from the switches
- * in Control Center. UI thread.
+ * The colours are light or dark, as set in Appearance. The switches in Control Center open it. UI thread.
  */
 final class SettingsScreen {
 
     interface Host {
         Controls.Setup setupState();
-        /** The setup steps that hand atvOS the Home button (this screen closes first). */
+        /** Starts the setup steps that give the Home button to atvOS. This screen closes first. */
         void setUpHome();
         void restoreHome(HomeView.SelfSetup progress);
         void releasePower();
-        /** The Google account whose picture is shown, or null. */
+        /** Returns the Google account of the profile picture, or null. */
         String account();
         void chooseAccount();
-        /** {@link Profile#PHOTO}, {@link Profile#INITIAL} or {@link Profile#NONE}. */
+        /** Returns {@link Profile#PHOTO}, {@link Profile#INITIAL} or {@link Profile#NONE}. */
         String picture();
         void setPicture(String picture);
         boolean light();
         void setLight(boolean light);
         boolean use24Hour();
         void setUse24Hour(boolean on);
-        /** Opens {@link #WEBSITE}, {@link #STORE} or {@link #APP_INFO}; false if the TV can't. */
+        /** Opens {@link #WEBSITE}, {@link #STORE} or {@link #APP_INFO}. Returns false if the TV cannot open it. */
         boolean open(int what);
-        /** Whether the TV has an app to open it with (many have no web browser). */
+        /** Returns true if the TV has an app that can open it. */
         boolean canOpen(int what);
         Donation donation();
         void close();
         void sound(int effect);
-        /** Something changed: redraw it, and tell screen readers. */
+        /** Draws the screen again and updates screen readers. */
         void changed();
     }
 
-    /** What {@link Host#open} opens: atvOS's website, its page on Google Play, Android's App Info for it. */
+    /** The targets of {@link Host#open}: the atvOS website, the Google Play page of atvOS, and App Info for atvOS. */
     static final int WEBSITE = 0, STORE = 1, APP_INFO = 2;
 
     private static final int MAIN = 0, GENERAL = 1, ABOUT = 2, APPEARANCE = 3, PROFILES = 4, PICTURE = 5,
             UNINSTALL = 6, SUPPORT = 7;
     /**
-     * What a row is: it opens something (a chevron), it does something in place (its value, no
-     * chevron), one of a page's choices (ticked when chosen), a fact (no pill, never focused), or
-     * the title of the section below it.
+     * Row kinds: NAV opens a page (with a chevron). ACTION does an action on the page (with its value). CHOICE is one
+     * choice of a page (with a tick when selected). INFO is a fact (no pill). HEADER is the title of the section below
+     * it.
      */
     private static final int NAV = 0, ACTION = 1, CHOICE = 2, INFO = 3, HEADER = 4;
 
     private static final float W = HomeView.W;
-    // Measured from tvOS Settings, in 1920-wide design units.
+    // The row layout of tvOS Settings, in design units (1920 wide).
     private static final float ROW_X = 1063f, ROW_W = 773.5f, ROW_H = 65.5f, ROW_PITCH = 80f, ROW_TOP = 189f;
-    private static final float HEADER_X = ROW_X + 29f, HEADER_BASELINE = 59.5f; // a section title's slot: its baseline
+    private static final float HEADER_X = ROW_X + 29f, HEADER_BASELINE = 59.5f; // the left edge and the baseline of a section title
     private static final float ICON_X = 255f, ICON_Y = 237f, ICON_SIZE = 540f, NOTE_CX = 525f, NOTE_TOP = 832f, NOTE_W = 860f;
     private static final float TITLE_Y = 112f;
 
-    /** A row; {@code about} is what the left side says while it's focused, {@code action} what Select does. */
+    /** A row. {@code about}: the description at the left while it is focused. {@code action}: the action of Select. */
     private record Row(int kind, String title, String value, String about, Runnable action, boolean enabled, boolean checked) {
-        /** Facts too, unseen (no pill), so the remote and screen readers can still go through them on a page of facts. */
+        /** INFO rows are focusable too, so the remote and screen readers can move through a page of facts. */
         boolean focusable() {
             return kind != HEADER;
         }
@@ -103,8 +102,7 @@ final class SettingsScreen {
             valueText = new TextPaint(Paint.ANTI_ALIAS_FLAG), headerText = new TextPaint(Paint.ANTI_ALIAS_FLAG),
             aboutText = new TextPaint(Paint.ANTI_ALIAS_FLAG), noteText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-    // The focused row's drop shadow, blurred once and scaled with the row: a shadow layer on a pill
-    // whose size animates makes the GPU build (and keep) a new blurred mask for every size it passes.
+    // The drop shadow of the focused row: a mask, blurred one time and scaled with the row.
     private final Paint shadow = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Bitmap shadowMask = makeShadowMask();
     private final RectF shadowRect = new RectF();
@@ -112,21 +110,21 @@ final class SettingsScreen {
     private final Path chevron = new Path(), tick = new Path();
     private final RectF r = new RectF(), logoRect = new RectF(ICON_X, ICON_Y, ICON_X + ICON_SIZE, ICON_Y + ICON_SIZE);
     private final List<Row> rows = new ArrayList<>();
-    private final List<RectF> rowRects = new ArrayList<>(); // where each row was last drawn, for screen readers
-    private float[] tops = new float[0];  // each row's top, before scrolling
-    private String[] fitTitle = new String[0], fitValue = new String[0]; // fitted to the row once per build, not per frame
+    private final List<RectF> rowRects = new ArrayList<>(); // the bounds of each row at the last draw, for screen readers
+    private float[] tops = new float[0];  // the top of each row before the scroll
+    private String[] fitTitle = new String[0], fitValue = new String[0]; // fitted to the row once for each build
     private String noteFit, noteFitFor;
     private float[] focus = new float[0];
-    private final ArrayDeque<int[]> under = new ArrayDeque<>(); // the pages Back returns to: {page, focused row}
-    private int page = MAIN, sel = -1;  // sel: the focused row, or -1 on a page of facts only
+    private final ArrayDeque<int[]> under = new ArrayDeque<>(); // the pages that Back goes to: {page, focused row}
+    private int page = MAIN, sel = -1;  // sel: the focused row, or -1 on a page of facts
     private float scroll, fade = 1f;
-    private boolean busy;               // restoring the TV's own home screen over its adb
-    private String note;                // what just happened, under the focused row's words
+    private boolean busy;               // Restore runs over self-adb
+    private String note;                // a status message below the description of the focused row
     private int noteRow = -1, notePage = -1;
-    private StaticLayout about;         // the focused row's words, laid out when they change
+    private StaticLayout about;         // the description of the focused row, laid out when it changes
     private String aboutFor;
     private String title = "";
-    // This frame's colours (light or dark)
+    // The colours of this frame (light or dark).
     private int ink, valueInk, dimInk, offInk;
 
     SettingsScreen(Context context, Host host) {
@@ -156,7 +154,7 @@ final class SettingsScreen {
         chevron.moveTo(-5f, -11f);
         chevron.lineTo(5f, 0f);
         chevron.lineTo(-5f, 11f);
-        tick.moveTo(-10f, 1f); // tvOS's checkmark: thin, its long stroke rising to the right
+        tick.moveTo(-10f, 1f); // a thin checkmark with a long stroke up to the right
         tick.lineTo(-3.5f, 8f);
         tick.lineTo(10f, -10f);
     }
@@ -168,18 +166,18 @@ final class SettingsScreen {
         enter(-1);
     }
 
-    /** Leaving: let Google Play go. */
+    /** Ends the connection to Google Play. */
     void closed() {
         host.donation().end();
     }
 
-    /** The TV changed (back from the account picker, a package change, Play): the values follow. */
+    /** Builds the page again with the current values. */
     void refresh() {
         build();
         host.changed();
     }
 
-    // ---- The pages ---------------------------------------------------------------------------
+    // Pages
 
     private void build() {
         rows.clear();
@@ -241,7 +239,7 @@ final class SettingsScreen {
                 if (host.canOpen(WEBSITE)) {
                     rows.add(nav(R.string.settings_website, s(R.string.settings_website_address), s(R.string.settings_website_about),
                             () -> open(WEBSITE, R.string.not_available)));
-                } else { // no browser: just the address, to visit elsewhere
+                } else { // no browser: the address only
                     rows.add(action(R.string.settings_website, s(R.string.settings_website_address), s(R.string.settings_website_elsewhere), null));
                 }
                 rows.add(nav(R.string.settings_store, null, s(R.string.settings_store_about), () -> open(STORE, R.string.not_available)));
@@ -262,7 +260,7 @@ final class SettingsScreen {
             default -> {
                 title = s(R.string.settings_title);
                 Controls.Setup st = host.setupState();
-                if (!st.homeActive) { // only while another app has the Home button
+                if (!st.homeActive) { // only when another app has the Home button
                     String home = st.currentHome != null ? st.currentHome : s(R.string.settings_home_other);
                     rows.add(nav(R.string.settings_home, home, context.getString(R.string.settings_home_about, home), host::setUpHome));
                 }
@@ -277,7 +275,7 @@ final class SettingsScreen {
         fitTitle = new String[n];
         fitValue = new String[n];
         for (int i = 0; i < n; i++) {
-            tops[i] = ROW_TOP + i * ROW_PITCH; // a section title takes a row's room
+            tops[i] = ROW_TOP + i * ROW_PITCH; // a section title uses the space of one row
             fit(i);
         }
         if (focus.length != n) focus = new float[n];
@@ -287,7 +285,7 @@ final class SettingsScreen {
         title = TextUtils.ellipsize(title, titleText, W - 200f, TextUtils.TruncateAt.END).toString();
     }
 
-    /** Row {@code i}'s title and value, shortened to fit it (as unfocused: focus only grows it a little). */
+    /** Fits the title and the value of row {@code i} to the width of the row when it is not focused. */
     private void fit(int i) {
         Row row = rows.get(i);
         if (row.kind() == HEADER) {
@@ -297,7 +295,7 @@ final class SettingsScreen {
         boolean mark = row.kind() == NAV || row.kind() == CHOICE && row.checked();
         float x = ROW_X + 32f, right = ROW_X + ROW_W - (mark ? 74f : 34f), textRight = right;
         if (row.value() != null && !row.value().isEmpty()) {
-            // As much room as the title leaves (a long model name, an email address), at least 45%
+            // The value gets the width that the title does not use, and not less than 45% of the row.
             float room = Math.max(ROW_W * 0.45f, right - x - rowText.measureText(row.title()) - 40f);
             fitValue[i] = TextUtils.ellipsize(row.value(), valueText, room, TextUtils.TruncateAt.END).toString();
             textRight = right - valueText.measureText(fitValue[i]) - 24f;
@@ -305,7 +303,7 @@ final class SettingsScreen {
         fitTitle[i] = TextUtils.ellipsize(row.title(), rowText, Math.max(60f, textRight - x), TextUtils.TruncateAt.END).toString();
     }
 
-    /** Where each row is, unfocused, before it's first drawn: screen readers can be asked at once. */
+    /** Sets the bounds of each row before the first draw, for screen readers. */
     private void layOut() {
         for (int i = 0; i < rows.size(); i++) {
             float top = tops[i] - scroll;
@@ -338,7 +336,7 @@ final class SettingsScreen {
             PackageInfo pi = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
             return pi.versionName + " (" + pi.getLongVersionCode() + ")";
         } catch (PackageManager.NameNotFoundException e) {
-            return ""; // it's this app: it's there
+            return ""; // this app is installed
         }
     }
 
@@ -350,12 +348,12 @@ final class SettingsScreen {
         });
     }
 
-    /** Opens a page over this one, focused on its chosen option, else its first row. */
+    /** Opens a page above this page. The focus goes to its selected choice, else to its first row. */
     private void go(int to) {
         under.push(new int[]{page, sel});
         page = to;
         enter(-1);
-        if (to == SUPPORT) host.donation().start(this::refresh); // Play is asked only once someone looks (after: it calls back at once)
+        if (to == SUPPORT) host.donation().start(this::refresh); // connects to Google Play when the Support page opens
     }
 
     private void enter(int at) {
@@ -370,13 +368,13 @@ final class SettingsScreen {
         layOut();
     }
 
-    /** The ticked choice, else the first row that can take focus; -1 if none can. */
+    /** Returns the selected choice, else the first focusable row, or -1. */
     private int first() {
         for (int i = 0; i < rows.size(); i++) if (rows.get(i).kind() == CHOICE && rows.get(i).checked()) return i;
         return nearest(0);
     }
 
-    /** {@code i}, or the nearest row after it (else before it) that can take focus; -1 if none can. */
+    /** Returns {@code i}, or the nearest focusable row after it (else before it), or -1. */
     private int nearest(int i) {
         if (i < 0) return -1;
         for (int j = Math.min(i, rows.size() - 1); j < rows.size() && j >= 0; j++) if (rows.get(j).focusable()) return j;
@@ -390,7 +388,7 @@ final class SettingsScreen {
         host.restoreHome(progress());
     }
 
-    /** Self-adb's progress, as a note under the focused row's words. */
+    /** Returns a listener that shows the self-adb progress below the description of the focused row. */
     private HomeView.SelfSetup progress() {
         int row = sel, on = page;
         return new HomeView.SelfSetup() {
@@ -434,9 +432,12 @@ final class SettingsScreen {
         notePage = page;
     }
 
-    // ---- Input -------------------------------------------------------------------------------
+    // Input
 
-    /** Arrows, Back and Menu; false lets anything else (volume…) through. Select is {@link #select}. */
+    /**
+     * Handles the arrow keys, Back and Menu. Returns false for other keys (for example, volume). {@link #select}
+     * handles Select.
+     */
     boolean key(int code) {
         switch (code) {
             case KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
@@ -477,11 +478,11 @@ final class SettingsScreen {
         int was = page;
         host.sound(SoundEffectConstants.CLICK);
         row.action().run();
-        if (!busy && page == was) build(); // the values follow (a new page has built itself)
+        if (!busy && page == was) build(); // a new page builds itself
         host.changed();
     }
 
-    /** Moves the focus to row {@code i} (a screen reader asking); false if it can't go there. */
+    /** Moves the focus to row {@code i} for a screen reader. Returns false if the row cannot have the focus. */
     boolean focus(int i) {
         if (busy || i < 0 || i >= rows.size() || !rows.get(i).focusable()) return false;
         sel = i;
@@ -489,16 +490,19 @@ final class SettingsScreen {
         return true;
     }
 
-    // ---- Animation and drawing ---------------------------------------------------------------
+    // Animation and draw
 
-    /** Keeps the focused row on screen, a row's height clear of the bottom edge. */
+    /** Returns the scroll that keeps the focused row on the screen, one row height above the bottom edge. */
     private float wantScroll() {
         return sel < 0 ? 0f : Math.max(0f, tops[sel] + ROW_H + ROW_PITCH - 1000f);
     }
 
-    /** Advances the focus highlights, the list's scroll and a new page's fade-in; true while anything moves. */
+    /**
+     * Moves the focus highlights, the scroll and the fade-in of a new page forward by {@code dt}. Returns true while
+     * something moves.
+     */
     boolean step(float dt) {
-        boolean motion = ValueAnimator.areAnimatorsEnabled(); // off: Remove animations
+        boolean motion = ValueAnimator.areAnimatorsEnabled(); // false when animations are off
         float k = motion ? 1f - (float) Math.exp(-18f * dt) : 1f;
         boolean moving = false;
         for (int i = 0; i < focus.length; i++) {
@@ -524,17 +528,17 @@ final class SettingsScreen {
         return moving;
     }
 
-    /** The whole screen. {@code height} is the screen's, in design units. */
+    /** Draws the screen. {@code height}: the screen height in design units. */
     void draw(Canvas c, float appear, float height) {
         int alpha = Math.round(255 * appear);
         if (alpha <= 2 || rows.isEmpty()) return;
         boolean light = host.light();
-        // tvOS's colours, measured
+        // the colours of tvOS Settings
         int bg = light ? 0xFFB1B0B1 : 0xFF1C1C1C, pill = light ? 0xFFC1C0C1 : 0xFF333333;
         ink = light ? Color.BLACK : Color.WHITE;
         valueInk = light ? 0xFF747475 : 0xFF8E8E93;
         dimInk = light ? 0xFF6B6A6B : 0xFF606060; // page and section titles
-        offInk = light ? 0xFF8C8B8C : 0xFF6E6E70; // rows that can't do anything now
+        offInk = light ? 0xFF8C8B8C : 0xFF6E6E70; // rows that are disabled
         int words = light ? 0xFF474748 : 0xFF98989D;
         fill.setColor(bg);
         fill.setAlpha(alpha);
@@ -576,7 +580,7 @@ final class SettingsScreen {
         c.save();
         c.clipRect(ROW_X - 40f, ROW_TOP - 30f, W, height);
         for (int i = 0; i < rows.size(); i++) if (i != sel) drawRow(c, i, a, pill);
-        if (sel >= 0) drawRow(c, sel, a, pill); // on top, its shadow over its neighbours
+        if (sel >= 0) drawRow(c, sel, a, pill); // drawn last, so its shadow is above the other rows
         c.restore();
     }
 
@@ -590,13 +594,13 @@ final class SettingsScreen {
             c.drawText(fitTitle[i], HEADER_X, top + HEADER_BASELINE, headerText);
             return;
         }
-        float f = row.kind() == INFO || i >= focus.length ? 0f : focus[i]; // a fact never lights up
+        float f = row.kind() == INFO || i >= focus.length ? 0f : focus[i]; // an INFO row has no focus highlight
         float cx = ROW_X + ROW_W / 2f, cy = top + ROW_H / 2f;
         float w = ROW_W * (1f + (ROW_GROW_W - 1f) * f), h = ROW_H * (1f + (ROW_GROW_H - 1f) * f);
         r.set(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f);
         rowRects.get(i).set(r);
         if (r.bottom < ROW_TOP - 30f || r.top > 1080f) return;
-        if (row.kind() != INFO) { // a fact has no pill
+        if (row.kind() != INFO) { // an INFO row has no pill
             if (f > 0.01f) {
                 float padX = SHADOW_PAD * w / (ROW_W * ROW_GROW_W), padY = SHADOW_PAD * h / (ROW_H * ROW_GROW_H);
                 shadowRect.set(r.left - padX, r.top - padY + SHADOW_DY, r.right + padX, r.bottom + padY + SHADOW_DY);
@@ -609,7 +613,7 @@ final class SettingsScreen {
         }
         int text = row.enabled() ? blend(ink, Color.BLACK, f) : blend(offInk, 0xFFA1A1A6, f);
         int soft = blend(valueInk, 0xFF8A8A8E, f);
-        boolean mark = row.kind() == NAV || row.kind() == CHOICE && row.checked(); // a chevron, or a tick
+        boolean mark = row.kind() == NAV || row.kind() == CHOICE && row.checked(); // a chevron or a tick
         float right = r.right - (mark ? 74f : 34f);
         if (fitValue[i] != null) {
             valueText.setColor(soft);
@@ -637,9 +641,9 @@ final class SettingsScreen {
                 Math.round(Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t));
     }
 
-    // ---- Screen readers ----------------------------------------------------------------------
+    // Screen readers
 
-    /** The rows (section titles aside), each with its value and what it's for. */
+    /** Adds the rows (not the section titles) to {@code out}, each with its value and its description. */
     void items(List<A11y.Item> out, int base) {
         for (int i = 0; i < rows.size() && i < rowRects.size(); i++) {
             Row row = rows.get(i);
@@ -647,12 +651,12 @@ final class SettingsScreen {
             String state = row.kind() == CHOICE ? (row.checked() ? s(R.string.a11y_selected) : null) : row.value();
             String hint = row.about();
             if (i == sel && note != null && noteRow == sel && notePage == page) hint = hint == null ? note : hint + " " + note;
-            boolean clickable = row.kind() != INFO && row.action() != null && row.enabled(); // words to read aren't buttons
+            boolean clickable = row.kind() != INFO && row.action() != null && row.enabled(); // INFO rows are not buttons
             out.add(new A11y.Item(base + i, row.title(), state, hint, new RectF(rowRects.get(i)), i == sel, clickable));
         }
     }
 
-    /** The focused row's shadow: its pill at full focus, blurred as the shadow layer it replaces was, in design units. */
+    /** Returns the shadow mask: the pill of a fully focused row, blurred, in design units. */
     private static Bitmap makeShadowMask() {
         float w = ROW_W * ROW_GROW_W, h = ROW_H * ROW_GROW_H;
         int bw = Math.round(w + 2 * SHADOW_PAD), bh = Math.round(h + 2 * SHADOW_PAD);

@@ -15,9 +15,8 @@ import android.text.TextUtils;
 import java.util.Locale;
 
 /**
- * The tvOS-style Control Center: glass tiles that drop down under the status row. This class owns
- * the layout, focus movement and drawing; {@link HomeView} owns input routing and {@link Controls}
- * does the actual work.
+ * The Control Center: glass tiles below the status row. This class lays out the tiles, moves the focus and draws the
+ * tiles. {@link HomeView} sends the keys, and {@link Controls} does the actions.
  * <pre>
  *   9:41 AM            ☾ ⏱  (≡) (⚙) (S)
  *   [ Power ]  [ Wi-Fi     ]
@@ -25,7 +24,7 @@ import java.util.Locale;
  *   [ Bluetooth ] [ Sleep  ]
  *   (In) (Acc) (System) (Find)
  * </pre>
- * (≡), two switches as on tvOS, is atvOS's own Settings; (⚙) is the TV's.
+ * (≡) opens atvOS Settings. (⚙) opens the Settings app of the TV.
  */
 final class ControlCenter {
 
@@ -36,13 +35,16 @@ final class ControlCenter {
     static final int PROFILE = 0, SETTINGS = 1, POWER = 2, WIFI = 3, DND = 4, BLUETOOTH = 5, SLEEP = 6,
             INPUTS = 7, ACCESSIBILITY = 8, SYSTEM = 9, SEARCH = 10, LAUNCHER_SETTINGS = 11;
     static final int COUNT = 12;
-    /** The tiles as they're read, left to right and down: the status row, then the grid. */
+    /**
+     * The tiles in the order for screen readers: the status row, then the grid from left to right and from top to
+     * bottom.
+     */
     static final int[] READING_ORDER = {LAUNCHER_SETTINGS, SETTINGS, PROFILE, POWER, WIFI, DND, BLUETOOTH, SLEEP,
             INPUTS, ACCESSIBILITY, SYSTEM, SEARCH};
 
-    // One grid, as on tvOS: circles as tall as the pills, two circles to a pill column.
+    // The grid: a circle is as tall as a pill, and two circles fill one pill column.
     private static final float ROW_H = 92f, GAP = 20f, COL_W = 2 * ROW_H + GAP, TOP = 134f, SETTINGS_D = 50f;
-    /** Width of the tile block, also the span of the top status row. */
+    /** The width of the tile block and of the status row. */
     static final float WIDTH = 2 * COL_W + GAP;
     private static final float LINE_1 = 23f, LINE_2 = 21f, TEXT_ROOM = COL_W - 88f;
     private static final int WHITE = Color.WHITE, DARK = 0xFF1C1C1E;
@@ -51,7 +53,7 @@ final class ControlCenter {
     private final RectF[] rects = new RectF[COUNT];
     private final float[] radii = new float[COUNT];
     private final float[] focus = new float[COUNT];
-    private final float cogSize; // the two Settings icons, a little smaller than the profile avatar
+    private final float cogSize; // the size of the two Settings icons
     private final Drawable power, wifi, ethernet, moon, bluetooth, headphones, timer, input, accessibility,
             system, search, settings, switches;
     private final String powerOff, wifiLabel, ethernetLabel, connected, notConnected, dndLabel,
@@ -63,19 +65,22 @@ final class ControlCenter {
     private final TextPaint text = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final RectF r = new RectF();
 
-    // Derived from the state once per change (not per frame): tile text already fitted to its width.
+    // Values from the state, calculated once for each change: the tile text, fitted to the tile width.
     private Controls.State state = new Controls.State();
     private String wifi1 = "", wifi2 = "", bt1 = "", bt2 = "", dnd1 = "", dnd2 = "", sleep1 = "", sleep2 = "";
     private int idleInk = WHITE;
 
     int selected = POWER;
 
-    /** {@code right} is the screen-space right edge to align to; {@code avatar} is where the clock draws the profile avatar. */
+    /**
+     * {@code right}: the right edge on the screen. {@code avatar}: the bounds of the profile avatar that the clock
+     * draws.
+     */
     ControlCenter(Context context, float right, RectF avatar) {
         float rx = right - COL_W, lx = right - WIDTH;
-        // The status row, right to left: profile, the TV's Settings, then atvOS's own, the same gap
-        // between what's seen of each (both icons' glyphs fill 20 of their 24 units).
-        cogSize = avatar.width() * 0.95f; // a little smaller than the avatar beside them
+        // The status row from right to left: the profile, the Settings of the TV, then atvOS Settings, with the same
+        // visible gap between them. The glyph of each icon fills 20 of its 24 units.
+        cogSize = avatar.width() * 0.95f; // slightly smaller than the avatar
         float glyph = cogSize * 20f / 24f, gap = 24f;
         float cy = avatar.centerY(), sx = avatar.left - gap - glyph / 2f, qx = sx - glyph - gap;
         rects[PROFILE] = new RectF(avatar);
@@ -145,7 +150,7 @@ final class ControlCenter {
         return d != null ? d.mutate() : null;
     }
 
-    /** New system state: refit the tile text now so drawing allocates nothing. */
+    /** Sets the system state and fits the tile text to the tiles. The draw then allocates no memory. */
     void setState(Controls.State s) {
         state = s;
         wifi1 = fit(s.ethernet ? ethernetLabel : wifiLabel, LINE_1);
@@ -167,9 +172,8 @@ final class ControlCenter {
     }
 
     /**
-     * A title over a tile's two lines: whole on the first if it fits, else broken at the last space
-     * that fits ("Do Not" / "Disturb"), so any language reads naturally. Text without spaces that
-     * doesn't fit is shortened instead.
+     * Divides a title into two lines: all of it on the first line if it fits, else a break at the last space that fits.
+     * Text with no space that does not fit is shortened.
      */
     private String[] wrap(String s, float secondLineSize) {
         text.setTextSize(LINE_1);
@@ -189,8 +193,8 @@ final class ControlCenter {
     }
 
     /**
-     * Spatial focus: among items wholly past the current one's edge in the pressed direction, the
-     * nearest, favouring ones in line with it. Returns whether focus moved.
+     * Moves the focus in the direction (dx, dy) to the nearest item past the edge of the current item. Items in line
+     * with the current item have priority. Returns true if the focus moved.
      */
     boolean move(int dx, int dy) {
         RectF from = rects[selected];
@@ -218,12 +222,12 @@ final class ControlCenter {
         return true;
     }
 
-    /** Where a tile is, in design units. */
+    /** Returns the bounds of a tile in design units. */
     RectF bounds(int id) {
         return rects[id];
     }
 
-    /** A tile's name, as a screen reader says it. */
+    /** Returns the name of a tile for a screen reader. */
     String label(int id) {
         return switch (id) {
             case PROFILE -> profileLabel;
@@ -241,7 +245,7 @@ final class ControlCenter {
         };
     }
 
-    /** A tile's state (Connected, On, 15 min…), or null for tiles that are just buttons. */
+    /** Returns the state of a tile (for example, Connected, On or 15 min), or null for a tile with no state. */
     String state(int id) {
         Controls.State s = state;
         return switch (id) {
@@ -254,10 +258,10 @@ final class ControlCenter {
         };
     }
 
-    /** Advances focus highlights; returns true while anything is still moving. */
+    /** Moves the focus highlights forward by {@code dt}. Returns true while a highlight moves. */
     boolean step(float dt) {
         boolean moving = false;
-        float k = ValueAnimator.areAnimatorsEnabled() ? 1f - (float) Math.exp(-16f * dt) : 1f; // off: Remove animations
+        float k = ValueAnimator.areAnimatorsEnabled() ? 1f - (float) Math.exp(-16f * dt) : 1f; // 1 when animations are off
         for (int i = 0; i < COUNT; i++) {
             float target = i == selected ? 1f : 0f, d = target - focus[i];
             if (Math.abs(d) <= 0.002f) {
@@ -270,13 +274,13 @@ final class ControlCenter {
         return moving;
     }
 
-    /** {@code ink}: 0 for white text on the glass, 1 for dark text when the backdrop behind is bright. */
+    /** {@code ink}: 0 for white text on the glass, 1 for dark text on a bright backdrop. */
     void draw(Canvas c, Glass glass, float appear, float ink) {
         int alpha = Math.round(255 * appear);
         if (alpha <= 0) return;
         idleInk = towardDark(WHITE, ink);
 
-        // The profile avatar is drawn by the clock; when focused it gets a ring, as on tvOS.
+        // The clock draws the profile avatar. A focused avatar gets a ring.
         if (focus[PROFILE] > 0.01f) {
             RectF a = rects[PROFILE];
             ring.setColor(idleInk);
@@ -303,9 +307,8 @@ final class ControlCenter {
     }
 
     /**
-     * Status glyphs left of the status row's buttons, as on tvOS: what's on (Bluetooth audio, Do Not
-     * Disturb, sleep timer), never left of {@code minX} (where the time ends). The time and profile
-     * avatar are drawn by the clock.
+     * Draws the status glyphs to the left of the status row buttons: Bluetooth audio, Do Not Disturb and the sleep
+     * timer, when they are on. No glyph goes to the left of {@code minX}. The clock draws the time and the avatar.
      */
     void drawStatus(Canvas c, float cy, int alpha, float minX) {
         float size = 28f, x = rects[LAUNCHER_SETTINGS].left - 24f - size;
@@ -321,7 +324,7 @@ final class ControlCenter {
         if (s.bluetoothDevice != null && x >= minX) drawIcon(c, headphones, x, cy - size / 2f, size, WHITE, alpha);
     }
 
-    /** One tile: glass when idle, white when focused; an accent colour marks "on". */
+    /** Draws one tile: glass when not focused, white when focused. An accent colour shows that it is on. */
     private void tile(Canvas c, Glass glass, int id, int alpha, Drawable icon, int accent, String line1, String line2) {
         float f = focus[id], grow = 1f + 0.06f * f;
         RectF base = rects[id];
@@ -329,7 +332,7 @@ final class ControlCenter {
         r.set(base.centerX() - w / 2f, base.centerY() - h / 2f, base.centerX() + w / 2f, base.centerY() + h / 2f);
         float radius = radii[id] * grow;
 
-        // The status row's buttons have no glass: just their icons, until focused.
+        // The buttons of the status row have no glass when they are not focused.
         boolean bare = id == SETTINGS || id == LAUNCHER_SETTINGS;
         if (f < 0.99f && !bare) glass.draw(c, r, radius, 0x24FFFFFF, Math.round(alpha * (1f - f)));
         if (f > 0.01f) {
@@ -348,7 +351,7 @@ final class ControlCenter {
             text.setAlpha(alpha);
             c.drawText(powerOff, r.centerX(), r.bottom - 34f * grow, text);
         } else if (line1 == null) {
-            float size = bare ? (id == LAUNCHER_SETTINGS ? cogSize - 1f : cogSize) * grow : r.height() * 0.46f; // the switches a point smaller
+            float size = bare ? (id == LAUNCHER_SETTINGS ? cogSize - 1f : cogSize) * grow : r.height() * 0.46f; // switches icon: 1 pt smaller
             drawIcon(c, icon, r.centerX() - size / 2f, r.centerY() - size / 2f, size, iconColor, alpha);
         } else {
             float size = 36f * grow, x = r.left + 24f * grow;
@@ -358,7 +361,7 @@ final class ControlCenter {
             text.setTextSize(LINE_1 * grow);
             text.setColor(ink);
             text.setAlpha(alpha);
-            if (line2.isEmpty()) { // a title that fit on one line sits in the middle
+            if (line2.isEmpty()) { // a one-line title is centred vertically
                 c.drawText(line1, tx, r.centerY() + 8f * grow, text);
                 return;
             }
@@ -378,7 +381,7 @@ final class ControlCenter {
         d.draw(c);
     }
 
-    /** {@code a} moved a fraction {@code t} of the way to the focused tiles' dark ink. */
+    /** Returns {@code a} moved by the fraction {@code t} toward the dark ink of a focused tile. */
     private static int towardDark(int a, float t) {
         return Color.rgb(
                 Math.round(Color.red(a) + (Color.red(DARK) - Color.red(a)) * t),

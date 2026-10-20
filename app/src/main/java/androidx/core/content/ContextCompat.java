@@ -9,17 +9,15 @@ import android.os.Build;
 import android.os.Handler;
 
 /**
- * Stand-in for the one AndroidX ContextCompat method Google Play billing calls (see
- * {@link androidx.core.util.Consumer} for why), doing what AndroidX does: from Android 13 the
- * platform's own call; before it, a receiver that mustn't be exported is guarded by this app's own
- * signature permission instead (declared in the manifest), as Android 12 has no flag for it.
+ * Replaces the AndroidX ContextCompat method that Google Play Billing calls. On Android 13 and later, it calls the
+ * platform method. On Android 12, it protects a receiver that is not exported with the signature permission of the app.
  */
 public final class ContextCompat {
     public static final int RECEIVER_VISIBLE_TO_INSTANT_APPS = 0x1, RECEIVER_EXPORTED = 0x2, RECEIVER_NOT_EXPORTED = 0x4;
 
     private ContextCompat() {}
 
-    @SuppressLint("WrongConstant") // the flags are billing's, already Context.RECEIVER_* values, passed on as given
+    @SuppressLint("WrongConstant") // the flags are Context.RECEIVER_* values
     public static Intent registerReceiver(Context context, BroadcastReceiver receiver, IntentFilter filter,
                                           String permission, Handler scheduler, int flags) {
         if (Build.VERSION.SDK_INT >= 33) return context.registerReceiver(receiver, filter, permission, scheduler, flags);

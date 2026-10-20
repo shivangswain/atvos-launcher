@@ -7,17 +7,13 @@ import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
 
-/**
- * atvOS's logo, drawn the way tvOS Settings draws its own: a grey tile with tvOS's continuous
- * corners and the wordmark cut out of it in the page's own colour. Dark grey on lighter grey on a
- * dark page, the other way round on a light one (the colours are tvOS's, measured).
- */
+/** Draws the atvOS logo: a grey tile with continuous corners, with the wordmark cut out in the colour of the page. */
 final class Logo {
 
     private static final int TILE_DARK = 0xFF555555, TILE_LIGHT = 0xFF7D7C7D;
-    /** The wordmark's width, as a share of the tile's. */
-    private static final float WORDMARK = 0.62f, WORDMARK_ASPECT = 1093f / 3930f; // its viewport's
-    /** The corners' radius as a share of the side, and how square they are (2 is a circle): tvOS's tile, traced. */
+    /** The width of the wordmark as a fraction of the tile width, and the height-to-width ratio of the wordmark. */
+    private static final float WORDMARK = 0.62f, WORDMARK_ASPECT = 1093f / 3930f;
+    /** The corner radius as a fraction of the side, and the superellipse exponent of the corners (2 gives a circle). */
     private static final float CORNER = 0.222f, SQUARENESS = 2.2f;
 
     private final Drawable wordmark;
@@ -30,7 +26,7 @@ final class Logo {
         wordmark = d != null ? d.mutate() : null;
     }
 
-    /** The logo filling the square {@code r}, on a page of colour {@code page}. */
+    /** Draws the logo in the square {@code r} on a page of the colour {@code page}. */
     void draw(Canvas c, RectF r, boolean light, int page, int alpha) {
         if (!r.equals(tileFor)) {
             squircle(tile, r, r.width() * CORNER);
@@ -48,7 +44,7 @@ final class Logo {
         wordmark.draw(c);
     }
 
-    /** A rounded square whose corners are superellipse quarters (|x|^n + |y|^n = 1), as tvOS's are. */
+    /** Adds a rounded square to {@code out}. Each corner is a superellipse quarter (|x|^n + |y|^n = 1). */
     static void squircle(Path out, RectF r, float radius) {
         out.rewind();
         float[][] centres = {{r.right - radius, r.top + radius}, {r.right - radius, r.bottom - radius},
