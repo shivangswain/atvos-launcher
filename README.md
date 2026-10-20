@@ -159,8 +159,10 @@ app's recommendations instead, turn off both to see just its logo. The switches 
 
 Below the dock, the last top shelf stays behind the grid, blurred and dimmed.
 
-Text on the clock pill, the hint and the Control Center switches to dark over bright images, like
-Liquid Glass. The clock is 12- or 24-hour as Settings > General > Time Format says (by default, as
+The dock, the clock pill, Play and the full-screen shelf's arrows and page dots are one glass, which
+shows what's behind it, darkening included, as tvOS's materials do; the Control Center's glass shows
+the home screen under it, cards and all. Text and glyphs on the glass, on the hint and on the
+Control Center switch to dark over bright images, like Liquid Glass. The clock is 12- or 24-hour as Settings > General > Time Format says (by default, as
 the TV has it), and moving around plays the TV's navigation sounds when **System sounds** are on in
 the TV's Settings.
 

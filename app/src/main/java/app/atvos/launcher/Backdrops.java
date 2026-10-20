@@ -89,8 +89,8 @@ final class Backdrops {
          * background, as tvOS shows a Continue Watching row. Null for a full-screen picture.
          */
         final List<Card> row;
-        /** Brightness (0–1) behind the clock, the full-screen hint and the Control Center, so text can flip to dark. */
-        final float clockLight, hintLight, controlsLight;
+        /** Brightness (0–1) behind the clock and the Control Center, so text can flip to dark. */
+        final float clockLight, controlsLight;
         /** The colour behind the full-screen hint, which tints it as tvOS does. */
         final int hintColor;
 
@@ -106,40 +106,28 @@ final class Backdrops {
             blur.getPixels(blurPixels, 0, blur.getWidth(), 0, 0, blur.getWidth(), blur.getHeight());
             this.program = program;
             this.row = row;
-            this.clockLight = light(blur, 0.86f, 0.03f, 1f, 0.11f);
-            this.controlsLight = light(blur, 0.72f, 0.10f, 1f, 0.53f);
-            this.hintColor = colour(blur, 0.40f, 0.62f, 0.60f, 0.70f);
-            this.hintLight = luminance(hintColor); // the mean colour's luminance is the mean luminance
+            int bw = blur.getWidth(), bh = blur.getHeight();
+            // Luminance is a weighted sum of the channels, so the mean colour's is the mean luminance.
+            this.clockLight = luminance(colour(blurPixels, bw, bh, 0.86f, 0.03f, 1f, 0.11f));
+            this.controlsLight = luminance(colour(blurPixels, bw, bh, 0.72f, 0.10f, 1f, 0.53f));
+            this.hintColor = colour(blurPixels, bw, bh, 0.40f, 0.62f, 0.60f, 0.70f);
         }
 
-        /** Mean colour of a region given as fractions of the (small, blurred) bitmap. */
-        private static int colour(Bitmap b, float l, float t, float r, float bottom) {
-            int bw = b.getWidth(), bh = b.getHeight();
+        /** Mean colour of a region, given as fractions, of the (small, blurred) bw×bh pixels. */
+        private static int colour(int[] px, int bw, int bh, float l, float t, float r, float bottom) {
             int x0 = Math.min((int) (l * bw), bw - 1), x1 = Math.min(Math.max(x0 + 1, (int) (r * bw)), bw);
             int y0 = Math.min((int) (t * bh), bh - 1), y1 = Math.min(Math.max(y0 + 1, (int) (bottom * bh)), bh);
-            int w = x1 - x0, n = w * (y1 - y0);
-            int[] px = new int[n];
-            b.getPixels(px, 0, w, x0, y0, w, y1 - y0);
+            int n = (x1 - x0) * (y1 - y0);
             long red = 0, green = 0, blue = 0;
-            for (int p : px) {
-                red += (p >> 16) & 255;
-                green += (p >> 8) & 255;
-                blue += p & 255;
+            for (int y = y0; y < y1; y++) {
+                for (int x = x0; x < x1; x++) {
+                    int p = px[y * bw + x];
+                    red += (p >> 16) & 255;
+                    green += (p >> 8) & 255;
+                    blue += p & 255;
+                }
             }
             return Color.rgb((int) (red / n), (int) (green / n), (int) (blue / n));
-        }
-
-        /** Mean luminance of a region given as fractions of the (small, blurred) bitmap. */
-        private static float light(Bitmap b, float l, float t, float r, float bottom) {
-            int bw = b.getWidth(), bh = b.getHeight();
-            int x0 = Math.min((int) (l * bw), bw - 1), x1 = Math.min(Math.max(x0 + 1, (int) (r * bw)), bw);
-            int y0 = Math.min((int) (t * bh), bh - 1), y1 = Math.min(Math.max(y0 + 1, (int) (bottom * bh)), bh);
-            int w = x1 - x0, n = w * (y1 - y0);
-            int[] px = new int[n];
-            b.getPixels(px, 0, w, x0, y0, w, y1 - y0);
-            double sum = 0;
-            for (int p : px) sum += 0.2126 * ((p >> 16) & 255) + 0.7152 * ((p >> 8) & 255) + 0.0722 * (p & 255);
-            return (float) (sum / n / 255.0);
         }
     }
 
@@ -163,7 +151,7 @@ final class Backdrops {
     private static final float LOGO_SIZE = 160f;
     // Per-app switches for the two recommendation sources (sets of packages switched off).
     private static final String NO_WATCH_NEXT = "no_watch_next", NO_PREVIEWS = "no_previews";
-    /** Keys: a recommendation behind the dock (scrims baked in), the same picture full screen (plain), an app's logo, a row. */
+    /** Keys: a recommendation behind the dock (scrims baked in), the same picture full screen (its details' darkening baked in), an app's logo, a row. */
     private static final String REMOTE = "rec:", FULL = "full:", APP = "app:", ROW = "row:";
     // The scrims behind the dock and the clock, in fractions of the screen's height: baked into each
     // backdrop when it's made, so they cost nothing per frame (they were 0.75 of a screen of fill).
@@ -227,9 +215,9 @@ final class Backdrops {
         this.height = Math.max(1, Math.round(height * k));
         ActivityManager am = context.getSystemService(ActivityManager.class);
         this.cacheSize = am != null && am.isLowRamDevice() ? 3 : 6;
-        Bitmap aurora = aurora();
+        Bitmap aurora = bake(aurora());
         Bitmap blurred = blur(aurora);
-        this.fallback = new Backdrop(toHardware(bake(aurora)), blurred, null);
+        this.fallback = new Backdrop(toHardware(aurora), blurred, null);
     }
 
     /** Re-reads app recommendations. Keys include the image URL, so a new image is picked up. IO thread. */
@@ -413,8 +401,10 @@ final class Backdrops {
         return out;
     }
 
-    /** What sits behind the dock for an app: its top shelf, else its splash picture or logo. */
-    /** The backdrop for an app; {@code fullScreen}: its full-screen shelf, without the dock's scrims. */
+    /**
+     * What sits behind the dock for an app: its top shelf, else its splash picture or logo.
+     * {@code fullScreen}: its full-screen shelf, with the darkening behind its details instead of the dock's.
+     */
     String backdropKey(String pkg, boolean fullScreen) {
         String shelf = shelfKey(pkg);
         if (shelf == null) return APP + pkg;
@@ -466,6 +456,7 @@ final class Backdrops {
         // a long thin strip, narrow one way and huge the other, would otherwise decode at full size.
         BitmapFactory.Options opts = new BitmapFactory.Options();
         opts.inSampleSize = 1;
+        opts.inMutable = true; // a picture already screen-sized gets its scrims drawn in place, not on an 8 MB copy
         while (bounds.outWidth / (opts.inSampleSize * 2) >= width && bounds.outHeight / (opts.inSampleSize * 2) >= height
                 || (long) (bounds.outWidth / opts.inSampleSize) * (bounds.outHeight / opts.inSampleSize) > 4L * width * height) {
             opts.inSampleSize *= 2;
@@ -474,8 +465,12 @@ final class Backdrops {
         if (src == null) return null;
         Bitmap sharp = cover(src, width, height);
         if (sharp != src) src.recycle();
-        Bitmap blurred = blur(sharp); // of the plain picture: the glass shows it as it is
-        Backdrop b = new Backdrop(toHardware(full ? bakeDetails(sharp) : bake(sharp)), blurred, program);
+        // The glass shows what's behind it, the darkening included (as tvOS's materials do): the
+        // dock's and the clock's here, the details' on the full-screen shelf (or white glass on a
+        // white picture, under white type).
+        sharp = full ? bakeDetails(sharp) : bake(sharp);
+        Bitmap blurred = blur(sharp); // before toHardware, which frees the software copy
+        Backdrop b = new Backdrop(toHardware(sharp), blurred, program);
         b.details = full;
         return b;
     }
@@ -521,10 +516,10 @@ final class Backdrops {
         // The background: a strip the screen's height, stretched across it, with the scrims in it.
         Bitmap strip = Bitmap.createBitmap(4, height, Bitmap.Config.ARGB_8888);
         strip.eraseColor(colour);
-        // Its blur as big as every other backdrop's, so the glass can mix them as they crossfade.
-        Bitmap plain = Bitmap.createBitmap(BLUR_W, blurHeight(), Bitmap.Config.ARGB_8888);
-        plain.eraseColor(colour);
-        return new Backdrop(bake(strip), plain, cards.get(0).item(), cards);
+        strip = bake(strip);
+        // Its blur (scrims and all) as big as every other backdrop's, so the glass can mix them as they crossfade.
+        Bitmap blurred = Bitmap.createScaledBitmap(strip, BLUR_W, blurHeight(), true);
+        return new Backdrop(strip, blurred, cards.get(0).item(), cards);
     }
 
     /**
@@ -545,8 +540,9 @@ final class Backdrops {
             return null; // another app's resources: anything can go wrong, and the aurora still works
         }
         if (out == null) return null;
-        Bitmap blurred = blur(out);
-        return new Backdrop(toHardware(bake(out)), blurred, null);
+        out = bake(out);
+        Bitmap blurred = blur(out); // before toHardware, which frees the software copy
+        return new Backdrop(toHardware(out), blurred, null);
     }
 
     private ActivityInfo launchActivity(String pkg) {
@@ -1099,7 +1095,7 @@ final class Backdrops {
         return spread >= 48 ? corners : null;
     }
 
-    private static float luminance(int p) {
+    static float luminance(int p) {
         return (0.2126f * ((p >> 16) & 255) + 0.7152f * ((p >> 8) & 255) + 0.0722f * (p & 255)) / 255f;
     }
 
@@ -1281,7 +1277,6 @@ final class Backdrops {
         return out;
     }
 
-    /** A heavily blurred 192px-wide copy. Drawn scaled up with bilinear filtering it reads as a smooth blur. */
     /**
      * The scrims drawn into a screen-high software picture, once: darker toward the bottom for the
      * dock, at the top for the clock. Mutable in place (a copy if it isn't). IO thread.
@@ -1329,8 +1324,9 @@ final class Backdrops {
         return Math.max(1, Math.round(BLUR_W * (float) height / width));
     }
 
-    private static final int BLUR_W = 192;
+    static final int BLUR_W = 192;
 
+    /** A heavily blurred 192px-wide copy. Drawn scaled up with bilinear filtering it reads as a smooth blur. */
     static Bitmap blur(Bitmap src) {
         int w = BLUR_W;
         int h = Math.max(1, Math.round(w * (float) src.getHeight() / src.getWidth()));
@@ -1339,18 +1335,21 @@ final class Backdrops {
         Bitmap small = Bitmap.createScaledBitmap(mid, w, h, true);
         if (mid != src && mid != small) mid.recycle();
         if (small == src) small = src.copy(Bitmap.Config.ARGB_8888, true);
+        Bitmap out = boxBlur(small);
+        if (small != src && out != small) small.recycle();
+        return out;
+    }
 
+    /** {@code small} (blur-sized already) box-blurred three times over: mutable, {@code small} itself when it was. */
+    static Bitmap boxBlur(Bitmap small) {
+        int w = small.getWidth(), h = small.getHeight();
         int[] px = new int[w * h], tmp = new int[w * h];
         small.getPixels(px, 0, w, 0, 0, w, h);
         for (int pass = 0; pass < 3; pass++) {
             boxBlurTransposed(px, tmp, w, h);
             boxBlurTransposed(tmp, px, h, w);
         }
-        Bitmap out = small;
-        if (!small.isMutable()) {
-            out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-            if (small != src) small.recycle();
-        }
+        Bitmap out = small.isMutable() ? small : Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         out.setPixels(px, 0, w, 0, 0, w, h);
         return out;
     }

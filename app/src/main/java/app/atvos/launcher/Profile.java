@@ -196,9 +196,12 @@ final class Profile {
             photo.delete();
             return true;
         }
-        // Google serves 96px by default; ask for the size it's shown at. The address is checked on the
-        // very URL that's fetched, so no difference between two parsers can slip past it.
-        URL url = new URL(picture.replaceAll("=s\\d+(-c)?$", "") + "=s" + Math.max(128, size * 2) + "-c");
+        // Google serves 96px by default; ask for the size it's shown at (a size suffix on the path,
+        // so not on an address with a query, which is fetched as it is). The address is checked on
+        // the very URL that's fetched, so no difference between two parsers can slip past it.
+        String sized = picture.indexOf('?') >= 0 ? picture
+                : picture.replaceAll("=s\\d+(-c)?$", "") + "=s" + Math.max(128, size * 2) + "-c";
+        URL url = new URL(sized);
         String host = url.getHost();
         if (!"https".equals(url.getProtocol()) || host == null || !host.endsWith(".googleusercontent.com")) {
             throw new IOException("unexpected photo address");

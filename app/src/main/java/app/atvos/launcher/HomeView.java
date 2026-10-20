@@ -11,11 +11,13 @@ import android.graphics.ColorFilter;
 import android.graphics.ColorMatrix;
 import android.graphics.ColorMatrixColorFilter;
 import android.graphics.DashPathEffect;
+import android.graphics.HardwareRenderer;
 import android.graphics.LightingColorFilter;
 import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PixelFormat;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.RadialGradient;
@@ -26,6 +28,9 @@ import android.graphics.RenderNode;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.hardware.HardwareBuffer;
+import android.media.Image;
+import android.media.ImageReader;
 import android.os.SystemClock;
 import android.text.Layout;
 import android.text.StaticLayout;
@@ -157,6 +162,10 @@ final class HomeView extends View {
     // The Delete alert
     private static final float ALERT_W = 660f, ALERT_PAD = 40f, ALERT_BUTTON_H = 70f;
     private static final float PLAY_H = 64f, PLAY_PAD = 34f, PLAY_ICON = 22f, PLAY_GAP = 14f, PLAY_BAR = 88f;
+    // The one glass for the controls over the backdrop (the dock, the clock pill, Play, the pager's
+    // arrows and dots): its tint, and the light over which what's on it turns dark.
+    private static final int GLASS_TINT = 0x1AFFFFFF, INK_DARK = 28;
+    private static final float INK_FROM = 0.55f, INK_TO = 0.70f;
     // The full-screen top shelf's paging controls, as tvOS shows them for a click remote: arrows at
     // the sides, page dots at the bottom, shown on arrival and on each page, then fading away.
     private static final float PAGER_ARROW_D = 80f, PAGER_ARROW_X = 130f, PAGER_DOT = 8f, PAGER_DOT_STEP = 21f,
@@ -191,7 +200,7 @@ final class HomeView extends View {
     private float away; // 0 in the dock, 1 once focus is in the grid: blurs and dims the backdrop
     private int dim; // black overlay alpha once focus leaves the dock
     // Liquid-glass text colour over the backdrop: 0 = white, 1 = dark (on bright images)
-    private float clockInk, hintInk, ccInk;
+    private float clockInk, ccInk;
     private boolean expanded, menuOpen, longPressed, pillFocused, ccOpen;
     private boolean rowFocused; // a card in the row shelf is focused (Up from the dock)
     private int rowIndex;          // which card
@@ -240,7 +249,7 @@ final class HomeView extends View {
 
     // Control Center (opened from the clock pill)
     private final ControlCenter cc;
-    private final ControlCenter.Glass ccGlass = (c, rect, radius, tint, alpha) -> drawGlass(c, rect, radius, 0f, tint, alpha);
+    private final ControlCenter.Glass ccGlass = (c, rect, radius, tint, alpha) -> drawGlass(c, rect, radius, 0f, tint, alpha, ccAnim > 0f);
 
     // Long-press menu, as on tvOS: options beside the tile, and a second list beside them for the
     // options that open one (Move to…, Top Shelf…).
@@ -336,6 +345,19 @@ final class HomeView extends View {
     private RenderNode homeNode;
     private final Paint homePaint = new Paint();
     private double homeSig, frozenSig = Double.NaN;
+    // That home screen small and blurred, for the Control Center's glass to show the cards and tiles
+    // under it (see snapHome): drawn offscreen by a renderer of its own, at most every SNAP_MS, and
+    // ahead of time while the clock pill has focus and nothing moves.
+    private HardwareRenderer snapRenderer;
+    private ImageReader snapReader;
+    private RenderNode snapNode;
+    private Bitmap homeBlur;
+    private android.graphics.BitmapShader homeBlurShader;
+    private double homeBlurSig = Double.NaN;
+    private long homeBlurAt;
+    private boolean snapUnavailable;
+    private static final long SNAP_MS = 120;
+    private final Runnable snapAhead = this::snapAhead;
     private final LinearGradient rimGradient, sheenGradient;
     private LinearGradient marqueeFade;  // the edges' fade, made for the focused card's width
     private float marqueeFadeFor;
@@ -556,7 +578,8 @@ final class HomeView extends View {
         previous = backdrop;
         backdrop = b;
         fade = previous == null ? 1f : 0f;
-        hintTint = vibrant(b.hintColor);
+        // Not from a full-screen picture: the darkening baked into it would dull the hint fading out.
+        if (!b.details) hintTint = vibrant(b.hintColor);
         if (expanded) page = pageOf(b.program);
         setRow(b.row != null ? b.row : Collections.<Backdrops.Card>emptyList());
         kick();
@@ -687,6 +710,10 @@ final class HomeView extends View {
         removeCallbacks(tick);
         removeCallbacks(hidePager);
         removeCallbacks(marqueeWake);
+        removeCallbacks(snapAhead);
+        releaseSnap();
+        if (homeNode != null) homeNode.discardDisplayList();
+        frozenSig = Double.NaN;
         super.onDetachedFromWindow();
     }
 
@@ -1101,6 +1128,7 @@ final class HomeView extends View {
             Apps.Entry e = focused();
             pages = e != null ? host.shelfPages(e) : Collections.emptyList();
             page = pageOf(backdrop != null ? backdrop.program : null);
+            playRect.setEmpty(); // placed when first drawn, for this program's width: screen readers wait
             showPager();
         } else {
             removeCallbacks(hidePager);
@@ -1807,10 +1835,8 @@ final class HomeView extends View {
         float shade = 1f - 0.39f * away;
         Backdrops.Backdrop b = backdrop;
         float clockLight = b == null ? 0f : (b.clockLight * shade) * 0.9f + 0.1f;   // + the pill's white tint
-        float hintLight = b == null ? 0f : b.hintLight * 0.78f;                      // under the bottom scrim
         float ccLight = b == null ? 0f : b.controlsLight * 0.86f + 0.14f;            // + the tiles' white tint
         clockInk = ease(clockInk, clockLight > 0.6f ? 1f : 0f, 6f, dt, 0.002f);
-        hintInk = ease(hintInk, hintLight > 0.6f ? 1f : 0f, 6f, dt, 0.002f);
         ccInk = ease(ccInk, ccLight > 0.62f ? 1f : 0f, 6f, dt, 0.002f);
         fade = ease(fade, 1f, 9f, dt, 0.002f);
         if (fade == 1f) previous = null;
@@ -1833,8 +1859,8 @@ final class HomeView extends View {
     private double homeFingerprint() {
         double f = scroll + away * 3 + expand * 5 + rowAnim * 7 + playFocus * 11 + rowScroll * 13 + pagerAnim * 17
                 + editAnim * 19 + downProgress * 23 + downAppear * 29 + bounce * 31 + hint * 37 + fade * 41
-                + marqueeOffset * 43 + hintInk * 47 + System.identityHashCode(backdrop) + 3.0 * System.identityHashCode(previous)
-                + (light ? 53 : 0) + focus * 59 + (menuAnim > 0f ? 61 : 0);
+                + marqueeOffset * 43 + System.identityHashCode(backdrop) + 3.0 * System.identityHashCode(previous)
+                + (light ? 53 : 0) + focus * 59 + (menuAnim > 0f ? 61 : 0) + (folderCover() > 0.999f ? 73 : 0);
         for (float v : rowFocus) f += v * 67;
         for (int i = 0, n = total(); i < n; i++) {
             Apps.Entry e = entry(i);
@@ -1886,6 +1912,7 @@ final class HomeView extends View {
     protected void onSizeChanged(int w, int h, int oldW, int oldH) {
         scale = w / W;
         height = h / scale;
+        frozenSig = homeBlurSig = Double.NaN; // the frozen home and its picture are the old size
         // Behind the full-screen shelf's details: darkest at the bottom-left corner, in one pass.
         detailsScrim.setShader(new RadialGradient(0f, height, Backdrops.DETAILS_SCRIM_RADIUS, Backdrops.DETAILS_SCRIM,
                 new float[]{0f, 0.5f, 1f}, Shader.TileMode.CLAMP));
@@ -1932,6 +1959,10 @@ final class HomeView extends View {
         c.restore();
 
         if (animating) postInvalidateOnAnimation();
+        else if (pillFocused && ccAnim == 0f && homeBlurSig != homeSig && !snapUnavailable && c.isHardwareAccelerated()) {
+            removeCallbacks(snapAhead);
+            post(snapAhead);
+        }
         a11y.drawn(); // what just opened has bounds now, for screen readers
     }
 
@@ -1951,12 +1982,84 @@ final class HomeView extends View {
             homeNode.endRecording();
             frozenSig = homeSig;
         }
+        if (homeBlurSig != frozenSig && !snapUnavailable) {
+            long wait = SNAP_MS - (SystemClock.uptimeMillis() - homeBlurAt);
+            if (wait <= 0) snapHome(covered, frozenSig);
+            else postInvalidateDelayed(wait);
+        }
         homePaint.setColorFilter(dimFilter(Math.round(110 * ccAnim))); // the Control Center's dim
         homeNode.setUseCompositingLayer(true, homePaint);
         c.save();
         c.scale(1f / scale, 1f / scale);
         c.drawRenderNode(homeNode);
         c.restore();
+    }
+
+    /**
+     * The home screen under the Control Center, cards and all, blurred like a backdrop for its glass:
+     * drawn by a second renderer into a buffer the blur's size, read back and blurred on the CPU.
+     * Some milliseconds, so taken ahead while the clock pill has focus and nothing moves (the
+     * home under the Control Center is the same), or as it opens, and again if the home moves.
+     * {@code sig} is the fingerprint of the home being drawn.
+     */
+    private void snapHome(boolean covered, double sig) {
+        int w = Backdrops.BLUR_W, h = Math.max(1, Math.round(w * height / W));
+        homeBlurAt = SystemClock.uptimeMillis(); // tried, at least: the next try waits SNAP_MS
+        try {
+            if (snapReader == null || snapReader.getWidth() != w || snapReader.getHeight() != h) {
+                releaseSnap();
+                snapReader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2,
+                        HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE | HardwareBuffer.USAGE_GPU_COLOR_OUTPUT);
+                snapNode = new RenderNode("home snapshot");
+                snapNode.setPosition(0, 0, w, h);
+                snapRenderer = new HardwareRenderer();
+                snapRenderer.setSurface(snapReader.getSurface());
+                snapRenderer.setContentRoot(snapNode);
+            }
+            RecordingCanvas rc = snapNode.beginRecording();
+            rc.scale(w / W, h / height);
+            drawHome(rc, covered);
+            snapNode.endRecording();
+            snapRenderer.createRenderRequest().setWaitForPresent(true).syncAndDraw();
+            Bitmap pixels = null;
+            try (Image image = snapReader.acquireLatestImage()) {
+                HardwareBuffer buffer = image != null ? image.getHardwareBuffer() : null;
+                if (buffer != null) {
+                    Bitmap hardware = Bitmap.wrapHardwareBuffer(buffer, null);
+                    buffer.close();
+                    if (hardware != null) {
+                        pixels = hardware.copy(Bitmap.Config.ARGB_8888, true); // mutable: blurred in place
+                        hardware.recycle();
+                    }
+                }
+            }
+            if (pixels == null) {
+                homeBlurShader = null; // the backdrop alone, rather than another home's
+                return;
+            }
+            homeBlur = Backdrops.boxBlur(pixels);
+            if (homeBlur != pixels) pixels.recycle();
+            homeBlurShader = new android.graphics.BitmapShader(homeBlur, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            homeBlurSig = sig;
+        } catch (RuntimeException e) {
+            // No offscreen rendering here: the glass shows the backdrop alone, as it used to.
+            snapUnavailable = true;
+            releaseSnap();
+        }
+    }
+
+    /** The Control Center is likely next: its glass's picture of the home, taken while nothing moves. */
+    private void snapAhead() {
+        if (animating || !pillFocused || ccAnim > 0f || homeBlurSig == homeSig || !isAttachedToWindow()) return;
+        snapHome(folderCover() > 0.999f, homeSig);
+    }
+
+    private void releaseSnap() {
+        if (snapRenderer != null) snapRenderer.destroy();
+        if (snapReader != null) snapReader.close();
+        snapRenderer = null;
+        snapReader = null;
+        snapNode = null;
     }
 
     /** The home screen under the overlays: the backdrop, the row or details, the dock and grid, the pager. */
@@ -2031,9 +2134,17 @@ final class HomeView extends View {
      * {@code offsetY} is the canvas' current y translation.
      */
     private void drawGlass(Canvas c, RectF rect, float radius, float offsetY, int tint, int alpha) {
+        drawGlass(c, rect, radius, offsetY, tint, alpha, false);
+    }
+
+    /** {@code overHome}: glass over the whole home screen (the Control Center's), showing all of it, not just the backdrop. */
+    private void drawGlass(Canvas c, RectF rect, float radius, float offsetY, int tint, int alpha, boolean overHome) {
         Bitmap blur = null;
         android.graphics.BitmapShader shader = null;
-        if (previous != null && backdrop != null && mixBlurs()) {
+        if (overHome && homeBlurShader != null) {
+            blur = homeBlur;
+            shader = homeBlurShader;
+        } else if (previous != null && backdrop != null && mixBlurs()) {
             blur = mixedBlur;
             shader = mixedShader;
         } else if (backdrop != null) {
@@ -2045,7 +2156,7 @@ final class HomeView extends View {
             m.postTranslate(0f, -offsetY);
             shader.setLocalMatrix(m);
             glass.setShader(shader);
-            glass.setColorFilter(glassFilter(tint, dim));
+            glass.setColorFilter(glassFilter(tint, overHome && blur == homeBlur ? 0 : dim)); // the home's picture is dimmed already
             glass.setAlpha(alpha);
             c.drawRoundRect(rect, radius, radius, glass);
         }
@@ -2054,6 +2165,35 @@ final class HomeView extends View {
         rimGradient.setLocalMatrix(m);
         rim.setAlpha(alpha);
         c.drawRoundRect(rect, radius, radius, rim);
+    }
+
+    /**
+     * The grey for type and glyphs on the controls' glass over {@code rect}: white, turning dark
+     * as the glass comes out bright (a white picture with no darkening there, say), as tvOS does.
+     */
+    private int glassInk(RectF rect) {
+        float light = lightUnder(backdrop, rect);
+        if (previous != null) light = light * fade + lightUnder(previous, rect) * (1f - fade);
+        float ta = Color.alpha(GLASS_TINT) / 255f;
+        light = light * (1f - ta) + ta; // under the glass's white tint
+        float t = Math.max(0f, Math.min(1f, (light - INK_FROM) / (INK_TO - INK_FROM)));
+        t = t * t * (3f - 2f * t);
+        return Math.round(255 - (255 - INK_DARK) * t);
+    }
+
+    /** Mean luminance (0–1) of a backdrop's blur under {@code rect}, in design units on the screen. */
+    private float lightUnder(Backdrops.Backdrop b, RectF rect) {
+        if (b == null) return 0f;
+        int bw = b.blur.getWidth(), bh = b.blur.getHeight();
+        int x0 = Math.max(0, Math.min(bw - 1, (int) (rect.left / W * bw)));
+        int x1 = Math.max(x0 + 1, Math.min(bw, (int) Math.ceil(rect.right / W * bw)));
+        int y0 = Math.max(0, Math.min(bh - 1, (int) (rect.top / height * bh)));
+        int y1 = Math.max(y0 + 1, Math.min(bh, (int) Math.ceil(rect.bottom / height * bh)));
+        float sum = 0f;
+        for (int y = y0; y < y1; y++) {
+            for (int x = x0; x < x1; x++) sum += Backdrops.luminance(b.blurPixels[y * bw + x]);
+        }
+        return sum / ((x1 - x0) * (y1 - y0));
     }
 
     /**
@@ -2117,7 +2257,7 @@ final class HomeView extends View {
     private void drawDock(Canvas c, float offset) {
         r.set(GRID_X - DOCK_PAD_X, DOCK_ROW_Y - DOCK_PAD_Y, EDGE, DOCK_ROW_Y + TILE_H + DOCK_PAD_Y);
         if (r.bottom + offset < 0f || r.top + offset > height) return;
-        drawGlass(c, r, TILE_R + DOCK_PAD_Y, offset, 0x14FFFFFF, 255);
+        drawGlass(c, r, TILE_R + DOCK_PAD_Y, offset, GLASS_TINT, 255);
     }
 
     /** A home-screen tile: greyed in Hidden, named when focused below the dock. */
@@ -2316,12 +2456,13 @@ final class HomeView extends View {
             if (side < 0 ? page <= 0 : page >= pages.size() - 1) continue;
             float cx = side < 0 ? PAGER_ARROW_X : W - PAGER_ARROW_X;
             r.set(cx - rad, cy - rad, cx + rad, cy + rad);
-            drawGlass(c, r, rad, 0f, 0x80000000, alpha);
+            drawGlass(c, r, rad, 0f, GLASS_TINT, alpha);
+            int ink = glassInk(r);
             c.save();
             c.translate(cx + side * 2f, cy);
             c.scale(side, 1f);
             stroke.setStrokeWidth(4f);
-            stroke.setColor(Color.argb(alpha, 255, 255, 255));
+            stroke.setColor(Color.argb(alpha, ink, ink, ink));
             c.drawPath(pagerChevron, stroke);
             stroke.setStrokeWidth(3f);
             c.restore();
@@ -2329,10 +2470,11 @@ final class HomeView extends View {
         float w = (pages.size() - 1) * PAGER_DOT_STEP + 2f * PAGER_DOTS_H, cx = W / 2f;
         float bottom = height - PAGER_DOTS_BOTTOM;
         r.set(cx - w / 2f, bottom - PAGER_DOTS_H, cx + w / 2f, bottom);
-        drawGlass(c, r, PAGER_DOTS_H / 2f, 0f, 0x80000000, alpha);
+        drawGlass(c, r, PAGER_DOTS_H / 2f, 0f, GLASS_TINT, alpha);
+        int ink = glassInk(r);
         for (int i = 0; i < pages.size(); i++) {
             float dx = cx + (i - (pages.size() - 1) / 2f) * PAGER_DOT_STEP;
-            fill.setColor(Color.WHITE);
+            fill.setColor(Color.rgb(ink, ink, ink));
             fill.setAlpha(Math.round(alpha * (i == page ? 1f : 0.25f)));
             c.drawCircle(dx, bottom - PAGER_DOTS_H / 2f, PAGER_DOT / 2f, fill);
         }
@@ -2352,7 +2494,7 @@ final class HomeView extends View {
             float grow = 1f + 0.05f * pillAnim;
             float w = (pad + timeWidth + gap + size + 8f) * grow, gh = h * grow;
             r.set(EDGE - w, cy - gh / 2f, EDGE, cy + gh / 2f);
-            drawGlass(c, r, gh / 2f, 0f, 0x1AFFFFFF, pillAlpha);
+            drawGlass(c, r, gh / 2f, 0f, GLASS_TINT, pillAlpha);
             if (pillAnim > 0.01f) {
                 fill.setColor(Color.argb(Math.round(pillAlpha * pillAnim * 0.96f), 255, 255, 255));
                 c.drawRoundRect(r, gh / 2f, gh / 2f, fill);
@@ -2516,10 +2658,11 @@ final class HomeView extends View {
         if (item != detailsFor) layOutDetails(item);
         int alpha = Math.round(255 * expand);
         // The darkening behind the details is baked into the full-screen picture: drawn here only for
-        // as much of the picture as doesn't have it yet (fading in after Up, say).
+        // what the pictures on screen don't carry yet of the share the details need (fading in after
+        // Up, say, before the full-screen picture is ready).
         float baked = (b.details ? 1f : 0f) * (previous != null ? fade : 1f)
                 + (previous != null && previous.details ? 1f - fade : 0f);
-        int scrim = Math.round(alpha * (1f - baked));
+        int scrim = Math.round(255 * Math.max(0f, expand - baked));
         if (scrim > 2) {
             detailsScrim.setAlpha(scrim);
             c.drawRect(0f, 0f, W, height, detailsScrim);
@@ -2554,12 +2697,16 @@ final class HomeView extends View {
         float f = playFocus;
         r.set(x, y, x + detailsPlayWidth, y + PLAY_H);
         playRect.set(r);
-        if (f < 0.99f) drawGlass(c, r, PLAY_H / 2f, 0f, 0x24FFFFFF, Math.round(alpha * (1f - f)));
+        int glassInk = 255;
+        if (f < 0.99f) {
+            drawGlass(c, r, PLAY_H / 2f, 0f, GLASS_TINT, Math.round(alpha * (1f - f)));
+            glassInk = glassInk(r);
+        }
         if (f > 0.01f) {
             fill.setColor(Color.argb(Math.round(alpha * f * 0.97f), 255, 255, 255));
             c.drawRoundRect(r, PLAY_H / 2f, PLAY_H / 2f, fill);
         }
-        int level = Math.round(255 - (255 - 20) * f), ink = Color.argb(alpha, level, level, level);
+        int level = Math.round(glassInk + (20 - glassInk) * f), ink = Color.argb(alpha, level, level, level);
         float ix = x + PLAY_PAD;
         c.save();
         c.translate(ix, y + (PLAY_H - PLAY_ICON) / 2f);
@@ -2574,8 +2721,8 @@ final class HomeView extends View {
         float tx = ix + PLAY_ICON + PLAY_GAP;
         if (detailsProgress > 0f) {
             float cy = y + PLAY_H / 2f, h = 6f;
-            // The track: light grey on the white capsule, faint white on the glass.
-            int track = Math.round(255 - (255 - 204) * f);
+            // The track: light grey on the white capsule, faint ink on the glass.
+            int track = Math.round(glassInk + (204 - glassInk) * f);
             fill.setColor(Color.argb(Math.round(alpha * (0.4f + 0.6f * f)), track, track, track));
             c.drawRoundRect(tx, cy - h / 2f, tx + PLAY_BAR, cy + h / 2f, h / 2f, h / 2f, fill);
             fill.setColor(ink);

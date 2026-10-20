@@ -4,6 +4,8 @@ import android.animation.ValueAnimator;
 import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BlurMaskFilter;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -101,6 +103,12 @@ final class SettingsScreen {
             valueText = new TextPaint(Paint.ANTI_ALIAS_FLAG), headerText = new TextPaint(Paint.ANTI_ALIAS_FLAG),
             aboutText = new TextPaint(Paint.ANTI_ALIAS_FLAG), noteText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+    // The focused row's drop shadow, blurred once and scaled with the row: a shadow layer on a pill
+    // whose size animates makes the GPU build (and keep) a new blurred mask for every size it passes.
+    private final Paint shadow = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private final Bitmap shadowMask = makeShadowMask();
+    private final RectF shadowRect = new RectF();
+    private static final float SHADOW_BLUR = 22f, SHADOW_PAD = 44f, SHADOW_DY = 8f, ROW_GROW_W = 1.016f, ROW_GROW_H = 1.06f;
     private final Path chevron = new Path(), tick = new Path();
     private final RectF r = new RectF(), logoRect = new RectF(ICON_X, ICON_Y, ICON_X + ICON_SIZE, ICON_Y + ICON_SIZE);
     private final List<Row> rows = new ArrayList<>();
@@ -124,6 +132,7 @@ final class SettingsScreen {
     SettingsScreen(Context context, Host host) {
         this.context = context;
         this.host = host;
+        shadow.setColor(Color.BLACK);
         logo = new Logo(context);
         titleText.setTypeface(Typeface.create(Typeface.DEFAULT, 700, false));
         titleText.setTextSize(60f);
@@ -581,18 +590,22 @@ final class SettingsScreen {
             c.drawText(fitTitle[i], HEADER_X, top + HEADER_BASELINE, headerText);
             return;
         }
-        float f = row.kind() == INFO || i >= focus.length ? 0f : focus[i], grow = 1f + 0.016f * f; // a fact never lights up
+        float f = row.kind() == INFO || i >= focus.length ? 0f : focus[i]; // a fact never lights up
         float cx = ROW_X + ROW_W / 2f, cy = top + ROW_H / 2f;
-        float w = ROW_W * grow, h = ROW_H * (1f + 0.06f * f);
+        float w = ROW_W * (1f + (ROW_GROW_W - 1f) * f), h = ROW_H * (1f + (ROW_GROW_H - 1f) * f);
         r.set(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f);
         rowRects.get(i).set(r);
         if (r.bottom < ROW_TOP - 30f || r.top > 1080f) return;
         if (row.kind() != INFO) { // a fact has no pill
-            if (f > 0.01f) fill.setShadowLayer(22f, 0f, 8f, Color.argb(Math.round(alpha * 0.28f * f), 0, 0, 0));
+            if (f > 0.01f) {
+                float padX = SHADOW_PAD * w / (ROW_W * ROW_GROW_W), padY = SHADOW_PAD * h / (ROW_H * ROW_GROW_H);
+                shadowRect.set(r.left - padX, r.top - padY + SHADOW_DY, r.right + padX, r.bottom + padY + SHADOW_DY);
+                shadow.setAlpha(Math.round(alpha * 0.28f * f));
+                c.drawBitmap(shadowMask, null, shadowRect, shadow);
+            }
             fill.setColor(blend(pill, Color.WHITE, f));
             fill.setAlpha(alpha);
             c.drawRoundRect(r, h / 2f, h / 2f, fill);
-            fill.clearShadowLayer();
         }
         int text = row.enabled() ? blend(ink, Color.BLACK, f) : blend(offInk, 0xFFA1A1A6, f);
         int soft = blend(valueInk, 0xFF8A8A8E, f);
@@ -637,5 +650,16 @@ final class SettingsScreen {
             boolean clickable = row.kind() != INFO && row.action() != null && row.enabled(); // words to read aren't buttons
             out.add(new A11y.Item(base + i, row.title(), state, hint, new RectF(rowRects.get(i)), i == sel, clickable));
         }
+    }
+
+    /** The focused row's shadow: its pill at full focus, blurred as the shadow layer it replaces was, in design units. */
+    private static Bitmap makeShadowMask() {
+        float w = ROW_W * ROW_GROW_W, h = ROW_H * ROW_GROW_H;
+        int bw = Math.round(w + 2 * SHADOW_PAD), bh = Math.round(h + 2 * SHADOW_PAD);
+        Bitmap b = Bitmap.createBitmap(bw, bh, Bitmap.Config.ALPHA_8);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setMaskFilter(new BlurMaskFilter(SHADOW_BLUR, BlurMaskFilter.Blur.NORMAL));
+        new Canvas(b).drawRoundRect(new RectF(SHADOW_PAD, SHADOW_PAD, bw - SHADOW_PAD, bh - SHADOW_PAD), h / 2f, h / 2f, p);
+        return b;
     }
 }

@@ -44,6 +44,11 @@ final class Recommendations {
     private record Ranked(Item item, long a, long b) {
     }
 
+    /** {@code v} as a rank that puts larger first: negated, but never overflowing (-Long.MIN_VALUE is itself). */
+    private static long descending(long v) {
+        return v == Long.MIN_VALUE ? Long.MAX_VALUE : -v;
+    }
+
     /**
      * One program to show behind the dock or in its app's row. {@code section}: the row it's in,
      * null for Watch Next ("Continue Watching"), "" for a preview program ("Recommended").
@@ -129,7 +134,7 @@ final class Recommendations {
                     Item item = item(context, c, null);
                     if (item == null) continue;
                     long when = c.isNull(ORDER_A) ? 0 : c.getLong(ORDER_A), id = c.isNull(ORDER_B) ? 0 : c.getLong(ORDER_B);
-                    engaged.computeIfAbsent(pkg, k -> new ArrayList<>()).add(new Ranked(item, -when, -id)); // newest first
+                    engaged.computeIfAbsent(pkg, k -> new ArrayList<>()).add(new Ranked(item, descending(when), descending(id))); // newest first
                 } catch (RuntimeException ignored) {
                     // skip it
                 }
@@ -149,7 +154,7 @@ final class Recommendations {
                     Item item = item(context, c, ""); // "Recommended", whatever the app names its channels
                     if (item == null) continue;
                     long weight = c.isNull(ORDER_B) ? 0 : c.getLong(ORDER_B);
-                    channels.computeIfAbsent(pkg, k -> new ArrayList<>()).add(new Ranked(item, channel, -weight));
+                    channels.computeIfAbsent(pkg, k -> new ArrayList<>()).add(new Ranked(item, channel, descending(weight)));
                 } catch (RuntimeException ignored) {
                     // skip it
                 }
