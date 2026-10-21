@@ -78,6 +78,9 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     private final ExecutorService io = new Background("atvos-io",
             Process.THREAD_PRIORITY_BACKGROUND + Process.THREAD_PRIORITY_MORE_FAVORABLE);
     private final ExecutorService net = new Background("atvos-net", Process.THREAD_PRIORITY_BACKGROUND); // downloads
+    // The backdrop of the focused app. It does not wait for a scan of the apps and recommendations on io.
+    private final ExecutorService decode = new Background("atvos-decode",
+            Process.THREAD_PRIORITY_BACKGROUND + Process.THREAD_PRIORITY_MORE_FAVORABLE);
     private final AtomicBoolean prefetchQueued = new AtomicBoolean();
     private final Set<String> pagesQueued = ConcurrentHashMap.newKeySet(); // apps whose other shelf pages are downloaded
     private Apps apps;
@@ -255,6 +258,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         unregisterReceiver(packages);
         io.shutdownNow();
         net.shutdownNow();
+        decode.shutdownNow();
         donation.end();
         super.onDestroy();
     }
@@ -313,7 +317,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
             view.setBackdrop(cached);
             return;
         }
-        io.execute(() -> {
+        decode.execute(() -> {
             if (!key.equals(wantedBackdrop)) return; // the focus moved
             Backdrops.Backdrop loaded = backdrops.load(key, program);
             runOnUiThread(() -> {

@@ -429,8 +429,8 @@ final class Backdrops {
 
 
     /**
-     * Prepares the backdrop for {@code key}, or returns null. The images are on disk. Out of memory gives null. IO
-     * thread.
+     * Prepares the backdrop for {@code key}, or returns null. The images are on disk. Out of memory gives null. Decode
+     * thread: it can run at the same time as {@link #scan} and the downloads, so it reads only their thread-safe state.
      */
     Backdrop load(String key, Recommendations.Item program) {
         try {
