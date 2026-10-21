@@ -58,7 +58,7 @@ final class ControlCenter {
             system, search, settings, switches;
     private final String powerOff, wifiLabel, ethernetLabel, connected, notConnected, dndLabel,
             bluetoothLabel, on, off, sleepTimerLabel, sleepLabel, minutes, profileLabel, settingsLabel, inputsLabel,
-            accessibilityLabel, systemLabel, searchLabel, launcherSettingsLabel;
+            accessibilityLabel, systemLabel, searchLabel, launcherSettingsLabel, notAvailable;
 
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -133,6 +133,7 @@ final class ControlCenter {
         searchLabel = context.getString(R.string.a11y_search);
         launcherSettingsLabel = context.getString(R.string.a11y_launcher_settings);
         minutes = context.getString(R.string.minutes);
+        notAvailable = context.getString(R.string.not_available);
 
         text.setTypeface(Typeface.create(Typeface.DEFAULT, 500, false));
         ring.setStyle(Paint.Style.STROKE);
@@ -250,7 +251,7 @@ final class ControlCenter {
         Controls.State s = state;
         return switch (id) {
             case WIFI -> s.online ? connected : notConnected;
-            case DND -> s.dnd ? on : off;
+            case DND -> !s.dndAvailable ? notAvailable : s.dnd ? on : off;
             case BLUETOOTH ->
                     s.bluetoothDevice != null ? s.bluetoothDevice : s.bluetoothOn ? on : off;
             case SLEEP -> s.sleepAt > 0 ? sleep2 : off;
@@ -295,7 +296,8 @@ final class ControlCenter {
         Controls.State s = state;
         tile(c, glass, POWER, alpha, power, 0, null, null);
         tile(c, glass, WIFI, alpha, s.ethernet ? ethernet : wifi, s.online ? CYAN : 0, wifi1, wifi2);
-        tile(c, glass, DND, alpha, moon, s.dnd ? INDIGO : 0, dnd1, dnd2);
+        // A tile that cannot work on this TV is dimmed, as tvOS dims a row that is not available.
+        tile(c, glass, DND, s.dndAvailable ? alpha : Math.round(alpha * 0.45f), moon, s.dnd ? INDIGO : 0, dnd1, dnd2);
         tile(c, glass, BLUETOOTH, alpha, s.bluetoothDevice != null ? headphones : bluetooth,
                 s.bluetoothOn ? CYAN : 0, bt1, bt2);
         tile(c, glass, SLEEP, alpha, timer, s.sleepAt > 0 ? ORANGE : 0, sleep1, sleep2);

@@ -41,6 +41,10 @@
         <intent>
             <action android:name="android.settings.HOME_SETTINGS" />
         </intent>
+        <!-- The Do Not Disturb access screen, which Google TV does not have. -->
+        <intent>
+            <action android:name="android.settings.NOTIFICATION_POLICY_ACCESS_SETTINGS" />
+        </intent>
         <provider android:authorities="android.media.tv" />
         <!-- Google Play, for the Support page. -->
         <intent>

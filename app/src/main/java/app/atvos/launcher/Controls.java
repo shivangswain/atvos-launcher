@@ -40,6 +40,7 @@ final class Controls {
     /** A copy of the state for the tile draw. */
     static final class State {
         boolean online, ethernet, dnd, bluetoothOn;
+        boolean dndAvailable;   // atvOS has Do Not Disturb access, or the TV has the screen that gives it
         String bluetoothDevice; // the connected Bluetooth audio device, or null
         long sleepAt;           // the deadline in SystemClock.elapsedRealtime(), or 0 when off
     }
@@ -92,6 +93,8 @@ final class Controls {
 
         NotificationManager nm = activity.getSystemService(NotificationManager.class);
         s.dnd = nm.getCurrentInterruptionFilter() > NotificationManager.INTERRUPTION_FILTER_ALL;
+        // Google TV has no screen to give Do Not Disturb access, so there the tile shows that it is not available.
+        s.dndAvailable = nm.isNotificationPolicyAccessGranted() || resolves(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS);
 
         // The adapter state needs no permission on Android 12 and later. The connected headphones come from the audio
         // routes, so BLUETOOTH_CONNECT is not necessary.
@@ -313,9 +316,14 @@ final class Controls {
         return open(Settings.ACTION_HOME_SETTINGS);
     }
 
-    @SuppressWarnings("deprecation")
     private boolean hasHomeSettings() {
-        return activity.getPackageManager().resolveActivity(new Intent(Settings.ACTION_HOME_SETTINGS), PackageManager.MATCH_DEFAULT_ONLY) != null;
+        return resolves(Settings.ACTION_HOME_SETTINGS);
+    }
+
+    /** Returns true if an activity of the TV opens {@code action}. The action must be in the manifest's queries. */
+    @SuppressWarnings("deprecation") // the int-flag method is available on Android 12 and later
+    private boolean resolves(String action) {
+        return activity.getPackageManager().resolveActivity(new Intent(action), PackageManager.MATCH_DEFAULT_ONLY) != null;
     }
 
     /** Opens a screen by intent action. Returns false if no app can open it. */
