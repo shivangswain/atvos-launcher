@@ -342,9 +342,13 @@ final class SetupFlow {
             }
             default -> { // Done
                 title = context.getString(R.string.setup_done_title);
-                bodyRes = setup.homeActive ? R.string.setup_done_body : R.string.setup_done_body_not_home;
+                // USB debugging was only for the hand-over of the Home button, and the TV is safer with it off.
+                boolean debugging = setup.homeActive && setup.adbOn && journey.contains(ALLOW);
+                bodyRes = !setup.homeActive ? R.string.setup_done_body_not_home
+                        : debugging ? R.string.setup_done_body_debugging : R.string.setup_done_body;
                 artKind = ART_CHECK;
                 add(R.string.setup_go_home, host::close);
+                if (debugging) add(R.string.setup_open_developer, host::openDeveloperOptions);
             }
         }
         sel = Math.min(sel, Math.max(0, buttons.size() - 1));

@@ -49,6 +49,8 @@
     <string name="setup_done_title">You\'re All Set</string>
     <string name="setup_done_body">atvOS Launcher is your home screen. Press Home any time to come back to it.</string>
     <string name="setup_done_body_not_home">atvOS Launcher is ready. You can make it your home screen any time from Settings in Control Center.</string>
+    <!-- Done, after the TV's own debugging set up the Home button. USB debugging is still on. -->
+    <string name="setup_done_body_debugging">atvOS Launcher is your home screen. You can now turn off USB debugging in Developer options. Turn it on again only to restore the TV\'s own home screen.</string>
     <string name="setup_go_home">Go to Home Screen</string>
     <string name="setup_tv_connecting">Connecting to this TV…</string>
     <string name="setup_tv_approve">Approve “Allow USB debugging” on your TV…</string>
