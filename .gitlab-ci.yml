@@ -1,4 +1,5 @@
-# Builds the pre-release APK and app bundle of atvOS Launcher on GitLab's shared Linux runners.
+# Builds and lints atvOS Launcher on GitLab's shared Linux runners. .github/workflows/ci.yml runs the same build on
+# GitHub.
 workflow:
   rules:
     - if: $CI_COMMIT_TAG =~ /^v.*-pre/
@@ -39,11 +40,21 @@ build:
     # GitLab runs the script with pipefail: "yes" in a pipe ends with SIGPIPE, so it comes from a process substitution.
     - '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null < <(yes)'
     - '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;36.0.0" > /dev/null'
+    # The upload key, if the project has the signing variables. Without them, the release build uses the debug key.
+    - |
+      if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+        echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > release.jks
+        printf 'storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+          "$ANDROID_KEYSTORE_PASSWORD" "$ANDROID_KEY_ALIAS" "$ANDROID_KEY_PASSWORD" > keystore.properties
+      fi
   script:
-    - ./gradlew assembleRelease bundleRelease
+    - ./gradlew build bundleRelease
   artifacts:
     name: "atvos-launcher-$CI_COMMIT_REF_SLUG"
+    when: always
     paths:
-      - app/build/outputs/apk/release/
-      - app/build/outputs/bundle/release/
-    expire_in: 30 days
+      - app/build/outputs/apk/debug/app-debug.apk
+      - app/build/outputs/apk/release/app-release.apk
+      - app/build/outputs/bundle/release/app-release.aab
+      - app/build/reports/lint-results-*.html
+    expire_in: 14 days
