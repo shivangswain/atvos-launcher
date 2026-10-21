@@ -31,6 +31,8 @@ import android.graphics.drawable.Drawable;
 import android.hardware.HardwareBuffer;
 import android.media.Image;
 import android.media.ImageReader;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.SystemClock;
 import android.text.Layout;
 import android.text.StaticLayout;
@@ -359,18 +361,17 @@ final class HomeView extends View {
     private RenderNode homeNode;
     private final Paint homePaint = new Paint();
     private double homeSig, frozenSig = Double.NaN;
-    // The home screen, small and blurred, for the glass of the Control Center (see snapHome). A separate renderer draws
-    // it offscreen, not more than once in SNAP_MS. It is also drawn while the clock pill has the focus and nothing
-    // moves.
-    private HardwareRenderer snapRenderer;
-    private ImageReader snapReader;
-    private RenderNode snapNode;
+    // The home screen, small and blurred, for the glass of the Control Center (see snapHome). The UI thread records it,
+    // not more than once in SNAP_MS, and the snapshot thread draws it offscreen. It is also made while the clock pill
+    // has the focus and nothing moves.
+    private Snapper snapper;
     private Bitmap homeBlur;
     private android.graphics.BitmapShader homeBlurShader;
     private double homeBlurSig = Double.NaN;
     private long homeBlurAt;
     private boolean snapUnavailable;
-    private static final long SNAP_MS = 120;
+    private boolean snapBusy; // a snapshot is on the snapshot thread; the next one waits for it
+    private static final long SNAP_MS = 120, SNAP_TIMEOUT_MS = 1000;
     private final Runnable snapAhead = this::snapAhead;
     private final LinearGradient rimGradient, sheenGradient;
     private LinearGradient marqueeFade;  // the fade of the title edges, made for the width of the focused card
@@ -2038,8 +2039,10 @@ final class HomeView extends View {
             homeNode.endRecording();
             frozenSig = homeSig;
         }
-        // A new snapshot on the first frame if the home changed. During an animation the snapshot from this Control
-        // Center stays, and a new one waits until nothing moves.
+        // A new snapshot on the first frame if the home changed. Until it arrives, the glass shows the backdrop, not a
+        // snapshot of a different home. During an animation the snapshot from this Control Center stays, and a new one
+        // waits until nothing moves.
+        if (first && homeBlurSig != frozenSig) homeBlurShader = null;
         if (homeBlurSig != frozenSig && !snapUnavailable && (first || homeBlurShader == null || !animating)) {
             long wait = first ? 0 : SNAP_MS - (SystemClock.uptimeMillis() - homeBlurAt);
             if (wait <= 0) snapHome(covered, frozenSig);
@@ -2054,55 +2057,84 @@ final class HomeView extends View {
     }
 
     /**
-     * Makes a blurred snapshot of the home screen under the Control Center, cards included, for its glass. A second
-     * renderer draws it into a buffer of the blur size. The CPU reads and blurs it. It runs while the clock pill has
-     * the focus and nothing moves, or when the Control Center opens, and again when the home screen changes.
-     * {@code sig}: the fingerprint of the home screen that it draws.
+     * Makes a blurred snapshot of the home screen under the Control Center, cards included, for its glass. The UI
+     * thread records the home screen into a new node; snapDraw draws, reads back and blurs it on the snapshot thread.
+     * One snapshot at a time. It runs while the clock pill has the focus and nothing moves, or when the Control Center
+     * opens, and again when the home screen changes. {@code sig}: the fingerprint of the home screen that it draws.
      */
     private void snapHome(boolean covered, double sig) {
+        long now = SystemClock.uptimeMillis();
+        if (snapBusy && now - homeBlurAt < SNAP_TIMEOUT_MS) return; // the result asks for the next snapshot
+        homeBlurAt = now; // the next try waits SNAP_MS
         int w = Backdrops.BLUR_W, h = Math.max(1, Math.round(w * height / W));
-        homeBlurAt = SystemClock.uptimeMillis(); // the next try waits SNAP_MS
+        // The UI thread does not change this node after endRecording, so the snapshot thread can draw it.
+        RenderNode node = new RenderNode("home snapshot");
+        node.setPosition(0, 0, w, h);
+        RecordingCanvas rc = node.beginRecording();
+        rc.scale(w / W, h / height);
+        drawHome(rc, covered);
+        node.endRecording();
+        if (snapper == null) snapper = new Snapper();
+        Snapper s = snapper;
+        snapBusy = true;
+        s.handler.post(() -> snapDraw(s, node, w, h, sig));
+    }
+
+    /**
+     * Draws the snapshot offscreen, reads it back and blurs it, then gives it to the glass on the UI thread. Snapshot
+     * thread. {@code s}: the snapshot thread that runs it.
+     */
+    private void snapDraw(Snapper s, RenderNode node, int w, int h, double sig) {
+        Bitmap blurred = null;
+        boolean failed = false;
         try {
-            if (snapReader == null || snapReader.getWidth() != w || snapReader.getHeight() != h) {
-                releaseSnap();
-                snapReader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2,
+            if (s.reader == null || s.reader.getWidth() != w || s.reader.getHeight() != h) {
+                s.close();
+                s.reader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2,
                         HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE | HardwareBuffer.USAGE_GPU_COLOR_OUTPUT);
-                snapNode = new RenderNode("home snapshot");
-                snapNode.setPosition(0, 0, w, h);
-                snapRenderer = new HardwareRenderer();
-                snapRenderer.setSurface(snapReader.getSurface());
-                snapRenderer.setContentRoot(snapNode);
+                s.renderer = new HardwareRenderer();
+                s.renderer.setSurface(s.reader.getSurface());
             }
-            RecordingCanvas rc = snapNode.beginRecording();
-            rc.scale(w / W, h / height);
-            drawHome(rc, covered);
-            snapNode.endRecording();
-            snapRenderer.createRenderRequest().setWaitForPresent(true).syncAndDraw();
-            Bitmap pixels = null;
-            try (Image image = snapReader.acquireLatestImage()) {
+            s.renderer.setContentRoot(node);
+            s.renderer.createRenderRequest().setWaitForPresent(true).syncAndDraw();
+            try (Image image = s.reader.acquireLatestImage()) {
                 HardwareBuffer buffer = image != null ? image.getHardwareBuffer() : null;
                 if (buffer != null) {
                     Bitmap hardware = Bitmap.wrapHardwareBuffer(buffer, null);
                     buffer.close();
                     if (hardware != null) {
-                        pixels = hardware.copy(Bitmap.Config.ARGB_8888, true); // mutable: blurred in place
+                        Bitmap pixels = hardware.copy(Bitmap.Config.ARGB_8888, true); // mutable: blurred in place
                         hardware.recycle();
+                        if (pixels != null) blurred = Backdrops.boxBlur(pixels);
                     }
                 }
             }
-            if (pixels == null) {
-                homeBlurShader = null; // the glass shows the backdrop only
-                return;
-            }
-            homeBlur = Backdrops.boxBlur(pixels);
-            if (homeBlur != pixels) pixels.recycle();
-            homeBlurShader = new android.graphics.BitmapShader(homeBlur, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
-            homeBlurSig = sig;
+        } catch (OutOfMemoryError e) {
+            // No snapshot this time.
         } catch (RuntimeException e) {
             // No offscreen renderer: the glass shows the backdrop only.
-            snapUnavailable = true;
-            releaseSnap();
+            failed = true;
+            s.close();
         }
+        Bitmap result = blurred;
+        boolean unavailable = failed;
+        post(() -> {
+            if (s != snapper) return; // the snapshot thread was released
+            snapBusy = false;
+            if (unavailable) {
+                snapUnavailable = true;
+                releaseSnap();
+                return;
+            }
+            // A result of a different home before this Control Center is dropped. drawFrozenHome asks for a new one.
+            boolean stale = !Double.isNaN(frozenSig) && sig != frozenSig && homeBlurShader == null;
+            if (result != null && !stale) {
+                homeBlur = result;
+                homeBlurShader = new android.graphics.BitmapShader(result, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+                homeBlurSig = sig;
+            }
+            if (result != null) invalidate();
+        });
     }
 
     /** Makes the snapshot of the home screen while nothing moves, before the Control Center opens. */
@@ -2111,12 +2143,34 @@ final class HomeView extends View {
         snapHome(folderCover() > 0.999f, homeSig);
     }
 
+    /** Stops the snapshot thread after it closes its renderer. A result that comes later is ignored. */
     private void releaseSnap() {
-        if (snapRenderer != null) snapRenderer.destroy();
-        if (snapReader != null) snapReader.close();
-        snapRenderer = null;
-        snapReader = null;
-        snapNode = null;
+        snapBusy = false;
+        if (snapper == null) return;
+        Snapper s = snapper;
+        snapper = null;
+        s.handler.post(s::close);
+        s.thread.quitSafely();
+    }
+
+    /** The offscreen renderer of the snapshot and its thread. Only that thread uses the renderer and the reader. */
+    private static final class Snapper {
+        final HandlerThread thread = new HandlerThread("atvos-snap");
+        final Handler handler;
+        HardwareRenderer renderer;
+        ImageReader reader;
+
+        Snapper() {
+            thread.start();
+            handler = new Handler(thread.getLooper());
+        }
+
+        void close() {
+            if (renderer != null) renderer.destroy();
+            if (reader != null) reader.close();
+            renderer = null;
+            reader = null;
+        }
     }
 
     /** Draws the home screen under the overlays: the backdrop, the row or details, the dock and grid, and the pager. */
