@@ -21,6 +21,7 @@ import java.security.KeyStore;
 import java.security.Signature;
 import java.security.interfaces.RSAPublicKey;
 import java.util.List;
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
@@ -46,12 +47,15 @@ final class SelfAdb {
      */
     private static final String DONE = "atvos-ok";
 
-    /** The command for each package. {@code %s} is the package name. */
+    /**
+     * The command for each package. {@code %1$s} is the package name and {@code %2$d} the Android user that runs atvOS.
+     * Without {@code --user}, both commands change user 0, which is a different user on a TV with profiles.
+     */
     enum Job {
-        /** Makes atvOS the default home app, then disables one locked home app. */
-        HOME("cmd package set-home-activity app.atvos.launcher/.HomeActivity ; pm disable-user --user 0 %s && echo " + DONE),
-        /** Enables one home app again. */
-        RESTORE("pm enable %s && echo " + DONE);
+        /** Makes atvOS the default home app of this user, then disables one locked home app for this user. */
+        HOME("cmd package set-home-activity --user %2$d app.atvos.launcher/.HomeActivity ; pm disable-user --user %2$d %1$s && echo " + DONE),
+        /** Enables one home app again for this user. */
+        RESTORE("pm enable --user %2$d %1$s && echo " + DONE);
 
         final String command;
 
@@ -59,8 +63,12 @@ final class SelfAdb {
             this.command = command;
         }
     }
-    /** The accepted package name format. A command is always a template and one name in this format. */
+    /**
+     * The accepted package name format. A command is always a template, one name in this format and the user number.
+     */
     private static final Pattern PKG = Pattern.compile("[a-zA-Z0-9_]+(\\.[a-zA-Z0-9_]+)+");
+    /** The number of uids for each Android user (UserHandle.PER_USER_RANGE): uid / range is the user number. */
+    private static final int PER_USER_RANGE = 100_000;
 
     private static final String KEY_ALIAS = "atvos-adb-auth";
     // adb authentication: the signature is RSA_sign(NID_sha1, token), PKCS#1 over the SHA-1 DigestInfo header and the
@@ -127,8 +135,10 @@ final class SelfAdb {
             if (!handshake(in, out, listener)) return Result.DENIED;
             listener.step(Listener.WORKING);
             int stream = 0; // a new id for each stream
+            int user = android.os.Process.myUid() / PER_USER_RANGE; // 0, or the user of a TV profile
             for (String pkg : packages) {
-                String cmd = String.format(job.command, pkg);
+                // ROOT: some locales format numbers with other digits, which the shell does not read.
+                String cmd = String.format(Locale.ROOT, job.command, pkg, user);
                 if (!shell(in, out, ++stream, cmd)) return Result.FAILED;
                 done.add(pkg); // records each change before the next step
             }
