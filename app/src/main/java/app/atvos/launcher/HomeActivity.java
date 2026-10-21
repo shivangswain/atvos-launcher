@@ -17,6 +17,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Process;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.format.DateFormat;
@@ -44,7 +45,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** The home activity. It owns the view, loads the apps and the backdrops on background threads, and launches apps. */
@@ -74,8 +74,10 @@ public final class HomeActivity extends Activity implements HomeView.Host {
      */
     private static final long APPROVE_GRACE_MS = 5000;
 
-    private final ExecutorService io = Executors.newSingleThreadExecutor();
-    private final ExecutorService net = Executors.newSingleThreadExecutor(); // recommendation downloads
+    // Background threads. A task that fails is logged and the thread continues. Tasks after onDestroy are dropped.
+    private final ExecutorService io = new Background("atvos-io",
+            Process.THREAD_PRIORITY_BACKGROUND + Process.THREAD_PRIORITY_MORE_FAVORABLE);
+    private final ExecutorService net = new Background("atvos-net", Process.THREAD_PRIORITY_BACKGROUND); // downloads
     private final AtomicBoolean prefetchQueued = new AtomicBoolean();
     private final Set<String> pagesQueued = ConcurrentHashMap.newKeySet(); // apps whose other shelf pages are downloaded
     private Apps apps;
