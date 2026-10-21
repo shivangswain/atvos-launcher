@@ -123,6 +123,14 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         }
     };
 
+    /** A new time or time zone, while the home screen shows: the clock changes now, not at the next minute. */
+    private final BroadcastReceiver clock = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            view.timeFormatChanged();
+        }
+    };
+
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -179,6 +187,9 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         refresh();
         profile.refresh(view::setAvatar); // not more than once a day
         view.setClockRunning(true);
+        IntentFilter time = new IntentFilter(Intent.ACTION_TIME_CHANGED);
+        time.addAction(Intent.ACTION_TIMEZONE_CHANGED);
+        registerReceiver(clock, time); // only protected system broadcasts, so no export flag
         view.refreshSetup(); // after the home app dialog or Settings
         // After the "Allow debugging" prompt: adb does not answer a declined prompt, so the wait ends after
         // APPROVE_GRACE_MS.
@@ -191,6 +202,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         view.removeCallbacks(checkApproval); // posted again at the next resume
         resumed = false;
         view.setClockRunning(false);
+        unregisterReceiver(clock);
         super.onPause();
     }
 
