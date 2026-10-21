@@ -1901,19 +1901,30 @@ final class HomeView extends View {
     }
 
     /**
-     * Returns the sum of all values that the home screen under the overlays shows. It changes when one of them changes.
+     * Returns a hash of all values that the home screen under the overlays shows. It changes when one of them changes.
+     * Each value is mixed in by its bits and its position, so two changes cannot cancel out, as they can in a sum (two
+     * tiles that swap places, say). The long is widened to a double, which is never NaN, the mark of "no layer".
      */
     private double homeFingerprint() {
-        double f = scroll + away * 3 + expand * 5 + rowAnim * 7 + playFocus * 11 + rowScroll * 13 + pagerAnim * 17
-                + editAnim * 19 + downProgress * 23 + downAppear * 29 + bounce * 31 + hint * 37 + fade * 41
-                + marqueeOffset * 43 + System.identityHashCode(backdrop) + 3.0 * System.identityHashCode(previous)
-                + (light ? 53 : 0) + focus * 59 + (menuAnim > 0f ? 61 : 0) + (folderCover() > 0.999f ? 73 : 0);
-        for (float v : rowFocus) f += v * 67;
+        long h = mix(mix(mix(mix(mix(mix(mix(1L, scroll), away), expand), rowAnim), playFocus), rowScroll), pagerAnim);
+        h = mix(mix(mix(mix(mix(mix(mix(h, editAnim), downProgress), downAppear), bounce), hint), fade), marqueeOffset);
+        h = mix(mix(h, System.identityHashCode(backdrop)), System.identityHashCode(previous));
+        h = mix(h, focus * 8 + (light ? 4 : 0) + (menuAnim > 0f ? 2 : 0) + (folderCover() > 0.999f ? 1 : 0));
+        for (float v : rowFocus) h = mix(h, v);
         for (int i = 0, n = total(); i < n; i++) {
             Apps.Entry e = entry(i);
-            f += e.x * 0.7 + e.y * 0.9 + e.focus * 71 * (i + 1);
+            h = mix(mix(mix(h, e.x), e.y), e.focus);
         }
-        return f;
+        return h;
+    }
+
+    private static long mix(long h, float v) {
+        return mix(h, Float.floatToIntBits(v));
+    }
+
+    /** Mixes {@code v} into the hash {@code h} (a multiply by the 64-bit golden ratio, as in Fibonacci hashing). */
+    private static long mix(long h, int v) {
+        return (h ^ v) * 0x9E3779B97F4A7C15L;
     }
 
     /**
