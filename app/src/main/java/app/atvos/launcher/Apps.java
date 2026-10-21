@@ -353,14 +353,14 @@ final class Apps {
                 banner.draw(c);
                 return out;
             }
-        } catch (RuntimeException ignored) {
-            // The banner of the app did not load or draw: the icon is used.
+        } catch (RuntimeException | OutOfMemoryError ignored) {
+            // The banner of the app did not load or draw (or is too large to decode): the icon is used.
             out.eraseColor(0);
         }
         try {
             drawIconTile(c, ri.loadIcon(pm));
-        } catch (RuntimeException e) {
-            // The icon of the app did not load or draw: the default icon is used.
+        } catch (RuntimeException | OutOfMemoryError e) {
+            // The icon of the app did not load or draw (or is too large to decode): the default icon is used.
             out.eraseColor(0);
             drawIconTile(c, pm.getDefaultActivityIcon());
         }
