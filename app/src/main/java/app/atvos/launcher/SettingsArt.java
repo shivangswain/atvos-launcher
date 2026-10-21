@@ -33,12 +33,15 @@ final class SettingsArt {
             ATV_ON_TRACK = 0xFF385470, ATV_OFF_TRACK = 0xFF5F6062, ATV_THUMB = 0xFFB9B9B9;
     // The "Allow USB debugging?" prompt, the same on both.
     private static final int PROMPT_SCRIM = 0xFF0C0E12, PROMPT_BG = 0xFF1F232B, PROMPT_BUTTON = 0xFF353940,
-            PROMPT_FOCUS = 0xFFE8EAED, PROMPT_CHECK = 0xFF8AB4F8;
+            PROMPT_FOCUS = 0xFFE8EAED;
+    /** The key fingerprint on the prompt before atvOS knows its own (the first prompt makes the key). */
+    private static final String NO_FINGERPRINT = "··:··:··:··:··:··:··:··:··:··:··:··:··:··:··:··";
 
     private final boolean googleTv;
     private final String about, model, version, build, developer, colorMode, colorSummary, debugging, usbDebugging,
-            usbSummary, revoke, promptTitle, promptKey, fingerprint, alwaysAllow, allow, cancel, times;
+            usbSummary, revoke, promptTitle, promptKey, alwaysAllow, allow, cancel, times;
     private final String modelValue, versionValue, buildValue;
+    private String fingerprint = NO_FINGERPRINT;
 
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint text = new TextPaint(Paint.ANTI_ALIAS_FLAG);
@@ -46,7 +49,7 @@ final class SettingsArt {
             medium = Typeface.create(Typeface.DEFAULT, 500, false), bold = Typeface.create(Typeface.DEFAULT, 700, false),
             condensed = Typeface.create("sans-serif-condensed", Typeface.NORMAL);
     private final RectF r = new RectF();
-    private final Path clip = new Path(), check = new Path();
+    private final Path clip = new Path();
     private float right; // the right edge of the text on the current screen
 
     SettingsArt(Context c) {
@@ -64,7 +67,6 @@ final class SettingsArt {
         revoke = c.getString(R.string.art_revoke);
         promptTitle = c.getString(R.string.art_prompt_title);
         promptKey = c.getString(R.string.art_prompt_key);
-        fingerprint = "··:··:··:··:··:··:··:··:··:··:··:··:··:··:··:··";
         alwaysAllow = c.getString(R.string.art_always_allow);
         allow = c.getString(R.string.art_allow);
         cancel = c.getString(R.string.cancel);
@@ -72,9 +74,11 @@ final class SettingsArt {
         modelValue = Build.MODEL;
         versionValue = Build.VERSION.RELEASE;
         buildValue = Build.DISPLAY;
-        check.moveTo(-7f, 0f);
-        check.lineTo(-2f, 5f);
-        check.lineTo(8f, -6f);
+    }
+
+    /** Shows {@code code}, the fingerprint of the key of atvOS, on the picture of the prompt (null: the placeholder). */
+    void fingerprint(String code) {
+        fingerprint = code != null ? code : NO_FINGERPRINT;
     }
 
     /** Draws the picture {@code kind} into {@code box} with rounded corners, at {@code alpha}. */
@@ -214,7 +218,10 @@ final class SettingsArt {
 
     // The debugging prompt
 
-    /** Draws the prompt with "Always allow" selected and Allow focused. */
+    /**
+     * Draws the prompt with the fingerprint of the key of atvOS (once known), "Always allow" not selected, and Allow
+     * focused. atvOS uses the debugging connection once, so the key does not need to stay allowed.
+     */
     private void prompt(Canvas c) {
         right = 1420f;
         rect(c, 0f, 0f, 1920f, 1080f, PROMPT_SCRIM);
@@ -224,18 +231,12 @@ final class SettingsArt {
         draw(c, promptTitle, 512f, 384f, 40f, bold, GTV_TEXT);
         draw(c, promptKey, 512f, 432f, 31f, regular, GTV_TEXT);
         draw(c, fingerprint, 512f, 470f, 31f, regular, GTV_TEXT);
-        r.set(511f, 509f, 535f, 533f);
-        fill.setColor(PROMPT_CHECK);
-        c.drawRoundRect(r, 3f, 3f, fill);
-        c.save();
-        c.translate(523f, 521f);
-        fill.setColor(GTV_CARD_TEXT);
+        r.set(512f, 510f, 534f, 532f); // an empty check box
+        fill.setColor(GTV_SUMMARY);
         fill.setStyle(Paint.Style.STROKE);
-        fill.setStrokeWidth(3.5f);
-        fill.setStrokeCap(Paint.Cap.ROUND);
-        c.drawPath(check, fill);
+        fill.setStrokeWidth(2.5f);
+        c.drawRoundRect(r, 3f, 3f, fill);
         fill.setStyle(Paint.Style.FILL);
-        c.restore();
         draw(c, alwaysAllow, 556f, 532f, 30f, regular, GTV_TEXT);
         button(c, 514f, 686f, allow, true);
         button(c, 708f, 880f, cancel, false);

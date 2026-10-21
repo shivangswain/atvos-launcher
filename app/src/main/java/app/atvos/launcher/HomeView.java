@@ -142,6 +142,9 @@ final class HomeView extends View {
     interface SelfSetup {
         void status(int messageRes);
         void done(boolean ok, int messageRes);
+        /** The TV shows its "Allow USB debugging" prompt for the key with this fingerprint (see SelfAdb). */
+        default void prompt(String fingerprint) {
+        }
     }
 
     // The layout in design units.

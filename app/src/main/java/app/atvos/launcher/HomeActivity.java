@@ -551,6 +551,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
             SelfAdb.Result r = adb.run(packages, job, step -> runOnUiThread(() -> {
                 if (selfAdb != adb || isDestroyed()) return; // a newer run replaced it, or the activity closed
                 adbApproving = step == SelfAdb.Listener.APPROVE;
+                if (adbApproving) progress.prompt(adb.fingerprint());
                 progress.status(stepMessage(step));
             }), changed);
             if (!changed.isEmpty()) record.accept(changed);

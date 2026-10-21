@@ -273,6 +273,11 @@ final class SetupFlow {
             }
 
             @Override
+            public void prompt(String fingerprint) {
+                art.fingerprint(fingerprint); // the picture of the prompt shows the code that the TV shows
+            }
+
+            @Override
             public void done(boolean ok, int messageRes) {
                 busy = false;
                 setup = host.state();

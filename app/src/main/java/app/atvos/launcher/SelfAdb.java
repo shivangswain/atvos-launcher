@@ -18,6 +18,7 @@ import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.KeyStore;
+import java.security.MessageDigest;
 import java.security.Signature;
 import java.security.interfaces.RSAPublicKey;
 import java.util.List;
@@ -98,6 +99,15 @@ final class SelfAdb {
     // caller calls declined() when the prompt closes.
     private volatile boolean approving;
     private volatile Socket socket;
+    private volatile String fingerprint; // the key fingerprint that the prompt shows, once it shows
+
+    /**
+     * Returns the fingerprint that the "Allow USB debugging" prompt shows for the key of atvOS, or null before the prompt
+     * shows. The setup shows it too, so that the user allows this key and not a prompt from a different app. Any thread.
+     */
+    String fingerprint() {
+        return fingerprint;
+    }
 
     /** The result of {@link #run}, with a message resource for the sheet. */
     enum Result {
@@ -191,8 +201,10 @@ final class SelfAdb {
             } else if (!offeredKey) {
                 approving = true;
                 socket.setSoTimeout(APPROVE_TIMEOUT_MS);
+                byte[] blob = keyBlob((RSAPublicKey) keys.getPublic());
+                fingerprint = fingerprint(blob); // before the listener step, which reads it
                 listener.step(Listener.APPROVE); // the daemon does not know the key: the TV shows its prompt
-                send(out, A_AUTH, AUTH_RSAPUBLICKEY, 0, publicKey(keys));
+                send(out, A_AUTH, AUTH_RSAPUBLICKEY, 0, publicKey(blob));
                 offeredKey = true;
             } else {
                 return false; // the key was refused
@@ -297,12 +309,34 @@ final class SelfAdb {
     }
 
     /**
-     * Returns the public key in the adb format. The format is a 524-byte little-endian {@code RSAPublicKey} struct: the
-     * word count, n0inv, the modulus and R² mod n as 64 words each, then the exponent. The struct is base64-encoded and
-     * followed by a comment, as in {@code ~/.android/adbkey.pub}.
+     * Returns the public key in the adb format: the key struct base64-encoded and followed by a comment, as in
+     * {@code ~/.android/adbkey.pub}.
      */
-    private static byte[] publicKey(KeyPair keys) {
-        RSAPublicKey pub = (RSAPublicKey) keys.getPublic();
+    private static byte[] publicKey(byte[] blob) {
+        String encoded = Base64.encodeToString(blob, Base64.NO_WRAP) + " atvos@launcher\0";
+        return encoded.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Returns the fingerprint of a key struct as the prompt shows it: the MD5 of the struct in upper-case hex pairs
+     * with colons ("A1:B2:…", 16 pairs), as AdbDebuggingManager.getFingerprints makes it.
+     */
+    static String fingerprint(byte[] blob) throws GeneralSecurityException {
+        byte[] md5 = MessageDigest.getInstance("MD5").digest(blob);
+        String hex = "0123456789ABCDEF";
+        StringBuilder sb = new StringBuilder(3 * md5.length);
+        for (int i = 0; i < md5.length; i++) {
+            if (i > 0) sb.append(':');
+            sb.append(hex.charAt((md5[i] >> 4) & 15)).append(hex.charAt(md5[i] & 15));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Returns the key in the adb struct: a 524-byte little-endian {@code RSAPublicKey} with the word count, n0inv, the
+     * modulus and R² mod n as 64 words each, then the exponent.
+     */
+    private static byte[] keyBlob(RSAPublicKey pub) {
         BigInteger n = pub.getModulus();
         int words = 2048 / 32;
         BigInteger r32 = BigInteger.ONE.shiftLeft(32);
@@ -316,8 +350,6 @@ final class SelfAdb {
         for (int i = 0; i < words; i++) b.putInt(n.shiftRight(32 * i).and(mask).intValue());
         for (int i = 0; i < words; i++) b.putInt(rr.shiftRight(32 * i).and(mask).intValue());
         b.putInt(pub.getPublicExponent().intValue());
-
-        String encoded = Base64.encodeToString(b.array(), Base64.NO_WRAP) + " atvos@launcher\0";
-        return encoded.getBytes(StandardCharsets.UTF_8);
+        return b.array();
     }
 }

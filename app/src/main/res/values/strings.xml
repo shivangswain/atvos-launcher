@@ -37,7 +37,7 @@
     <string name="setup_debugging_body">Turn on USB debugging, and confirm when the TV asks. atvOS Launcher uses it once, to take over the Home button. Then press Back to come back here.</string>
     <string name="setup_open_developer">Open Developer Options</string>
     <string name="setup_allow_title">Allow USB Debugging</string>
-    <string name="setup_allow_body">Select Set Up. When the TV asks, tick “Always allow from this computer”, then select Allow.</string>
+    <string name="setup_allow_body">Select Set Up. When the TV asks, check that its code is the same as the code in this picture, then select Allow.</string>
     <string name="setup_set_up">Set Up</string>
     <string name="setup_try_again">Try Again</string>
     <string name="setup_pick_title">Make It Your Home Screen</string>
