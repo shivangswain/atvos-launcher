@@ -169,6 +169,7 @@ final class Backdrops {
         return t;
     });
     private static final int MAX_CACHED = 72; // some pages for each app that has a top shelf
+    private static final long MAX_CACHE_BYTES = 128L << 20; // a download can be 16 MB, so the count alone is not a limit
 
     private final ContentResolver resolver;
     private final PackageManager pm;
@@ -301,10 +302,12 @@ final class Backdrops {
                 failedAt.put(url, System.currentTimeMillis());
             }
         }
-        // Keeps the images that were used last (fetch() updates the time of a file at each use). An image that a
-        // current recommendation shows is never deleted.
+        // Keeps the images that were used last (fetch() updates the time of a file at each use), not more than
+        // MAX_CACHED files and MAX_CACHE_BYTES. An image that a current recommendation shows is never deleted.
         File[] cached = downloads.listFiles();
-        if (cached != null && cached.length > MAX_CACHED) {
+        long bytes = 0;
+        if (cached != null) for (File f : cached) bytes += f.length();
+        if (cached != null && (cached.length > MAX_CACHED || bytes > MAX_CACHE_BYTES)) {
             Set<String> inUse = new HashSet<>();
             for (List<Recommendations.Item> list : pages.values()) {
                 for (Recommendations.Item item : list) inUse.add(cacheFile(item.image()).getName());
@@ -317,9 +320,13 @@ final class Backdrops {
             }
             Arrays.sort(order, Comparator.comparingLong(i -> used[i]));
             int excess = cached.length - MAX_CACHED;
-            for (int i = 0; i < order.length && excess > 0; i++) {
+            for (int i = 0; i < order.length && (excess > 0 || bytes > MAX_CACHE_BYTES); i++) {
                 File f = cached[order[i]];
-                if (!inUse.contains(f.getName()) && f.delete()) excess--;
+                long size = f.length();
+                if (!inUse.contains(f.getName()) && f.delete()) {
+                    excess--;
+                    bytes -= size;
+                }
             }
         }
     }
@@ -499,7 +506,10 @@ final class Backdrops {
             int cw = Math.round(design * s);
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inSampleSize = 1;
-            while (bounds.outWidth / (opts.inSampleSize * 2) >= cw && bounds.outHeight / (opts.inSampleSize * 2) >= ch) {
+            // Halves the size while both sides stay larger than the card, and while the picture has more than four
+            // cards of pixels: a very wide or tall picture (60000×600, say) is not decoded at full size.
+            while (bounds.outWidth / (opts.inSampleSize * 2) >= cw && bounds.outHeight / (opts.inSampleSize * 2) >= ch
+                    || (long) (bounds.outWidth / opts.inSampleSize) * (bounds.outHeight / opts.inSampleSize) > 4L * cw * ch) {
                 opts.inSampleSize *= 2;
             }
             Bitmap src = BitmapFactory.decodeFile(file.getPath(), opts);
