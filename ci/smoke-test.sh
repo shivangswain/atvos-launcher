@@ -123,9 +123,26 @@ else log "FAIL: atvOS is not running"; FAILED=1; fi
 adb logcat -b crash -d > "$OUT/crash.txt"
 if grep -q "$PKG" "$OUT/crash.txt"; then log "FAIL: atvOS crashed (see crash.txt)"; FAILED=1
 else log "ok: no crash"; fi
-adb shell dumpsys gfxinfo "$PKG" > "$OUT/gfxinfo.txt"
-grep -E "Total frames rendered|Janky frames|50th percentile|90th percentile|99th percentile" "$OUT/gfxinfo.txt" | tee -a "$OUT/steps.txt" || true
 adb logcat -d > "$OUT/logcat.txt"
+
+# Frame statistics. A CI emulator draws with a software GPU, and the test turns animations off, so the frame and GPU
+# times measure the emulator, not atvOS on a TV (gfxinfo.txt keeps them). The UI thread time is the CPU work of atvOS.
+adb shell dumpsys gfxinfo "$PKG" framestats > "$OUT/gfxinfo.txt"
+python3 - "$OUT/gfxinfo.txt" <<'PY' | tee -a "$OUT/steps.txt"
+import re, sys
+rows, header = [], None
+for line in open(sys.argv[1]):
+    if line.startswith("Flags,"):
+        header = line.strip().rstrip(",").split(",")
+    elif header and re.match(r"^\d+,", line):
+        values = line.strip().rstrip(",").split(",")
+        rows.append(dict(zip(header, map(int, values))))
+ui = sorted((r["SyncQueued"] - r["HandleInputStart"]) / 1e6 for r in rows if r["Flags"] == 0 and r["SyncQueued"] > 0)
+if ui:
+    pick = lambda p: ui[min(len(ui) - 1, int(len(ui) * p))]
+    print(f"UI thread per frame ({len(ui)} frames): p50 {pick(0.5):.1f} ms, p90 {pick(0.9):.1f} ms, max {ui[-1]:.1f} ms")
+print("Frame and GPU times: software GPU on this emulator, not a TV measure (see gfxinfo.txt).")
+PY
 
 [ "$FAILED" = 0 ] && log "PASSED" || log "FAILED"
 exit "$FAILED"
