@@ -2380,6 +2380,7 @@ final class HomeView extends View {
         List<Apps.Entry> in = e.folder.apps;
         float w = box.width(), mw = w * 0.23f, mh = mw * TILE_H / TILE_W, gap = w * 0.04f;
         float padX = (w - 3 * mw - 2 * gap) / 2f, padY = (box.height() - 3 * mh - 2 * gap) / 2f;
+        art.setAlpha(Math.round(255 * tileFade)); // else the alpha of the last tile drawn, from this frame or the last
         for (int k = 0; k < Math.min(9, in.size()); k++) {
             Apps.Entry a = in.get(k);
             float mx = box.left + padX + (k % 3) * (mw + gap), my = box.top + padY + (k / 3) * (mh + gap);
