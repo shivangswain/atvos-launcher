@@ -1,0 +1,5 @@
+# Baseline Profile: Android compiles this code ahead of time at install, so the first launch and the first frames do
+# not wait for the JIT (TV app quality TV-BP). The app is small and nearly all of it runs at startup or at the first
+# key presses, so all of it is listed. Google Play also merges this profile with its cloud profiles.
+HSPLapp/atvos/launcher/**;->**(**)**
+Lapp/atvos/launcher/**;
