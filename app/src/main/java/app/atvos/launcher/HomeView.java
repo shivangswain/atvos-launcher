@@ -40,6 +40,7 @@ import android.text.format.DateFormat;
 import android.view.KeyEvent;
 import android.view.SoundEffectConstants;
 import android.view.View;
+import android.view.ViewConfiguration;
 
 import java.text.DateFormatSymbols;
 import java.text.SimpleDateFormat;
@@ -164,7 +165,6 @@ final class HomeView extends View {
     private static final float SHADOW_PAD = 60f, SHADOW_DY = 20f, SHADOW_BLUR = 30f;
     private static final float CLOCK_TOP = 50f, CLOCK_H = 56f, AVATAR = 40f;
     private static final float HIDDEN_GAP = 84f; // the space for the "Hidden" title above the hidden apps
-    private static final long HOLD_MS = 800;     // a long press of Down on the last row for this time opens Hidden
     private static final int INK = 0xFF141416, TV_RED = 0xFFFF4245;
     // An open folder: a glass panel below its name, with four apps in each row.
     private static final int FOLDER_COLS = 4;
@@ -250,6 +250,9 @@ final class HomeView extends View {
     private boolean editFromHidden;   // true if the moved app came from Hidden
     private boolean showHidden;       // the Hidden section is open (a long press of Down on the last row)
     private boolean downHeld, swallowDown; // Down is held on the last row, and its repeats after Hidden opens are ignored
+    private final Runnable reveal = () -> { // the end of the hold: Hidden opens
+        if (downHeld && !hidden.isEmpty()) revealHidden();
+    };
     private long downAt, bounceAt;
     private float downAppear, downProgress, bounce, menuSelAnim;
     private Backdrops.Backdrop backdrop, previous;
@@ -695,9 +698,24 @@ final class HomeView extends View {
         setExpanded(false);
         rowFocused = false;
         showHidden = false;
-        downHeld = false;
+        cancelHold();
+        swallowDown = false;
         if (!apps.isEmpty()) focus = Math.min(focus, apps.size() - 1) % COLS;
         focusChanged();
+    }
+
+    /** Ends a hold of Down on the last row before Hidden opens. */
+    private void cancelHold() {
+        downHeld = false;
+        removeCallbacks(reveal);
+    }
+
+    /**
+     * Returns how long Down is held on the last row before Hidden opens: two system long presses, 800 ms by default.
+     * It follows the touch and hold delay in the accessibility settings of the TV.
+     */
+    private static long holdMs() {
+        return 2L * ViewConfiguration.getLongPressTimeout();
     }
 
     /** Opens the Control Center. */
@@ -722,6 +740,7 @@ final class HomeView extends View {
         removeCallbacks(hidePager);
         removeCallbacks(marqueeWake);
         removeCallbacks(snapAhead);
+        cancelHold();
         releaseSnap();
         if (homeNode != null) homeNode.discardDisplayList();
         frozenSig = Double.NaN;
@@ -782,7 +801,7 @@ final class HomeView extends View {
 
     @Override
     public boolean onKeyDown(int code, KeyEvent e) {
-        if (downHeld && code != KeyEvent.KEYCODE_DPAD_DOWN) downHeld = false; // another key cancels the long press
+        if (downHeld && code != KeyEvent.KEYCODE_DPAD_DOWN) cancelHold(); // another key cancels the long press
         if (setupOpen) {
             if (isSelect(code)) return true; // acts on release
             return setupFlow.key(code) || super.onKeyDown(code, e);
@@ -894,6 +913,8 @@ final class HomeView extends View {
                     if (e.getRepeatCount() == 0) {
                         downHeld = true;
                         downAt = SystemClock.uptimeMillis();
+                        removeCallbacks(reveal);
+                        postDelayed(reveal, holdMs());
                         kick();
                     }
                     return true;
@@ -943,7 +964,7 @@ final class HomeView extends View {
             return true;
         }
         if (code == KeyEvent.KEYCODE_DPAD_DOWN && (downHeld || swallowDown)) {
-            downHeld = false;
+            cancelHold();
             swallowDown = false;
             kick();
             return true;
@@ -1690,7 +1711,7 @@ final class HomeView extends View {
     private void closeAll() {
         closeMenu();
         alertEntry = null;
-        downHeld = false;
+        cancelHold();
         swallowDown = false;
         ccOpen = false;
         pillFocused = false;
@@ -1803,9 +1824,9 @@ final class HomeView extends View {
         editAnim = ease(editAnim, editing || showHidden ? 1f : 0f, 10f, dt, 0.002f);
         long now = SystemClock.uptimeMillis();
         if (downHeld) {
-            downProgress = Math.min(1f, (now - downAt) / (float) HOLD_MS);
+            // The ring fills during the hold. The reveal runnable opens Hidden at the end, outside the draw.
+            downProgress = Math.min(1f, (now - downAt) / (float) holdMs());
             animating = true;
-            if (downProgress >= 1f) revealHidden();
         } else {
             downProgress = ease(downProgress, 0f, 10f, dt, 0.002f);
         }
