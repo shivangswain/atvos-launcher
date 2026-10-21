@@ -120,6 +120,7 @@ final class A11y extends AccessibilityNodeProvider {
         if (id == HOST_VIEW_ID) {
             AccessibilityNodeInfo info = new AccessibilityNodeInfo(host);
             host.onInitializeAccessibilityNodeInfo(info);
+            info.setFocusable(false); // the virtual items take the focus, not the unlabelled view
             fresh = false; // lists the items again
             for (Item it : items()) info.addChild(host, it.id);
             return info;

@@ -104,7 +104,7 @@ final class SettingsScreen {
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     // The drop shadow of the focused row: a mask, blurred one time and scaled with the row.
     private final Paint shadow = new Paint(Paint.FILTER_BITMAP_FLAG);
-    private final Bitmap shadowMask = makeShadowMask();
+    private Bitmap shadowMask; // made when Settings first opens
     private final RectF shadowRect = new RectF();
     private static final float SHADOW_BLUR = 22f, SHADOW_PAD = 44f, SHADOW_DY = 8f, ROW_GROW_W = 1.016f, ROW_GROW_H = 1.06f;
     private final Path chevron = new Path(), tick = new Path();
@@ -160,6 +160,7 @@ final class SettingsScreen {
     }
 
     void open() {
+        if (shadowMask == null) shadowMask = makeShadowMask();
         under.clear();
         page = MAIN;
         busy = false;
@@ -601,7 +602,7 @@ final class SettingsScreen {
         rowRects.get(i).set(r);
         if (r.bottom < ROW_TOP - 30f || r.top > 1080f) return;
         if (row.kind() != INFO) { // an INFO row has no pill
-            if (f > 0.01f) {
+            if (f > 0.01f && shadowMask != null) {
                 float padX = SHADOW_PAD * w / (ROW_W * ROW_GROW_W), padY = SHADOW_PAD * h / (ROW_H * ROW_GROW_H);
                 shadowRect.set(r.left - padX, r.top - padY + SHADOW_DY, r.right + padX, r.bottom + padY + SHADOW_DY);
                 shadow.setAlpha(Math.round(alpha * 0.28f * f));

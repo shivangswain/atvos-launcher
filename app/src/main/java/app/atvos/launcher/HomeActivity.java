@@ -128,7 +128,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         apps = new Apps(this, dm.widthPixels);
         backdrops = new Backdrops(this, dm.widthPixels, dm.heightPixels);
         controls = new Controls(this);
-        profile = new Profile(this, io, Math.round(40f * dm.widthPixels / HomeView.W));
+        profile = new Profile(this, io, net, Math.round(40f * dm.widthPixels / HomeView.W));
         donation = new Donation(this); // connects to Google Play only while Settings is open
         view = new HomeView(this, this);
         view.setBackdrop(backdrops.cached(Backdrops.DEFAULT));

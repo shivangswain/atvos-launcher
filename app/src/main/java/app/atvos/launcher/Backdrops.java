@@ -521,7 +521,7 @@ final class Backdrops {
         strip = bake(strip);
         // Its blur has the size of all blurs, so that the glass can mix them during a crossfade.
         Bitmap blurred = Bitmap.createScaledBitmap(strip, BLUR_W, blurHeight(), true);
-        return new Backdrop(strip, blurred, cards.get(0).item(), cards);
+        return new Backdrop(toHardware(strip), blurred, cards.get(0).item(), cards);
     }
 
     /**

@@ -339,26 +339,36 @@ final class Apps {
     private Bitmap renderArt(ResolveInfo ri) {
         Bitmap out = Bitmap.createBitmap(artW, artH, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(out);
-        Drawable banner = null;
         try {
-            banner = ri.activityInfo.loadBanner(pm);
-        } catch (RuntimeException ignored) {
-            // The resources of the app did not load: no banner.
-        }
-        if (banner != null) {
-            int iw = banner.getIntrinsicWidth(), ih = banner.getIntrinsicHeight();
-            if (iw <= 0 || ih <= 0) {
-                banner.setBounds(0, 0, artW, artH);
-            } else {
-                float s = Math.max((float) artW / iw, (float) artH / ih);
-                int w = Math.round(iw * s), h = Math.round(ih * s);
-                banner.setBounds((artW - w) / 2, (artH - h) / 2, (artW + w) / 2, (artH + h) / 2);
+            Drawable banner = ri.activityInfo.loadBanner(pm);
+            if (banner != null) {
+                int iw = banner.getIntrinsicWidth(), ih = banner.getIntrinsicHeight();
+                if (iw <= 0 || ih <= 0) {
+                    banner.setBounds(0, 0, artW, artH);
+                } else {
+                    float s = Math.max((float) artW / iw, (float) artH / ih);
+                    int w = Math.round(iw * s), h = Math.round(ih * s);
+                    banner.setBounds((artW - w) / 2, (artH - h) / 2, (artW + w) / 2, (artH + h) / 2);
+                }
+                banner.draw(c);
+                return out;
             }
-            banner.draw(c);
-            return out;
+        } catch (RuntimeException ignored) {
+            // The banner of the app did not load or draw: the icon is used.
+            out.eraseColor(0);
         }
+        try {
+            drawIconTile(c, ri.loadIcon(pm));
+        } catch (RuntimeException e) {
+            // The icon of the app did not load or draw: the default icon is used.
+            out.eraseColor(0);
+            drawIconTile(c, pm.getDefaultActivityIcon());
+        }
+        return out;
+    }
 
-        Drawable icon = ri.loadIcon(pm);
+    /** Draws {@code icon} at the centre of a tile in the colour of the icon. */
+    private void drawIconTile(Canvas c, Drawable icon) {
         int color = averageColor(icon);
         float[] hsv = new float[3];
         Color.colorToHSV(color, hsv);
@@ -372,7 +382,6 @@ final class Apps {
         int size = Math.round(artH * 0.56f);
         icon.setBounds((artW - size) / 2, (artH - size) / 2, (artW + size) / 2, (artH + size) / 2);
         icon.draw(c);
-        return out;
     }
 
     /** Returns the average colour of a drawable, weighted by alpha. */

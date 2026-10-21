@@ -66,14 +66,15 @@ final class Profile {
     private static final int MAX_PHOTO = 4 << 20, MAX_FILE = 16 << 20; // the maximum download and the maximum file to decode
 
     private final Activity activity;
-    private final Executor io;
+    private final Executor io, net;
     private final SharedPreferences prefs;
     private final File photo;
     private final int size;
 
-    Profile(Activity activity, Executor io, int sizePx) {
+    Profile(Activity activity, Executor io, Executor net, int sizePx) {
         this.activity = activity;
         this.io = io;
+        this.net = net;
         this.prefs = activity.getSharedPreferences(HomeActivity.PREFS, Context.MODE_PRIVATE);
         this.photo = new File(activity.getFilesDir(), "google_photo");
         this.size = sizePx;
@@ -88,7 +89,7 @@ final class Profile {
         });
     }
 
-    /** Returns the avatar for {@code account} and the setting {@code picture}. IO thread. */
+    /** Returns the avatar for {@code account} and the setting {@code picture}. Background thread. */
     private Bitmap shown(String account, String picture) {
         if (account == null || NONE.equals(picture)) return null;
         Bitmap round = PHOTO.equals(picture) && photo.isFile() ? decodeCircle(photo, size) : null;
@@ -137,7 +138,7 @@ final class Profile {
      */
     private void fetchPhoto(AccountManager am, Account account, Consumer<Bitmap> onAvatar, boolean ask, boolean retry) {
         String name = account.name;
-        AccountManagerCallback<Bundle> done = future -> io.execute(() -> {
+        AccountManagerCallback<Bundle> done = future -> net.execute(() -> {
             try {
                 String token = future.getResult().getString(AccountManager.KEY_AUTHTOKEN);
                 if (token == null) return; // consent is necessary
@@ -167,7 +168,7 @@ final class Profile {
 
     /**
      * Reads the photo address from the userinfo of Google, then saves the photo, or deletes the old photo if there is
-     * none. Returns false if Google refuses the token. IO thread.
+     * none. Returns false if Google refuses the token. Network thread.
      */
     private boolean download(String token) throws IOException {
         String picture;
@@ -278,9 +279,18 @@ final class Profile {
         // immediately.
         boolean other = !name.equals(prefs.getString(KEY_ACCOUNT, null));
         prefs.edit().putString(KEY_ACCOUNT, name).remove(KEY_PHOTO_TRIED).apply();
-        if (other) io.execute(photo::delete); // the executor has one thread, so this runs before load()
-        load(onAvatar);
-        refresh(onAvatar, true);
+        if (other) {
+            // The delete runs on io before load(). The download starts after the delete, on net.
+            io.execute(() -> {
+                //noinspection ResultOfMethodCallIgnored
+                photo.delete();
+                activity.runOnUiThread(() -> refresh(onAvatar, true));
+            });
+            load(onAvatar);
+        } else {
+            load(onAvatar);
+            refresh(onAvatar, true);
+        }
     }
 
     /** Returns a round copy, cropped to the centre, at {@code size} px. */

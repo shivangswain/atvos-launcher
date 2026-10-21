@@ -168,7 +168,7 @@ the TV. The access token for the photo is not stored. Donations go through Googl
 
 ## Build from source
 
-You need JDK 17 or later and the Android SDK. Android Studio writes the SDK location to
+You need JDK 21 or later and the Android SDK. Android Studio writes the SDK location to
 `local.properties`.
 
 ```bash
@@ -191,6 +191,13 @@ keyPassword=…
 ```bash
 ./gradlew bundleRelease
 ```
+
+### Continuous integration
+
+- **GitHub Actions** builds and lints each push to `main` and each pull request. It then runs `ci/smoke-test.sh` on two Android TV emulators: Android 12 (Google TV) and Android 16 (Android TV).
+- **Pre-release tags** (for example, `v1.0-pre.1`) also make a draft pre-release on GitHub, with the APKs and the app bundle.
+- **GitLab CI** builds the release APK and the app bundle for pre-release tags and for `main`.
+- **Release signing:** to sign GitHub builds with your upload key, add these repository secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
 
 ### Google profile photo
 

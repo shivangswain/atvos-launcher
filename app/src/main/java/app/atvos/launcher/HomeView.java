@@ -1557,11 +1557,12 @@ final class HomeView extends View {
                 if (sub) subSel = to; else menuSel = to;
             }
             case KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                // The arrow toward the second list opens it. The arrow away from it closes it, or closes the menu.
-                boolean toward = (code == KeyEvent.KEYCODE_DPAD_RIGHT) != subLeftGuess();
+                // Right opens the second list of an option with a chevron, on either side of the menu. In the second
+                // list, the arrow toward the menu closes the list. Other arrows close the menu.
+                boolean right = code == KeyEvent.KEYCODE_DPAD_RIGHT;
                 if (sub) {
-                    if (!toward) subOf = -1;
-                } else if (toward && menuRows.get(menuSel).kind() == ROW_SUBMENU) {
+                    if (right == subLeft) subOf = -1;
+                } else if (right && menuRows.get(menuSel).kind() == ROW_SUBMENU) {
                     menuRows.get(menuSel).action().run();
                 } else {
                     closeMenu();
@@ -1577,13 +1578,6 @@ final class HomeView extends View {
         }
         kick();
         return true;
-    }
-
-    /**
-     * Returns true if the second list opens to the left because there is not sufficient space at the right of the menu.
-     */
-    private boolean subLeftGuess() {
-        return subOf >= 0 ? subLeft : menuBox.right - 24f + Math.max(subWidth, 380f) > W - 30f;
     }
 
     private void activateMenu() {
@@ -1673,8 +1667,6 @@ final class HomeView extends View {
     /** Opens Settings full screen. */
     void openSettings() {
         closeAll();
-        setExpanded(false);
-        rowFocused = false;
         settingsOpen = true;
         settings.open();
         kick();
@@ -1689,12 +1681,17 @@ final class HomeView extends View {
         a11y.sync();
     }
 
+    /** Closes the overlays and resets the focus state before a full-screen flow opens. */
     private void closeAll() {
         closeMenu();
         alertEntry = null;
+        downHeld = false;
+        swallowDown = false;
         ccOpen = false;
         pillFocused = false;
         if (editing) finishEditing();
+        setExpanded(false);
+        rowFocused = false;
     }
 
     /** Updates the setup after Settings, the home or account chooser of Android, or a package change. */
@@ -1995,6 +1992,7 @@ final class HomeView extends View {
      */
     private void drawFrozenHome(Canvas c, boolean covered) {
         if (homeNode == null) homeNode = new RenderNode("home");
+        boolean first = Double.isNaN(frozenSig); // the first frame of this Control Center
         if (homeSig != frozenSig) {
             homeNode.setPosition(0, 0, getWidth(), getHeight());
             RecordingCanvas rc = homeNode.beginRecording();
@@ -2003,8 +2001,10 @@ final class HomeView extends View {
             homeNode.endRecording();
             frozenSig = homeSig;
         }
-        if (homeBlurSig != frozenSig && !snapUnavailable) {
-            long wait = SNAP_MS - (SystemClock.uptimeMillis() - homeBlurAt);
+        // A new snapshot on the first frame if the home changed. During an animation the snapshot from this Control
+        // Center stays, and a new one waits until nothing moves.
+        if (homeBlurSig != frozenSig && !snapUnavailable && (first || homeBlurShader == null || !animating)) {
+            long wait = first ? 0 : SNAP_MS - (SystemClock.uptimeMillis() - homeBlurAt);
             if (wait <= 0) snapHome(covered, frozenSig);
             else postInvalidateDelayed(wait);
         }
@@ -2210,11 +2210,16 @@ final class HomeView extends View {
         int x1 = Math.max(x0 + 1, Math.min(bw, (int) Math.ceil(rect.right / W * bw)));
         int y0 = Math.max(0, Math.min(bh - 1, (int) (rect.top / height * bh)));
         int y1 = Math.max(y0 + 1, Math.min(bh, (int) Math.ceil(rect.bottom / height * bh)));
-        float sum = 0f;
+        long red = 0, green = 0, blue = 0;
         for (int y = y0; y < y1; y++) {
-            for (int x = x0; x < x1; x++) sum += Backdrops.luminance(b.blurPixels[y * bw + x]);
+            for (int x = x0; x < x1; x++) {
+                int p = b.blurPixels[y * bw + x];
+                red += (p >> 16) & 255;
+                green += (p >> 8) & 255;
+                blue += p & 255;
+            }
         }
-        return sum / ((x1 - x0) * (y1 - y0));
+        return (0.2126f * red + 0.7152f * green + 0.0722f * blue) / (255f * (x1 - x0) * (y1 - y0));
     }
 
     /**
@@ -3078,6 +3083,7 @@ final class HomeView extends View {
             if (id >= A11Y_APP) {
                 int i = id - A11Y_APP;
                 if (setupOpen || menuOpen || ccOpen || alertEntry != null || openFolder != null || i >= total()) return false;
+                if (editing) return i == focus; // the D-pad moves the held app
                 pillFocused = false;
                 rowFocused = false;
                 if (expanded) setExpanded(false);
@@ -3086,6 +3092,7 @@ final class HomeView extends View {
             } else if (id >= A11Y_FOLDER) {
                 int i = id - A11Y_FOLDER - 1;
                 if (openFolder == null || menuOpen || alertEntry != null || i >= openFolder.folder.apps.size()) return false;
+                if (editing) return i == folderFocus; // the D-pad moves the held app
                 folderFocus = i;
             } else if (id >= A11Y_SETTINGS) {
                 if (!settingsOpen || !settings.focus(id - A11Y_SETTINGS)) return false;
