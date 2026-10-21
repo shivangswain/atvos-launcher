@@ -36,7 +36,8 @@ build:
         mv /tmp/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
         chmod +x "$ANDROID_HOME/cmdline-tools/latest/bin/"*
       fi
-    - yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+    # GitLab runs the script with pipefail: "yes" in a pipe ends with SIGPIPE, so it comes from a process substitution.
+    - '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null < <(yes)'
     - '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;36.0.0" > /dev/null'
   script:
     - ./gradlew assembleRelease bundleRelease
