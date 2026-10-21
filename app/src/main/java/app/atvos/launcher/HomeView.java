@@ -117,13 +117,8 @@ final class HomeView extends View {
         void setFullScreen(boolean on);
         /** Shows the Hidden toast after an app moves to Hidden. */
         void showHiddenHint();
-        /**
-         * Settings > Support: opens {@link SettingsScreen#WEBSITE}, {@link SettingsScreen#STORE} or
-         * {@link SettingsScreen#APP_INFO}.
-         */
+        /** Settings > Support: opens {@link SettingsScreen#STORE} or {@link SettingsScreen#APP_INFO}. */
         boolean openFromSettings(int what);
-        /** Returns true if the TV has an app that can open it. */
-        boolean canOpenFromSettings(int what);
         /** Uninstalls an app after the user confirms the deletion. */
         void deleteApp(Apps.Entry entry);
         /** Settings > Appearance: true for light rows and Settings, else dark. */
@@ -508,7 +503,6 @@ final class HomeView extends View {
             @Override public boolean use24Hour() { return HomeView.this.host.use24Hour(); }
             @Override public void setUse24Hour(boolean on) { HomeView.this.host.setUse24Hour(on); }
             @Override public boolean open(int what) { return HomeView.this.host.openFromSettings(what); }
-            @Override public boolean canOpen(int what) { return HomeView.this.host.canOpenFromSettings(what); }
             @Override public Donation donation() { return HomeView.this.host.donation(); }
             @Override public void close() { closeSettings(); }
             @Override public void sound(int effect) { playSoundEffect(effect); }

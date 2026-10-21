@@ -23,7 +23,7 @@
         android:protectionLevel="signature" />
     <uses-permission android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
 
-    <!-- Package visibility: launcher apps, home apps, the home settings screen, the TV provider, web browsers and Google Play. -->
+    <!-- Package visibility: launcher apps, home apps, the home settings screen, the TV provider and Google Play. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -42,12 +42,7 @@
             <action android:name="android.settings.HOME_SETTINGS" />
         </intent>
         <provider android:authorities="android.media.tv" />
-        <!-- A web browser and Google Play, for the Support page. -->
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <category android:name="android.intent.category.BROWSABLE" />
-            <data android:scheme="https" />
-        </intent>
+        <!-- Google Play, for the Support page. -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="market" />

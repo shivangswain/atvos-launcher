@@ -35,7 +35,7 @@ import java.util.Locale;
  *                            Acknowledgements · DATE &amp; TIME: Time Format
  *   Profiles and Accounts ›  Account · Profile Picture ›
  *   Uninstall ›              Restore Default Launcher · Remove Power Control
- *   Support ›                Website › · Open Play Store › · App Info › · Donate ›
+ *   Support ›                Website · Open Play Store › · App Info › · Donate ›
  * </pre>
  * The colours are light or dark, as set in Appearance. The switches in Control Center open it. UI thread.
  */
@@ -57,10 +57,8 @@ final class SettingsScreen {
         void setLight(boolean light);
         boolean use24Hour();
         void setUse24Hour(boolean on);
-        /** Opens {@link #WEBSITE}, {@link #STORE} or {@link #APP_INFO}. Returns false if the TV cannot open it. */
+        /** Opens {@link #STORE} or {@link #APP_INFO}. Returns false if the TV cannot open it. */
         boolean open(int what);
-        /** Returns true if the TV has an app that can open it. */
-        boolean canOpen(int what);
         Donation donation();
         void close();
         void sound(int effect);
@@ -68,8 +66,11 @@ final class SettingsScreen {
         void changed();
     }
 
-    /** The targets of {@link Host#open}: the atvOS website, the Google Play page of atvOS, and App Info for atvOS. */
-    static final int WEBSITE = 0, STORE = 1, APP_INFO = 2;
+    /**
+     * The targets of {@link Host#open}: the Google Play page of atvOS, and App Info for atvOS. The website is only an
+     * address, because TV apps do not open a web browser (TV app quality, TV-WB).
+     */
+    static final int STORE = 1, APP_INFO = 2;
 
     private static final int MAIN = 0, GENERAL = 1, ABOUT = 2, APPEARANCE = 3, PROFILES = 4, PICTURE = 5,
             UNINSTALL = 6, SUPPORT = 7;
@@ -237,12 +238,7 @@ final class SettingsScreen {
             }
             case SUPPORT -> {
                 title = s(R.string.settings_support);
-                if (host.canOpen(WEBSITE)) {
-                    rows.add(nav(R.string.settings_website, s(R.string.settings_website_address), s(R.string.settings_website_about),
-                            () -> open(WEBSITE, R.string.not_available)));
-                } else { // no browser: the address only
-                    rows.add(action(R.string.settings_website, s(R.string.settings_website_address), s(R.string.settings_website_elsewhere), null));
-                }
+                rows.add(action(R.string.settings_website, s(R.string.settings_website_address), s(R.string.settings_website_elsewhere), null));
                 rows.add(nav(R.string.settings_store, null, s(R.string.settings_store_about), () -> open(STORE, R.string.not_available)));
                 rows.add(nav(R.string.settings_app_info, null, s(R.string.settings_app_info_about), () -> open(APP_INFO, R.string.not_available)));
                 Donation d = host.donation();

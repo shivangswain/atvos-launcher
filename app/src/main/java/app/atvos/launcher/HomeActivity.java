@@ -58,7 +58,6 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     static final String KEY_LIGHT = "appearance_light";
     /** Settings > Time Format: true for 24-hour, false for 12-hour. If it is not set, the setting of the TV applies. */
     private static final String KEY_24_HOUR = "time_24_hour";
-    private static final String WEBSITE = "https://atvos.tv";
     /**
      * The colours of the system toast: a dark surface with light text up to Android 15, and a light surface with dark
      * text from Android 16.
@@ -674,20 +673,17 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     }
 
     /**
-     * Returns the intent for Settings > Support: the atvOS website, the Google Play page of atvOS, or App Info for
-     * atvOS.
+     * Returns the intent for Settings > Support: the Google Play page of atvOS, or App Info for atvOS. The website has
+     * no intent, because TV apps do not open a web browser (TV app quality, TV-WB): Settings shows its address.
      */
     private Intent supportIntent(int what) {
-        return switch (what) {
-            case SettingsScreen.WEBSITE -> new Intent(Intent.ACTION_VIEW, Uri.parse(WEBSITE)).addCategory(Intent.CATEGORY_BROWSABLE);
-            case SettingsScreen.STORE -> new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=" + getPackageName()));
-            default -> new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", getPackageName(), null));
-        };
+        return what == SettingsScreen.STORE
+                ? new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=" + getPackageName()))
+                : new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", getPackageName(), null));
     }
 
     /** Returns true if the TV has an app for the intent. The stub package of Android TV does not count. */
-    @Override
-    public boolean canOpenFromSettings(int what) {
+    private boolean canOpenFromSettings(int what) {
         ComponentName handler = supportIntent(what).resolveActivity(getPackageManager());
         return handler != null && !handler.getPackageName().equals(NO_APP_STUBS);
     }
@@ -700,7 +696,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
             startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             return true;
         } catch (ActivityNotFoundException | SecurityException e) {
-            return false; // no browser: Settings shows the address
+            return false; // Settings shows a note
         }
     }
 
