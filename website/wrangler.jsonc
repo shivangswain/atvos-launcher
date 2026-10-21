@@ -1,0 +1,9 @@
+// Cloudflare: atvos.tv as static assets (Cloudflare Pages, now part of Workers). There is no Worker script.
+{
+  "name": "atvos",
+  "compatibility_date": "2026-10-06",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  }
+}

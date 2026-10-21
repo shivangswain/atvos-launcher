@@ -129,14 +129,14 @@ only in a copy installed from Google Play.
 ### Website
 
 The website, [atvos.tv](https://atvos.tv), is in `website/`. It is a static [Astro](https://astro.build)
-site with no client JavaScript, hosted on Cloudflare Pages. It has the privacy policy that the app
+site with no client JavaScript, served by Cloudflare as static assets (`wrangler.jsonc`). It has the privacy policy that the app
 and Play Console link to. You need Node.js 22.12 or later.
 
 ```bash
 cd website
 npm ci
 npm run dev      # a local copy at http://localhost:4321
-npm run deploy   # builds the site and publishes it to the Cloudflare Pages project "atvos"
+npm run deploy   # builds the site and publishes it to the Cloudflare project "atvos"
 ```
 
 When atvOS Launcher is on Google Play, set `onPlay` to `true` in `website/src/site.ts`.
