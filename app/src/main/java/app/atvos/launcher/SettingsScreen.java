@@ -189,7 +189,8 @@ final class SettingsScreen {
                 rows.add(nav(R.string.settings_about, null, null, () -> go(ABOUT)));
                 rows.add(nav(R.string.settings_appearance, s(host.light() ? R.string.settings_light : R.string.settings_dark),
                         s(R.string.settings_appearance_about), () -> go(APPEARANCE)));
-                rows.add(action(R.string.settings_privacy, null, s(R.string.settings_privacy_about), null));
+                // Google Play asks for a privacy policy link or text in the app, as well as in Play Console.
+                rows.add(action(R.string.settings_privacy, s(R.string.settings_privacy_address), s(R.string.settings_privacy_about), null));
                 rows.add(action(R.string.settings_acknowledgements, null, s(R.string.settings_acknowledgements_about), null));
                 rows.add(new Row(HEADER, s(R.string.settings_date_time).toUpperCase(Locale.getDefault()), null, null, null, true, false));
                 rows.add(action(R.string.settings_time_format, s(host.use24Hour() ? R.string.settings_24_hour : R.string.settings_12_hour),

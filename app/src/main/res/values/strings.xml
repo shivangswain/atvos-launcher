@@ -76,7 +76,9 @@
     <string name="settings_light">Light</string>
     <string name="settings_dark">Dark</string>
     <string name="settings_privacy">Privacy</string>
-    <string name="settings_privacy_about">atvOS Launcher keeps everything on this TV. It collects nothing and shares nothing: your profile photo comes straight from Google, and donations are handled by Google Play.</string>
+    <string name="settings_privacy_about">atvOS Launcher keeps everything on this TV. It collects nothing and shares nothing: your profile photo comes straight from Google, and donations are handled by Google Play. Read the full privacy policy at atvos.tv/privacy on your phone or computer.</string>
+    <!-- The address of the privacy policy. It must be the same as the privacy policy address in Play Console. -->
+    <string name="settings_privacy_address" translatable="false">atvos.tv/privacy</string>
     <string name="settings_acknowledgements">Acknowledgements</string>
     <string name="settings_acknowledgements_about">Icons from Google\'s Material Symbols, under the Apache License 2.0. Donations through the Google Play Billing Library.</string>
     <!-- A section title. It shows in capital letters. -->
