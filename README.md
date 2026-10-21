@@ -103,10 +103,9 @@ keyPassword=…
 
 ### Continuous integration
 
-- **GitHub Actions** builds and lints each push to `main` and each pull request. It then runs `ci/smoke-test.sh` on two Android TV emulators: Android 12 (Google TV) and Android 16 (Android TV).
+- **GitHub Actions** and **GitLab CI** run the same build: `./gradlew build bundleRelease`. It lints the app and makes the debug APK, the release APK and the app bundle. Both run it for each push to `main` and each pre-release tag. GitHub Actions also runs it for each pull request.
 - **Pre-release tags** (for example, `v1.0-pre.1`) also make a draft pre-release on GitHub, with the APKs and the app bundle.
-- **GitLab CI** builds the release APK and the app bundle for pre-release tags and for `main`.
-- **Release signing:** to sign GitHub builds with your upload key, add these repository secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
+- **Release signing:** to sign the builds with your upload key, add `ANDROID_KEYSTORE_BASE64` (the keystore file in Base64), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. On GitHub, add them as repository secrets. On GitLab, add them as masked and protected CI/CD variables, and protect the `v*` tags.
 
 ### Google profile photo
 
@@ -126,6 +125,21 @@ Without a client, the profile picture shows the first letter of the account.
 
 Donations need a consumable in-app product with the id `donation` in Play Console. Donations work
 only in a copy installed from Google Play.
+
+### Website
+
+The website, [atvos.tv](https://atvos.tv), is in `website/`. It is a static [Astro](https://astro.build)
+site with no client JavaScript, hosted on Cloudflare Pages. It has the privacy policy that the app
+and Play Console link to. You need Node.js 22.12 or later.
+
+```bash
+cd website
+npm ci
+npm run dev      # a local copy at http://localhost:4321
+npm run deploy   # builds the site and publishes it to the Cloudflare Pages project "atvos"
+```
+
+When atvOS Launcher is on Google Play, set `onPlay` to `true` in `website/src/site.ts`.
 
 ## License
 

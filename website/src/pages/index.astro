@@ -1,0 +1,228 @@
+---
+// atvos.tv: what atvOS Launcher is, how to set it up, and answers to common questions.
+import Base from "../layouts/Base.astro";
+import HomeMock from "../components/HomeMock.astro";
+import Icon from "../components/Icon.astro";
+import { site } from "../site";
+
+const features = [
+  {
+    icon: "tv",
+    title: "Top Shelf",
+    body: "Move to an app in the dock and its top shelf fills the screen: a full-screen picture with a Play button, or a row of Continue Watching and Recommended.",
+  },
+  {
+    icon: "apps",
+    title: "Your layout",
+    body: "Put your favourite apps in the dock, reorder the rest, make folders, and hide the apps that you don't use. Hold Select on an app for its menu.",
+  },
+  {
+    icon: "switches",
+    title: "Control Center",
+    body: "Power, network, Do Not Disturb, Bluetooth and a sleep timer, with shortcuts to inputs, accessibility, system settings and search.",
+  },
+  {
+    icon: "settings",
+    title: "Glass, made for TVs",
+    body: "The dock, the buttons and the Control Center blur and tint what is behind them. Light or dark appearance, and a 12- or 24-hour clock.",
+  },
+  {
+    icon: "accessibility",
+    title: "TalkBack",
+    body: "Every tile, button and menu option is read aloud as you reach it. When the TV's animations are off, atvOS changes without motion.",
+  },
+  {
+    icon: "lock",
+    title: "Private",
+    body: "No accounts, ads or analytics. atvOS Launcher uses the network only for top shelf artwork and your profile photo, over HTTPS.",
+  },
+];
+
+const steps = [
+  {
+    title: "Turn on Developer options",
+    body: "atvOS opens the TV's About screen. Select the build row seven times.",
+  },
+  {
+    title: "Turn on USB debugging",
+    body: "atvOS opens Developer options for you.",
+  },
+  {
+    title: "Allow USB debugging",
+    body: "Select Set Up. When the TV asks, check that its code is the same as the code in the picture, then select Allow. atvOS becomes the home screen.",
+  },
+  {
+    title: "Add your profile picture",
+    body: "Optional. Choose your Google account, and your photo shows next to the clock.",
+  },
+];
+---
+<Base
+  title="atvOS Launcher: a home screen for Google TV and Android TV"
+  description="atvOS Launcher is a free, open-source home screen for Google TV and Android TV, inspired by the tvOS Home Screen: a glass dock, full-screen top shelves and a Control Center."
+  current="overview"
+>
+  <section class="hero">
+    <div class="wrap center text-col">
+      <h1>The home screen your TV deserves.</h1>
+      <p class="lead">
+        atvOS Launcher gives Google TV and Android TV a glass dock, full-screen top shelves and a Control Center,
+        inspired by the tvOS Home Screen. It is free, open source, and keeps everything on your TV.
+      </p>
+      <div class="actions">
+        {site.onPlay ? (
+          <a class="pill" href={site.play}>Get it on Google Play</a>
+        ) : (
+          <span class="pill soon">Coming soon to Google Play</span>
+        )}
+        <a class="more" href={site.github}>View the source code<Icon name="chevron" /></a>
+      </div>
+    </div>
+    <HomeMock />
+  </section>
+
+  <section class="section" id="features">
+    <div class="wrap">
+      <div class="section-head text-col center">
+        <h2>Get to know atvOS.</h2>
+        <p class="lead">Everything that you watch, one press away. Nothing that you don't need.</p>
+      </div>
+      <div class="features">
+        {features.map((f) => (
+          <article class="feature">
+            <span class="glyph"><Icon name={f.icon} /></span>
+            <h3>{f.title}</h3>
+            <p>{f.body}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="section alt" id="setup">
+    <div class="wrap text-col">
+      <div class="section-head">
+        <h2>Set up in a few minutes.</h2>
+        <p class="lead">
+          You need a Google TV or Android TV device with Android 12 or later. On first launch, atvOS shows each step
+          with a picture of the TV's Settings screen, opens that screen for you, and skips the steps that are already
+          done.
+        </p>
+      </div>
+      <ol class="steps">
+        {steps.map((s) => (
+          <li>
+            <div>
+              <h3>{s.title}</h3>
+              <p>{s.body}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <div class="card-box note">
+        <h3>Why USB debugging?</h3>
+        <p>
+          The built-in home screens of Google TV and Android TV keep the Home button, even after you choose a
+          different home app. atvOS turns the built-in home screen off through the TV's own debugging connection,
+          inside the TV. It sends only two fixed commands: one turns the built-in home screen off, and one turns it
+          back on.
+        </p>
+        <p>
+          When setup is done, you can turn USB debugging off again. On a TV that lets you choose the home app, atvOS
+          opens Android's home app setting instead, and needs no debugging at all.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="support">
+    <div class="wrap text-col">
+      <div class="section-head">
+        <h2>Support.</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>How do I get my TV's own home screen back?<Icon name="chevron" /></summary>
+          <div class="answer">
+            <ol>
+              <li>
+                If you turned USB debugging off after setup, turn it on again in Developer options. Then open atvOS
+                Settings, select Uninstall, then Restore Default Launcher.
+              </li>
+              <li>Select Remove Power Control. Android can't uninstall an app with device admin access.</li>
+              <li>Open Support, select App Info, then Uninstall.</li>
+            </ol>
+            <p>To open atvOS Settings, select the clock, then the switches button in the Control Center.</p>
+          </div>
+        </details>
+        <details>
+          <summary>Which TVs does atvOS work on?<Icon name="chevron" /></summary>
+          <div class="answer">
+            <p>
+              Google TV and Android TV devices with Android 12 or later: TVs, streaming sticks and set-top boxes. You
+              use it with the arrows, Select and Back on your remote.
+            </p>
+          </div>
+        </details>
+        <details>
+          <summary>Why is a top shelf empty?<Icon name="chevron" /></summary>
+          <div class="answer">
+            <p>
+              A top shelf shows what an app shares with the TV, and some apps share nothing. atvOS also needs access
+              to app recommendations: the TV asks for it when the first setup ends. If you didn't allow it, turn it on
+              in the TV's Settings, in the permissions of atvOS Launcher.
+            </p>
+          </div>
+        </details>
+        <details>
+          <summary>Does atvOS collect my data?<Icon name="chevron" /></summary>
+          <div class="answer">
+            <p>No. It has no accounts, no ads and no analytics. Read the <a href="/privacy">Privacy Policy</a>.</p>
+          </div>
+        </details>
+        <details>
+          <summary>How do I report a problem or ask for a feature?<Icon name="chevron" /></summary>
+          <div class="answer">
+            <p>
+              Open an issue on <a href={site.issues}>GitHub</a>. Say which TV you have, its Android version, and what
+              you did before the problem.
+            </p>
+          </div>
+        </details>
+        <details>
+          <summary>Is atvOS made by Apple?<Icon name="chevron" /></summary>
+          <div class="answer">
+            <p>
+              No. atvOS Launcher is an independent project, inspired by the tvOS Home Screen. It is not affiliated with
+              or endorsed by Apple or Google.
+            </p>
+          </div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="section alt">
+    <div class="wrap">
+      <div class="pair">
+        <div class="card-box">
+          <span class="glyph"><Icon name="code" /></span>
+          <h3>Free and open source</h3>
+          <p>
+            atvOS Launcher is free software under the GNU General Public License v3.0. Read the code, build it
+            yourself, or help make it better.
+          </p>
+          <a class="more" href={site.github}>View on GitHub<Icon name="chevron" /></a>
+        </div>
+        <div class="card-box">
+          <span class="glyph"><Icon name="heart" /></span>
+          <h3>Support the project</h3>
+          <p>
+            If you enjoy atvOS, you can donate from atvOS Settings, under Support, then Donate. Donations go through
+            Google Play and unlock nothing: atvOS is the same for everyone.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+</Base>

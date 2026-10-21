@@ -1,0 +1,43 @@
+---
+// The page frame: head, the sticky navigation bar, the page content and the footer.
+import "../styles/global.css";
+import Nav from "../components/Nav.astro";
+import Footer from "../components/Footer.astro";
+import { site } from "../site";
+
+interface Props {
+  title: string;
+  description: string;
+  current?: "overview" | "privacy";
+}
+const { title, description, current } = Astro.props;
+// With build.format "file", a page path ends in .html: /index.html is /, and /privacy.html is /privacy.
+const path = Astro.url.pathname.replace(/\.html$/, "").replace(/(^|\/)index$/, "/");
+const canonical = new URL(path, site.url).href;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="color-scheme" content="dark" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={site.name} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <Nav current={current} />
+    <main id="main">
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>

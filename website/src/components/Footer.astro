@@ -1,0 +1,25 @@
+---
+// The footer: links, the trademark notice and the licence.
+import { site } from "../site";
+
+const year = new Date().getFullYear();
+---
+<footer class="footer">
+  <div class="wrap">
+    <nav class="footer-links" aria-label="More">
+      <a href="/privacy">Privacy Policy</a>
+      <a href={site.github}>GitHub</a>
+      <a href={site.gitlab}>GitLab</a>
+      <a href={site.issues}>Report a Problem</a>
+    </nav>
+    <p>
+      atvOS Launcher is an independent project. It is not affiliated with or endorsed by Apple or Google. Apple TV and
+      tvOS are trademarks of Apple Inc. Google TV, Android TV and Google Play are trademarks of Google LLC.
+    </p>
+    <p>
+      © {year} {site.developer}. atvOS Launcher is free software under the <a
+        href={`${site.github}/blob/main/LICENSE.md`}>GNU General Public License v3.0</a>. Icons from Material Symbols
+      (Apache License 2.0).
+    </p>
+  </div>
+</footer>

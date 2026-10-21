@@ -1,0 +1,40 @@
+---
+// The atvOS home screen, drawn in HTML and CSS at the launcher's own layout (1920 × 1080 design units): the aurora
+// backdrop, the clock pill, a row of Continue Watching cards, the glass dock and the top of the app grid.
+import Icon from "./Icon.astro";
+
+const dock = [
+  { name: "TV", icon: "tv", art: "a1" },
+  { name: "Music", icon: "music", art: "a2" },
+  { name: "Photos", icon: "photo", art: "a3" },
+  { name: "Arcade", icon: "game", art: "a4" },
+  { name: "Films", icon: "play", art: "a5" },
+  { name: "Settings", icon: "settings", art: "a6" },
+];
+const grid = ["a5", "a3", "a6", "a1", "a4", "a2"];
+---
+<figure class="tv">
+  <div
+    class="screen"
+    role="img"
+    aria-label="The atvOS home screen: a row of Continue Watching cards over an aurora backdrop, the clock at the top right, and a glass dock of six apps with the first app in focus."
+  >
+    <div class="clock glass"><span>8:30</span><span class="avatar"></span></div>
+    <p class="row-title">Continue Watching</p>
+    <div class="row">
+      <div class="card c1"><span class="bar"><span class="fill f1"></span></span></div>
+      <div class="card c2"><span class="bar"><span class="fill f2"></span></span></div>
+      <div class="card c3"></div>
+    </div>
+    <div class="dock glass">
+      {dock.map((t, i) => (
+        <div class:list={["tile", t.art, { focused: i === 0 }]}>
+          <Icon name={t.icon} size={24} />
+        </div>
+      ))}
+    </div>
+    <div class="grid-row">
+      {grid.map((art) => <div class:list={["tile", art]} />)}
+    </div>
+  </div>
+</figure>

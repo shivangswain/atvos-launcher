@@ -1,0 +1,122 @@
+---
+// atvos.tv/privacy: the privacy policy of atvOS Launcher. The app and Play Console link to this address.
+import Base from "../layouts/Base.astro";
+import { site } from "../site";
+---
+<Base
+  title="Privacy Policy · atvOS Launcher"
+  description="atvOS Launcher collects no personal data. Everything that it keeps stays on your TV."
+  current="privacy"
+>
+  <article class="doc">
+    <div class="wrap text-col">
+      <h1>Privacy Policy</h1>
+      <p class="updated">Effective {site.policyDate}</p>
+      <p class="lead">
+        atvOS Launcher collects no personal data. It has no accounts, no advertising, no analytics and no servers of
+        its own. Everything that it keeps stays on your TV.
+      </p>
+
+      <h2>Who makes atvOS Launcher</h2>
+      <p>
+        atvOS Launcher ("atvOS", "the app") is a home screen app for Google TV and Android TV, made by {site.developer},
+        an independent developer. For questions about this policy, open an issue on <a href={site.issues}>GitHub</a>.
+      </p>
+
+      <h2>What atvOS uses, and where it stays</h2>
+
+      <h3>Your layout and settings</h3>
+      <p>
+        The order of your apps, your folders, the apps that you hide, the appearance, the clock format and the state of
+        setup. atvOS keeps them in its private storage on the TV. They are not backed up to the cloud and not
+        transferred to other devices.
+      </p>
+
+      <h3>App recommendations</h3>
+      <p>
+        With your permission, atvOS reads the Watch Next and preview programs that your apps put on the TV, to show
+        them on the top shelf. It reads them on the TV only and sends them nowhere.
+      </p>
+
+      <h3>Artwork</h3>
+      <p>
+        atvOS downloads the pictures of those programs from the addresses that your apps give, over HTTPS only. As with
+        any download, the server that holds a picture sees the TV's IP address. atvOS sends nothing else to it. The
+        pictures are cached on the TV, up to 128 MB, and old ones are deleted.
+      </p>
+
+      <h3>Your Google account (optional)</h3>
+      <p>
+        If you choose a Google account for your profile picture, Android asks you to let atvOS see your basic Google
+        profile. atvOS then gets your profile photo from Google over HTTPS. It keeps the account address and the photo
+        on the TV, and it does not keep the access token. If you don't choose an account, atvOS shows an initial or no
+        picture.
+      </p>
+
+      <h3>Donations</h3>
+      <p>
+        Donations are handled by Google Play. atvOS never sees your payment details: Google Play only tells it that a
+        donation is complete, so that it can say thank you. A donation unlocks nothing. Google's handling of the payment
+        is covered by the <a href="https://policies.google.com/privacy">Google Privacy Policy</a>.
+      </p>
+
+      <h3>Setup and the debugging connection</h3>
+      <p>
+        To replace the TV's built-in home screen, atvOS connects to the TV's own debugging service at 127.0.0.1, a
+        connection that stays inside the TV. It sends only two fixed commands: one turns the built-in home screen off,
+        and one turns it back on. Its key is made and kept in the TV's Android Keystore and never leaves the TV.
+      </p>
+
+      <h3>Power Off and the sleep timer</h3>
+      <p>
+        These use a device admin permission with one policy: put the TV to sleep. It cannot erase, reset or read
+        anything. To remove it, select Remove Power Control in atvOS Settings, under Uninstall.
+      </p>
+
+      <h2>What atvOS does not do</h2>
+      <ul>
+        <li>It does not collect, sell or share personal data.</li>
+        <li>It contains no analytics, crash reporting or advertising code.</li>
+        <li>It does not track you across apps or websites.</li>
+        <li>It does not use cleartext (HTTP) connections.</li>
+      </ul>
+
+      <h2>Permissions</h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Permission</th><th>What atvOS uses it for</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Access to TV listings (<code>READ_TV_LISTINGS</code>)</td><td>The programs on the top shelf.</td></tr>
+            <tr><td>Internet (<code>INTERNET</code>)</td><td>Top shelf artwork and your profile photo, over HTTPS.</td></tr>
+            <tr><td>Network state (<code>ACCESS_NETWORK_STATE</code>)</td><td>The connection in the Control Center.</td></tr>
+            <tr><td>Do Not Disturb access (<code>ACCESS_NOTIFICATION_POLICY</code>)</td><td>The Do Not Disturb button.</td></tr>
+            <tr><td>Alarms and reminders (<code>SCHEDULE_EXACT_ALARM</code>)</td><td>The sleep timer, at the exact time.</td></tr>
+            <tr><td>Delete apps (<code>REQUEST_DELETE_PACKAGES</code>)</td><td>Opens Android's uninstall screen for Delete App.</td></tr>
+            <tr><td>Google Play billing (<code>BILLING</code>)</td><td>Donate.</td></tr>
+            <tr><td>Device admin, sleep only</td><td>Power Off and the sleep timer.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>Keeping and deleting your data</h2>
+      <p>
+        All of the data above is on your TV, so you control it. To delete it, clear the storage of atvOS Launcher in the
+        TV's Settings, or uninstall the app. There is nothing for us to delete, because we receive nothing.
+      </p>
+
+      <h2>Children</h2>
+      <p>atvOS collects no personal information from anyone, including children.</p>
+
+      <h2>Changes to this policy</h2>
+      <p>
+        If this policy changes, the new version is posted on this page with a new effective date. Every change is also
+        in the <a href={site.github}>source code history</a>.
+      </p>
+
+      <h2>Contact</h2>
+      <p>Open an issue on <a href={site.issues}>GitHub</a>.</p>
+    </div>
+  </article>
+</Base>

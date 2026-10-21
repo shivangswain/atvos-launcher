@@ -1,0 +1,20 @@
+{
+  "name": "atvos-website",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The website of atvOS Launcher, atvos.tv.",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "deploy": "astro build && npx --yes wrangler@4.148.0 pages deploy dist --project-name atvos --branch main"
+  },
+  "dependencies": {
+    "astro": "7.3.6"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}
