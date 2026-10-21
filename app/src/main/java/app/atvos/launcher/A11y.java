@@ -24,10 +24,18 @@ import java.util.List;
  */
 final class A11y extends AccessibilityNodeProvider {
 
-    /** One focusable item. The bounds are in design units (1920 wide). {@code clickable}: Select does an action. */
-    record Item(int id, String label, String state, String hint, RectF bounds, boolean focused, boolean clickable) {
+    /**
+     * One focusable item. The bounds are in design units (1920 wide). {@code clickable}: Select does an action.
+     * {@code menu}: a long press opens a menu of options (the long-press menu of an app).
+     */
+    record Item(int id, String label, String state, String hint, RectF bounds, boolean focused, boolean clickable,
+                boolean menu) {
         Item(int id, String label, String state, String hint, RectF bounds, boolean focused) {
-            this(id, label, state, hint, bounds, focused, true);
+            this(id, label, state, hint, bounds, focused, true, false);
+        }
+
+        Item(int id, String label, String state, String hint, RectF bounds, boolean focused, boolean clickable) {
+            this(id, label, state, hint, bounds, focused, clickable, false);
         }
     }
 
@@ -41,6 +49,10 @@ final class A11y extends AccessibilityNodeProvider {
         boolean focus(int id);
         /** Moves the focus to the item and selects it. */
         boolean click(int id);
+        /** Moves the focus to the item and opens its menu, as a long press of Select does. */
+        default boolean longClick(int id) {
+            return false;
+        }
         /** Returns the number of pixels in one design unit. */
         float scale();
     }
@@ -49,6 +61,7 @@ final class A11y extends AccessibilityNodeProvider {
     private final Source source;
     private final AccessibilityManager manager;
     private final int[] location = new int[2];
+    private final AccessibilityNodeInfo.AccessibilityAction options; // the long click of an item with a menu
 
     // The items in the last events. Only changes cause new events.
     private int focusedId = View.NO_ID, a11yFocusedId = View.NO_ID;
@@ -65,6 +78,8 @@ final class A11y extends AccessibilityNodeProvider {
         this.host = host;
         this.source = source;
         this.manager = host.getContext().getSystemService(AccessibilityManager.class);
+        this.options = new AccessibilityNodeInfo.AccessibilityAction(AccessibilityNodeInfo.ACTION_LONG_CLICK,
+                host.getContext().getString(R.string.a11y_options));
     }
 
     /**
@@ -145,6 +160,10 @@ final class A11y extends AccessibilityNodeProvider {
         n.setClickable(it.clickable);
         n.setAccessibilityFocused(id == a11yFocusedId);
         if (it.clickable) n.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK);
+        if (it.menu) { // Switch Access and TalkBack offer it as an action: "Options"
+            n.setLongClickable(true);
+            n.addAction(options);
+        }
         n.addAction(it.focused ? AccessibilityNodeInfo.AccessibilityAction.ACTION_CLEAR_FOCUS
                 : AccessibilityNodeInfo.AccessibilityAction.ACTION_FOCUS);
         n.addAction(id == a11yFocusedId ? AccessibilityNodeInfo.AccessibilityAction.ACTION_CLEAR_ACCESSIBILITY_FOCUS
@@ -182,6 +201,8 @@ final class A11y extends AccessibilityNodeProvider {
                 return source.focus(id);
             case AccessibilityNodeInfo.ACTION_CLICK:
                 return source.click(id);
+            case AccessibilityNodeInfo.ACTION_LONG_CLICK:
+                return source.longClick(id);
             default:
                 return false;
         }

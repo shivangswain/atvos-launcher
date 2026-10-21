@@ -3055,7 +3055,7 @@ final class HomeView extends View {
                     boolean current = i == folderFocus;
                     out.add(new A11y.Item(A11Y_FOLDER + 1 + i, e.label, editing && current ? c.getString(R.string.a11y_moving) : null,
                             editing && current ? c.getString(R.string.a11y_moving_hint) : null,
-                            new RectF(e.x, e.y - folderScroll, e.x + TILE_W, e.y - folderScroll + TILE_H), current));
+                            new RectF(e.x, e.y - folderScroll, e.x + TILE_W, e.y - folderScroll + TILE_H), current, true, !editing));
                 }
                 return;
             }
@@ -3100,7 +3100,7 @@ final class HomeView extends View {
                     hint = c.getString(R.string.a11y_reveal_hint);
                 }
                 out.add(new A11y.Item(A11Y_APP + i, e.label, state, hint,
-                        new RectF(e.x, e.y + offset, e.x + TILE_W, e.y + offset + TILE_H), current));
+                        new RectF(e.x, e.y + offset, e.x + TILE_W, e.y + offset + TILE_H), current, true, !editing));
             }
         }
 
@@ -3177,6 +3177,15 @@ final class HomeView extends View {
             else select();
             a11y.sync();
             return true;
+        }
+
+        /** Opens the long-press menu of an app on the home screen or in a folder. */
+        @Override
+        public boolean longClick(int id) {
+            if (id <= A11Y_FOLDER || editing || !focus(id)) return false; // apps only: the folder name has no menu
+            openMenu();
+            a11y.sync();
+            return menuOpen;
         }
 
         @Override

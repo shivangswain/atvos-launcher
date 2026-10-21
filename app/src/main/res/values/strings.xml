@@ -147,6 +147,8 @@
     <string name="a11y_launcher_settings">atvOS Launcher Settings</string>
     <!-- A Settings choice that is selected. -->
     <string name="a11y_selected">Selected</string>
+    <!-- The accessibility action on an app that opens its long-press menu (Move to…, App Info, Delete App). -->
+    <string name="a11y_options">Options</string>
     <string name="a11y_inputs">Inputs</string>
     <string name="a11y_accessibility">Accessibility</string>
     <string name="a11y_system">System</string>
