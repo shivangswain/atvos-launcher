@@ -31,7 +31,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-/** The system state and the actions of the Control Center tiles. UI thread. */
+/**
+ * The system state and the actions of the Control Center tiles. UI thread, except {@link #rememberDisabled} and
+ * {@link #forgetDisabled}, which the self-adb thread calls.
+ */
 final class Controls {
 
     /** A copy of the state for the tile draw. */
@@ -275,15 +278,18 @@ final class Controls {
         return all;
     }
 
-    /** Adds {@code packages} to the saved home apps that self-adb disabled. */
-    void rememberDisabled(List<String> packages) {
+    /**
+     * Adds {@code packages} to the saved home apps that self-adb disabled. Any thread: two runs (one replaced by a retry)
+     * can finish together, and each read-modify-write must see the other.
+     */
+    synchronized void rememberDisabled(List<String> packages) {
         Set<String> all = disabled();
         all.addAll(packages);
         prefs.edit().putString(KEY_DISABLED_HOMES, String.join(",", all)).apply();
     }
 
-    /** Removes {@code packages} from the saved home apps that self-adb disabled. */
-    void forgetDisabled(List<String> packages) {
+    /** Removes {@code packages} from the saved home apps that self-adb disabled. Any thread. */
+    synchronized void forgetDisabled(List<String> packages) {
         Set<String> all = disabled();
         packages.forEach(all::remove);
         if (all.isEmpty()) prefs.edit().remove(KEY_DISABLED_HOMES).apply();
