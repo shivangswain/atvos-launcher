@@ -133,6 +133,8 @@ final class HomeView extends View {
         Donation donation();
         /** Shows the TV keyboard to edit {@code text} (a folder name) and sends each change to {@code edit}. */
         void editText(String text, TextEdit edit);
+        /** Back with nothing to close. A home screen stays; atvOS opened as an app closes. */
+        void backAtRoot();
     }
 
     /** Receives the text from the TV keyboard. UI thread. */
@@ -902,7 +904,9 @@ final class HomeView extends View {
                 move(0, 1);
                 return true;
             case KeyEvent.KEYCODE_MENU: if (!editing) openMenu(); return true;
-            case KeyEvent.KEYCODE_BACK: back(); return true;
+            case KeyEvent.KEYCODE_BACK:
+                if (!back()) host.backAtRoot();
+                return true;
             default: return super.onKeyDown(code, e);
         }
     }
@@ -1110,10 +1114,11 @@ final class HomeView extends View {
         kick();
     }
 
-    private void back() {
+    /** Returns false if there is nothing to close: the focus is already in the dock. */
+    private boolean back() {
         if (editing) {
             finishEditing();
-        } else if (focus >= apps.size()) {
+        } else if (focus >= apps.size() && focus < total()) {
             // Closes Hidden and goes back to the dock.
             showHidden = false;
             focus = Math.max(0, Math.min((focus - apps.size()) % COLS, apps.size() - 1));
@@ -1121,7 +1126,10 @@ final class HomeView extends View {
         } else if (focus >= COLS) {
             focus %= COLS;
             focusChanged();
+        } else {
+            return false;
         }
+        return true;
     }
 
     /**

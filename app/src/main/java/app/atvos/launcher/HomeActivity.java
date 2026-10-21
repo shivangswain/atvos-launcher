@@ -719,6 +719,15 @@ public final class HomeActivity extends Activity implements HomeView.Host {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), null, entry.label);
     }
 
+    /**
+     * Back with nothing to close. The home screen stays. When another app has the Home button and atvOS runs as an app,
+     * Back goes back to that home screen (TV app quality, TV-DB).
+     */
+    @Override
+    public void backAtRoot() {
+        if (!homeInstance) finish();
+    }
+
     /** Opens the TV keyboard for a hidden field. The field sends each change to the view. */
     @Override
     public void editText(String text, HomeView.TextEdit edit) {
