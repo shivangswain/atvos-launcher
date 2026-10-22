@@ -8,8 +8,7 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview",
-    "deploy": "astro build && npx --yes wrangler@4.148.0 deploy"
+    "preview": "astro preview"
   },
   "dependencies": {
     "astro": "7.3.6"
