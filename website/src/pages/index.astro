@@ -3,38 +3,39 @@
 import Base from "../layouts/Base.astro";
 import HomeMock from "../components/HomeMock.astro";
 import Icon from "../components/Icon.astro";
+import Chevron from "../components/Chevron.astro";
 import { site } from "../site";
 
 const features = [
   {
     icon: "tv",
     title: "Top Shelf",
-    body: "Move to an app in the dock and its top shelf fills the screen: a full-screen picture with a Play button, or a row of Continue Watching and Recommended.",
+    body: "Move to an app in the dock and its top shelf fills the screen.",
   },
   {
     icon: "apps",
     title: "Your layout",
-    body: "Put your favourite apps in the dock, reorder the rest, make folders, and hide the apps that you don't use. Hold Select on an app for its menu.",
+    body: "Put your favourite apps in the dock, reorder the rest, make folders and hide the apps that you don't use.",
   },
   {
     icon: "switches",
     title: "Control Center",
-    body: "Power, network, Do Not Disturb, Bluetooth and a sleep timer, with shortcuts to inputs, accessibility, system settings and search.",
+    body: "Frequently used shortcuts that let you change settings quickly, without getting in the way.",
   },
   {
     icon: "settings",
     title: "Glass, made for TVs",
-    body: "The dock, the buttons and the Control Center blur and tint what is behind them. Light or dark appearance, and a 12- or 24-hour clock.",
+    body: "Quickly change the look and feel of the launcher, while it stays familiar and easy to use.",
   },
   {
     icon: "accessibility",
     title: "TalkBack",
-    body: "Every tile, button and menu option is read aloud as you reach it. When the TV's animations are off, atvOS changes without motion.",
+    body: "Every tile, button and menu option is read aloud as you reach it.",
   },
   {
     icon: "lock",
     title: "Private",
-    body: "No accounts, ads or analytics. atvOS Launcher uses the network only for top shelf artwork and your profile photo, over HTTPS.",
+    body: "No ads or analytics. atvOS Launcher uses your Google account only for your profile photo.",
   },
 ];
 
@@ -49,25 +50,25 @@ const steps = [
   },
   {
     title: "Allow USB debugging",
-    body: "Select Set Up. When the TV asks, check that its code is the same as the code in the picture, then select Allow. atvOS becomes the home screen.",
+    body: "When the TV asks, select Allow. atvOS becomes the home screen.",
   },
   {
     title: "Add your profile picture",
-    body: "Optional. Choose your Google account, and your photo shows next to the clock.",
+    body: "Completely optional. Choose your Google account to show its profile picture on the home screen.",
   },
 ];
 ---
 <Base
-  title="atvOS Launcher: a home screen for Google TV and Android TV"
-  description="atvOS Launcher is a free, open-source home screen for Google TV and Android TV, inspired by the tvOS Home Screen: a glass dock, full-screen top shelves and a Control Center."
+  title="atvOS Launcher: a home screen for Google TV"
+  description="atvOS Launcher is a free, open-source home screen for Google TV, inspired by the tvOS Home Screen."
   current="overview"
 >
   <section class="hero">
     <div class="wrap center text-col">
-      <h1>The home screen your TV deserves.</h1>
+      <h1>The home screen your TV deserves</h1>
       <p class="lead">
-        atvOS Launcher gives Google TV and Android TV a glass dock, full-screen top shelves and a Control Center,
-        inspired by the tvOS Home Screen. It is free, open source, and keeps everything on your TV.
+        atvOS Launcher gives your Google TV a clean, fast and visually stunning home screen, inspired by tvOS. It
+        is free and open source, and it keeps everything on your TV.
       </p>
       <div class="actions">
         {site.onPlay ? (
@@ -75,7 +76,7 @@ const steps = [
         ) : (
           <span class="pill soon">Coming soon to Google Play</span>
         )}
-        <a class="more" href={site.github}>View the source code<Icon name="chevron" /></a>
+        <a class="more" href={site.github}>View the source code<Chevron /></a>
       </div>
     </div>
     <HomeMock />
@@ -84,8 +85,8 @@ const steps = [
   <section class="section" id="features">
     <div class="wrap">
       <div class="section-head text-col center">
-        <h2>Get to know atvOS.</h2>
-        <p class="lead">Everything that you watch, one press away. Nothing that you don't need.</p>
+        <h2>Get to know atvOS</h2>
+        <p class="lead">Everything that you watch, one press away.</p>
       </div>
       <div class="features">
         {features.map((f) => (
@@ -102,10 +103,10 @@ const steps = [
   <section class="section alt" id="setup">
     <div class="wrap text-col">
       <div class="section-head">
-        <h2>Set up in a few minutes.</h2>
+        <h2>Set up in a few minutes</h2>
         <p class="lead">
           You need a Google TV or Android TV device with Android 12 or later. On first launch, atvOS shows each step
-          with a picture of the TV's Settings screen, opens that screen for you, and skips the steps that are already
+          with a picture of the TV's Settings screen, opens that screen for you and skips the steps that are already
           done.
         </p>
       </div>
@@ -138,7 +139,7 @@ const steps = [
   <section class="section" id="support">
     <div class="wrap text-col">
       <div class="section-head">
-        <h2>Support.</h2>
+        <h2>Support</h2>
       </div>
       <div class="faq">
         <details>
@@ -156,11 +157,10 @@ const steps = [
           </div>
         </details>
         <details>
-          <summary>Which TVs does atvOS work on?<Icon name="chevron" /></summary>
+          <summary>Which devices does atvOS work on?<Icon name="chevron" /></summary>
           <div class="answer">
             <p>
-              Google TV and Android TV devices with Android 12 or later: TVs, streaming sticks and set-top boxes. You
-              use it with the arrows, Select and Back on your remote.
+              Google TV and Android TV devices with Android 12 or later: TVs, streaming sticks and set-top boxes.
             </p>
           </div>
         </details>
@@ -177,14 +177,14 @@ const steps = [
         <details>
           <summary>Does atvOS collect my data?<Icon name="chevron" /></summary>
           <div class="answer">
-            <p>No. It has no accounts, no ads and no analytics. Read the <a href="/privacy">Privacy Policy</a>.</p>
+            <p>No. There's no sign-up, no ads and no analytics. Read the <a href="/privacy">Privacy Policy</a>.</p>
           </div>
         </details>
         <details>
           <summary>How do I report a problem or ask for a feature?<Icon name="chevron" /></summary>
           <div class="answer">
             <p>
-              Open an issue on <a href={site.issues}>GitHub</a>. Say which TV you have, its Android version, and what
+              Open an issue on <a href={site.issues}>GitHub</a>. Say which TV you have, its Android version and what
               you did before the problem.
             </p>
           </div>
@@ -210,17 +210,18 @@ const steps = [
           <h3>Free and open source</h3>
           <p>
             atvOS Launcher is free software under the GNU General Public License v3.0. Read the code, build it
-            yourself, or help make it better.
+            yourself or help make it better.
           </p>
-          <a class="more" href={site.github}>View on GitHub<Icon name="chevron" /></a>
+          <a class="more" href={site.github}>View on GitHub<Chevron /></a>
         </div>
         <div class="card-box">
           <span class="glyph"><Icon name="heart" /></span>
           <h3>Support the project</h3>
           <p>
-            If you enjoy atvOS, you can donate from atvOS Settings, under Support, then Donate. Donations go through
-            Google Play and unlock nothing: atvOS is the same for everyone.
+            If you enjoy atvOS, you can donate from atvOS Settings, under Support, then Donate. Donations are completely
+            optional: atvOS is the same for everyone.
           </p>
+          <a class="more" href={site.paypal}>Or buy me a coffee on PayPal<Chevron /></a>
         </div>
       </div>
     </div>
