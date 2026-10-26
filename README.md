@@ -25,6 +25,16 @@ and tvOS are trademarks of Apple Inc.
 - **Private.** atvOS Launcher collects nothing. It uses the network only for artwork and your
   profile photo, over HTTPS.
 
+## Screenshots
+
+| Continue Watching | Full-screen top shelf | Control Center |
+| --- | --- | --- |
+| ![The dock with a Continue Watching row of cards](docs/images/screenshots/continue-watching.jpg) | ![A full-screen top shelf with the title, details and Play](docs/images/screenshots/top-shelf.jpg) | ![The Control Center over a top shelf](docs/images/screenshots/control-center.jpg) |
+
+The screenshots show demo apps with original artwork. The store listing text and images are in
+[`fastlane/metadata/android/en-GB/`](fastlane/metadata/android/en-GB), and
+[docs/play-store.md](docs/play-store.md) is the guide to publishing on Google Play.
+
 ## Requirements
 
 - A Google TV or Android TV device with Android 12 or later.
@@ -160,8 +170,9 @@ npm run build    # the finished site, in website/dist
 ```
 
 Cloudflare Pages builds and publishes the site from GitHub when a push to `main` changes
-`website/`. The link preview image, the logo and the README banner come from `website/social/`
-(`card.html` and `logo.svg`). On a Mac, `render.swift` draws them again: see the comment at its top. When atvOS Launcher is on Google Play, set `onPlay` to `true` in
+`website/`. The site, the link preview image, the logo and the README banner use Inter. The images come from
+`website/social/`: `card.html`, and `logo.svg` with the outlines of "atvOS" in Inter Display Medium
+(`textpath.swift`). On a Mac, `render.swift` draws them again: see the comments at their tops. When atvOS Launcher is on Google Play, set `onPlay` to `true` in
 `website/src/site.ts`.
 
 ## License

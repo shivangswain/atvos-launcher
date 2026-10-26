@@ -1,0 +1,34 @@
+atvOS Launcher is a home screen for Google TV and Android TV. It puts your favourite apps in a glass dock, fills the screen with what each app recommends, and keeps the rest of your apps in a tidy grid below. Its design is inspired by the tvOS Home Screen.
+
+Top Shelf
+Move to an app in the dock and its top shelf fills the screen: a full-screen picture with the title, details and a Play button, or a row of Continue Watching and Recommended programs. Move through the pages of an app without opening it.
+
+Your Layout
+• Put your favourite apps in the dock and reorder the rest.
+• Make folders and hide the apps that you don't use.
+• Hold Select on an app for its menu: edit the home screen, move it to a folder, choose its top shelf, or delete it.
+
+Control Center
+Select the clock for power, network, Do Not Disturb, Bluetooth and a sleep timer, with shortcuts to inputs, accessibility, the TV's settings and search.
+
+Made for the Big Screen
+• Glass that blurs and tints what is behind it, drawn smoothly on everyday TV hardware.
+• Light or dark appearance, and a 12- or 24-hour clock.
+• Your Google profile picture next to the clock (optional).
+• TalkBack reads every tile, button and menu option aloud.
+
+Private by Design
+atvOS Launcher has no accounts, no ads and no analytics. Your layout and settings stay on your TV. It uses the network only for top shelf artwork and your profile photo, over HTTPS.
+
+Set Up
+On first launch, atvOS shows each step with a picture of the TV's Settings screen. On many Google TV and Android TV devices, the built-in home screen keeps the Home button. To make the Home button open atvOS, setup turns on Developer options and USB debugging, and then turns off the built-in home screen through the TV's own debugging connection. It sends only two fixed commands: one turns the built-in home screen off, and one turns it back on. You can turn USB debugging off again when setup is done. Restore Default Launcher in atvOS Settings brings the built-in home screen back at any time.
+
+Free and Open Source
+atvOS Launcher is free software under the GNU General Public License v3.0. Donations through Google Play are optional and unlock nothing: atvOS is the same for everyone.
+
+Requires Google TV or Android TV with Android 12 or later.
+
+atvOS Launcher is an independent project. It is not affiliated with or endorsed by Apple or Google. Apple TV and tvOS are trademarks of Apple Inc. Google TV and Android TV are trademarks of Google LLC.
+
+Website and help: https://atvos.tv
+Source code: https://github.com/shivangswain/atvos-launcher

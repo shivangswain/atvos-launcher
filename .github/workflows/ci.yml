@@ -7,9 +7,9 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-    paths-ignore: ["**.md", "LICENSE*", ".gitlab-ci.yml", "website/**"]
+    paths-ignore: ["**.md", "LICENSE*", ".gitlab-ci.yml", "website/**", "docs/**", "fastlane/**"]
   pull_request:
-    paths-ignore: ["**.md", "LICENSE*", ".gitlab-ci.yml", "website/**"]
+    paths-ignore: ["**.md", "LICENSE*", ".gitlab-ci.yml", "website/**", "docs/**", "fastlane/**"]
   workflow_dispatch:
 
 # A new push to a branch cancels its older run. Tag runs always complete.

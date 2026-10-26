@@ -1,0 +1,1 @@
+The first release of atvOS Launcher: a glass dock, full-screen top shelves, Continue Watching rows, folders, a Control Center, light and dark appearance, TalkBack support and optional donations.
