@@ -11,5 +11,5 @@ export const site = {
   paypal: "https://www.paypal.com/paypalme/shivangswain",
   // true when atvOS Launcher is on Google Play. While it is false, the pages say "Coming soon to Google Play".
   onPlay: false,
-  policyDate: "26 October 2026",
+  policyDate: "27 October 2026",
 };

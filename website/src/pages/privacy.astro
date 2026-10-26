@@ -69,9 +69,21 @@ import { site } from "../site";
 
       <h3>Setup and the debugging connection</h3>
       <p>
-        To replace the TV's built-in home screen, atvOS connects to the TV's own debugging service at 127.0.0.1, a
-        connection that stays inside the TV. It sends only two fixed commands: one turns the built-in home screen off,
-        and one turns it back on. Its key is made and kept in the TV's Android Keystore and never leaves the TV.
+        To replace the TV's built-in home screen, atvOS can connect to the TV's own debugging service at 127.0.0.1, a
+        connection that stays inside the TV. It sends only fixed commands: one turns the built-in home screen off and
+        one turns it back on, and one turns Remote Buttons on and one turns it off. Its key is made and kept in the TV's
+        Android Keystore and never leaves the TV.
+      </p>
+
+      <h3>Remote Buttons (an accessibility service)</h3>
+      <p>
+        atvOS Launcher Remote Buttons is an accessibility service. It gets the buttons that you press on the remote, so
+        that holding Home opens the Control Center and the Settings button opens the TV's settings. If you set up atvOS
+        with Accessibility instead of USB debugging, it also opens atvOS when you press Home, and when the TV's own home
+        screen opens: for this, it sees only the window changes of that one app. It acts only on Home and Settings and
+        passes every other button on. It cannot read the screen or anything that you type, and it keeps and sends
+        nothing. Setup tells you this before it turns the service on, and you can turn it off in atvOS Settings, under
+        General, or in the TV's Accessibility settings.
       </p>
 
       <h3>Power Off and the sleep timer</h3>
@@ -103,6 +115,7 @@ import { site } from "../site";
             <tr><td>Delete apps (<code>REQUEST_DELETE_PACKAGES</code>)</td><td>Opens Android's uninstall screen for Delete App.</td></tr>
             <tr><td>Google Play billing (<code>BILLING</code>)</td><td>Donate.</td></tr>
             <tr><td>Device admin, sleep only</td><td>Power Off and the sleep timer.</td></tr>
+            <tr><td>Accessibility service, key filter (<code>BIND_ACCESSIBILITY_SERVICE</code>)</td><td>Remote Buttons: holding Home, the Settings button, and the Home button without USB debugging. It cannot read the screen.</td></tr>
           </tbody>
         </table>
       </div>

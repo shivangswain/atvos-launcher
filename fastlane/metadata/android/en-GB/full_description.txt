@@ -21,7 +21,9 @@ Private by Design
 atvOS Launcher has no accounts, no ads and no analytics. Your layout and settings stay on your TV. It uses the network only for top shelf artwork and your profile photo, over HTTPS.
 
 Set Up
-On first launch, atvOS shows each step with a picture of the TV's Settings screen. On many Google TV and Android TV devices, the built-in home screen keeps the Home button. To make the Home button open atvOS, setup turns on Developer options and USB debugging, and then turns off the built-in home screen through the TV's own debugging connection. It sends only two fixed commands: one turns the built-in home screen off, and one turns it back on. You can turn USB debugging off again when setup is done. Restore Default Launcher in atvOS Settings brings the built-in home screen back at any time.
+On first launch, atvOS shows each step with a picture of the TV's Settings screen. On many Google TV and Android TV devices, the built-in home screen keeps the Home button. To make the Home button open atvOS, setup turns on Developer options and USB debugging, and then turns off the built-in home screen through the TV's own debugging connection. It sends only fixed commands: to turn the built-in home screen off or back on, and to turn Remote Buttons on or off. You can turn USB debugging off again when setup is done. Or skip the developer settings: turn on atvOS Launcher Remote Buttons in Accessibility, and atvOS opens when you press Home. Restore Default Launcher in atvOS Settings brings the built-in home screen back at any time.
+
+Remote Buttons: hold Home to open Control Center, and press the Settings button for the TV's settings. It is an accessibility service that gets the remote's buttons, acts only on Home and Settings, and never reads the screen or sends anything.
 
 Free and Open Source
 atvOS Launcher is free software under the GNU General Public License v3.0. Donations through Google Play are optional and unlock nothing: atvOS is the same for everyone.

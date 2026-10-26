@@ -64,6 +64,10 @@ const jsonLd = {
 
 const steps = [
   {
+    title: "Choose how",
+    body: "USB debugging is best. Or use Accessibility, with no developer settings.",
+  },
+  {
     title: "Turn on Developer options",
     body: "atvOS opens the TV's About screen. Select the build row seven times.",
   },
@@ -76,6 +80,10 @@ const steps = [
     body: "When the TV asks, select Allow. atvOS becomes the home screen.",
   },
   {
+    title: "Or turn on Remote Buttons",
+    body: "With Accessibility, atvOS opens Accessibility for you. Turn on atvOS Launcher Remote Buttons.",
+  },
+  {
     title: "Add your profile picture",
     body: "Completely optional. Choose your Google account to show its profile picture on the home screen.",
   },
@@ -86,7 +94,8 @@ const steps = [
   description="atvOS Launcher is a free, open-source home screen for Google TV, inspired by the tvOS Home Screen."
   current="overview"
 >
-  <script is:inline slot="head" type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+  <!-- "<" as \u003c, so that no text in the data can end the script element. -->
+  <script is:inline slot="head" type="application/ld+json" set:html={JSON.stringify(jsonLd).replace(/</g, "\\u003c")} />
   <section class="hero">
     <div class="wrap center text-col">
       <h1>The home screen your TV deserves</h1>
@@ -149,8 +158,12 @@ const steps = [
         <p>
           The built-in home screens of Google TV and Android TV keep the Home button, even after you choose a
           different home app. atvOS turns the built-in home screen off through the TV's own debugging connection,
-          inside the TV. It sends only two fixed commands: one turns the built-in home screen off, and one turns it
-          back on.
+          inside the TV. It sends only fixed commands: one turns the built-in home screen off and one turns it back on,
+          and one turns Remote Buttons on and one turns it off.
+        </p>
+        <p>
+          Don't want developer settings? Choose Accessibility instead: Remote Buttons opens atvOS when you press Home
+          and when the TV's home screen opens, which can show for a moment first.
         </p>
         <p>
           When setup is done, you can turn USB debugging off again. On a TV that lets you choose the home app, atvOS
@@ -171,8 +184,8 @@ const steps = [
           <div class="answer">
             <ol>
               <li>
-                If you turned USB debugging off after setup, turn it on again in Developer options. Then open atvOS
-                Settings, select Uninstall, then Restore Default Launcher.
+                If you set up atvOS with USB debugging and turned it off afterwards, turn it on again in Developer
+                options. Then open atvOS Settings, select Uninstall, then Restore Default Launcher.
               </li>
               <li>Select Remove Power Control. Android can't uninstall an app with device admin access.</li>
               <li>Open Support, select App Info, then Uninstall.</li>
@@ -189,12 +202,17 @@ const steps = [
           </div>
         </details>
         <details>
-          <summary>Why don't the Settings and Guide buttons on my remote work?<Icon name="chevron" /></summary>
+          <summary>What do the Home, Settings and Guide buttons do?<Icon name="chevron" /></summary>
           <div class="answer">
             <p>
-              On Google TV, these buttons open panels that belong to the TV's built-in home screen, which atvOS turns
-              off so that the Home button opens atvOS. To open the TV's settings, select the clock, then the settings
-              button in the Control Center. Restore Default Launcher brings the buttons back.
+              With Remote Buttons on, holding Home opens the Control Center, and the Settings button opens the TV's
+              settings. Remote Buttons is an accessibility service: it gets the remote's buttons, acts only on Home and
+              Settings, and passes every other button on. It doesn't read the screen. Turn it on or off in atvOS
+              Settings, under General.
+            </p>
+            <p>
+              The Guide button opens a panel of the TV's built-in home screen, so it does nothing while atvOS replaces
+              it. Restore Default Launcher brings it back.
             </p>
           </div>
         </details>

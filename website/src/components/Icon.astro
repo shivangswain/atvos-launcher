@@ -1,6 +1,6 @@
 ---
 // 24 × 24 glyphs in the colour of the text. Most are Material Symbols (Apache License 2.0), as in the app.
-const icons: Record<string, string> = {
+const icons = {
   tv: `<path d="M21,3H3c-1.1,0 -2,0.9 -2,2v12c0,1.1 0.9,2 2,2h5v2h8v-2h5c1.1,0 1.99,-0.9 1.99,-2L23,5c0,-1.1 -0.9,-2 -2,-2zM21,17H3V5h18v12z" />`,
   switches: `<path fill-rule="evenodd" d="M6.05,2.65h11.9a4.05,4.05 0,0 1,0 8.1h-11.9a4.05,4.05 0,0 1,0 -8.1zM6.05,4.15a2.55,2.55 0,0 0,0 5.1h11.9a2.55,2.55 0,0 0,0 -5.1zM4.15,6.7a1.9,1.9 0,1 0,3.8 0a1.9,1.9 0,1 0,-3.8 0z" /><path fill-rule="evenodd" d="M6.05,13.25h11.9a4.05,4.05 0,0 1,0 8.1h-11.9a4.05,4.05 0,0 1,0 -8.1zM15.35,17.3a2.6,2.6 0,1 0,5.2 0a2.6,2.6 0,1 0,-5.2 0z" />`,
   accessibility: `<path d="M20.5,6c-2.61,0.7 -5.67,1 -8.5,1S6.11,6.7 3.5,6L3,8c1.86,0.5 4,0.83 6,1v13h2v-6h2v6h2V9c2,-0.17 4.14,-0.5 6,-1L20.5,6zM12,6c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2s-2,0.9 -2,2S10.9,6 12,6z" />`,
@@ -21,8 +21,16 @@ const icons: Record<string, string> = {
   photo: `<path d="M14 6l-3.75 5 2.85 3.8-1.6 1.2C9.81 13.75 7 10 7 10l-6 8h22L14 6z" />`,
   game: `<path d="M21 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-10 7H8v3H6v-3H3v-2h3V8h2v3h3v2zm4.5 2c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm4-3c-.83 0-1.5-.67-1.5-1.5S18.67 9 19.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" />`,
   chevron: `<path d="M8.59 16.59 13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z" />`,
-};
+} satisfies Record<string, string>;
+interface Props {
+  name: keyof typeof icons;
+  size?: number;
+  label?: string;
+}
+
 const { name, size = 24, label } = Astro.props;
+// An unknown name fails the build, not the page.
+if (!(name in icons)) throw new Error(`Unknown icon: ${name}`);
 ---
 <svg class="icon" viewBox="0 0 24 24" width={size} height={size} fill="currentColor" role={label ? "img" : undefined}
   aria-label={label} aria-hidden={label ? undefined : "true"} set:html={icons[name]} />

@@ -89,8 +89,9 @@ and agree to the TV review policy. Do this early, so the TV review runs while th
 **Instructions for reviewers** (App access): "No account or login is needed. On first launch,
 select Not Now to skip setup and use the home screen. On Google TV and Android TV, the built-in home
 screen keeps the Home button. The optional setup turns it off through the TV's own debugging
-connection (Developer options > USB debugging), with two fixed commands, and Settings > Uninstall >
-Restore Default Launcher turns it back on. Donate is in atvOS Settings > Support."
+connection (Developer options > USB debugging), with fixed commands, and Settings > Uninstall >
+Restore Default Launcher turns it back on. Setup can use Accessibility instead: the user turns on
+atvOS Launcher Remote Buttons. Donate is in atvOS Settings > Support."
 
 **Data safety.** atvOS Launcher sends no user data to you or to anyone else:
 
@@ -109,7 +110,22 @@ Why this is correct:
 
 If a future version adds analytics, crash reporting or a server, update this form first.
 
-**Permissions.** No declaration form applies:
+**Accessibility API (Policy > App content > Sensitive app permissions, or the AccessibilityService
+declaration that Play Console asks for after the upload).** atvOS Launcher Remote Buttons is not an
+accessibility tool (`isAccessibilityTool` is false), so Play asks for a declaration:
+
+| Question | Answer |
+| --- | --- |
+| Core functionality | A home screen (launcher) for TVs. The service makes the remote's Home and Settings buttons work for it: holding Home opens the Control Center, the Settings button opens the TV's settings, and, without USB debugging, Home opens the launcher in place of the TV's built-in home screen. |
+| Data accessed | Key events of the remote (it acts only on Home and Settings), and the window changes of the TV's built-in home app only, when it stands in for it. No window content (`canRetrieveWindowContent` is false). |
+| Data use and sharing | Used only on the TV to open the launcher, the Control Center or Settings. Nothing is stored or sent. |
+| Prominent disclosure | Setup shows it before the user turns the service on: the "Allow USB Debugging" step (`setup_allow_body`) and the "Turn On Remote Buttons" step (`setup_buttons_body`). Settings > General > Remote Buttons repeats it. |
+| Video | Record setup on a TV: the disclosure, turning the service on, then holding Home for the Control Center. Upload it to YouTube (unlisted) and paste the link. |
+
+Also add the service to the privacy policy (done: [atvos.tv/privacy](https://atvos.tv/privacy)) and
+answer **No** to "collects or shares user data" in Data safety: the key events stay on the TV.
+
+**Permissions.** No other declaration form applies:
 - `SCHEDULE_EXACT_ALARM` (the sleep timer) needs no declaration. Only `USE_EXACT_ALARM` does.
 - `REQUEST_DELETE_PACKAGES` opens Android's own uninstall screen and is not restricted.
 - The device admin uses only the lock policy (Power Off and the sleep timer). Its description in the
