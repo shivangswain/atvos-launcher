@@ -12,7 +12,7 @@ final class Logo {
 
     private static final int TILE_DARK = 0xFF555555, TILE_LIGHT = 0xFF7D7C7D;
     /** The width of the wordmark as a fraction of the tile width, and the height-to-width ratio of the wordmark. */
-    private static final float WORDMARK = 0.62f, WORDMARK_ASPECT = 1093f / 3930f;
+    private static final float WORDMARK = 0.62f, WORDMARK_ASPECT = 751f / 2634.8f;
     /** The corner radius as a fraction of the side, and the superellipse exponent of the corners (2 gives a circle). */
     private static final float CORNER = 0.222f, SQUARENESS = 2.2f;
 
