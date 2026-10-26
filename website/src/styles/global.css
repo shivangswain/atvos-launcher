@@ -1,4 +1,4 @@
-/* The styles of atvos.tv: the system font, a dark or light page that follows the device's appearance, and glass in
+/* The styles of atvos.tv: Inter, a dark or light page that follows the device's appearance, and glass in
    the colours of the launcher. */
 
 :root {
@@ -61,7 +61,10 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 400 1.0625rem/1.47 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Inter Variable (website/node_modules/@fontsource-variable/inter): its optical size axis gives the Display shapes
+     at headline sizes. */
+  font: 400 1.0625rem/1.47 "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  font-optical-sizing: auto;
   letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -164,24 +167,17 @@ a:hover {
   padding-inline: var(--gutter);
 }
 
+/* The logo: "atvOS Launcher" in one line of Inter Medium ("atvOS" alone on small screens). */
 .brand {
-  display: flex;
-  align-items: center;
-  gap: 7px;
   color: var(--text);
-  font-size: 1.1875rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-size: 1.25rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
   white-space: nowrap;
 }
 
 .brand:hover {
   text-decoration: none;
-}
-
-.wordmark {
-  display: block;
-  width: auto;
 }
 
 .nav-links {
@@ -770,7 +766,7 @@ a:hover {
     display: none;
   }
 
-  .brand span {
+  .brand .product {
     display: none;
   }
 

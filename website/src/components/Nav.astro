@@ -1,13 +1,12 @@
 ---
-// The sticky navigation bar: the wordmark, the page links and the Google Play button.
-import Wordmark from "./Wordmark.astro";
+// The sticky navigation bar: the logo, the page links and the Google Play button.
 import { site } from "../site";
 
 const { current } = Astro.props;
 ---
 <header class="nav">
   <div class="nav-inner">
-    <a class="brand" href="/" aria-label="atvOS Launcher, overview"><Wordmark height={17} /><span>Launcher</span></a>
+    <a class="brand" href="/" aria-label="atvOS Launcher, overview">atvOS<span class="product"> Launcher</span></a>
     <nav class="nav-links" aria-label="Site">
       <a class="hide-small" href="/" aria-current={current === "overview" ? "page" : undefined}>Overview</a>
       <a href="/#setup">Set Up</a>
