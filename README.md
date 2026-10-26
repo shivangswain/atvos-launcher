@@ -1,5 +1,10 @@
 # atvOS Launcher
 
+[![atvOS Launcher: the home screen your TV deserves](docs/images/social-preview.png)](https://atvos.tv)
+
+[Website](https://atvos.tv) · [Google Play](https://play.google.com/store/apps/details?id=app.atvos.launcher) ·
+[Privacy policy](https://atvos.tv/privacy) · [Report a problem](https://github.com/shivangswain/atvos-launcher/issues)
+
 atvOS Launcher is a home screen for Google TV and Android TV, inspired by the tvOS Home Screen. It
 puts your favourite apps in a glass dock, shows each app's top shelf behind it, and keeps the rest
 of your apps in a grid below. A clock in the corner opens a Control Center.
@@ -52,6 +57,11 @@ screen and one that turns it back on. It uses the debugging connection for nothi
 
 When setup ends the first time, the TV asks you to allow access to app recommendations.
 
+**Settings and Guide buttons:** on Google TV, these remote buttons open panels that belong to the
+built-in home screen. While atvOS Launcher replaces it, they do nothing. To open the TV's settings,
+select the clock, then the settings button in the Control Center. **Restore Default Launcher**
+brings the buttons back.
+
 ## Privacy and permissions
 
 atvOS Launcher collects and shares nothing. Your Google account address and profile photo stay on
@@ -103,23 +113,33 @@ keyPassword=…
 
 ### Continuous integration
 
-- **GitHub Actions** and **GitLab CI** run the same build: `./gradlew build bundleRelease`. It lints the app and makes the debug APK, the release APK and the app bundle. Both run it for each push to `main` and each pre-release tag. GitHub Actions also runs it for each pull request.
-- **Pre-release tags** (for example, `v1.0-pre.1`) also make a draft pre-release on GitHub, with the APKs and the app bundle.
+- **GitHub Actions** and **GitLab CI** run the same build: `./gradlew build bundleRelease`. It lints the app and makes the debug APK, the release APK and the app bundle. Both run it for each push to `main` and each version tag. GitHub Actions also runs it for each pull request.
+- **Version tags** (`v1.0`, or `v1.0-pre.3` for a pre-release) also make a release with the APKs, the app bundle and `SHA256SUMS`, the SHA-256 digest of each file:
+  - **GitHub:** a draft release, and a signed build provenance attestation for each file. Check a file with `gh attestation verify FILE --repo shivangswain/atvos-launcher`.
+  - **GitLab:** the files in the package registry (package `atvos-launcher`, version = the tag), a release that links to them, and the runner's provenance statement in the job artifacts.
 - **Release signing:** to sign the builds with your upload key, add `ANDROID_KEYSTORE_BASE64` (the keystore file in Base64), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. On GitHub, add them as repository secrets. On GitLab, add them as masked and protected CI/CD variables, and protect the `v*` tags.
 
 ### Google profile photo
 
-Google gives profile photos only to registered apps. To show photos in your own build:
+The profile photo uses Google's basic profile scope (`userinfo.profile`) through the Google account on
+the TV. Google gives the photo only to an app with an OAuth client that matches its package name and
+signing key. To make the photo work for every user:
 
-1. In the [Google Cloud console](https://console.cloud.google.com/), create a project.
-2. Under **Google Auth Platform**, set up the app as **External**, with a home page and a privacy
-   policy. Under **Audience**, select **Publish app** to make it **In production**. In Testing, only
-   test users get a photo.
-3. Under **Clients**, create an **Android** client with the package name of your build and the SHA-1
-   of its signing key. For Google Play, use the app signing key from Play Console > **Test and
-   release** > **App integrity**.
+1. In [Google Search Console](https://search.google.com/search-console), verify that you own the
+   domain of the home page (`atvos.tv`), with a DNS TXT record.
+2. In the [Google Cloud console](https://console.cloud.google.com/), open the project and go to
+   **Google Auth Platform**:
+   - **Branding:** the app name, a support email, the home page `https://atvos.tv`, the privacy
+     policy `https://atvos.tv/privacy`, and `atvos.tv` as an authorized domain.
+   - **Data access:** only the `.../auth/userinfo.profile` scope. It is a non-sensitive scope, so it
+     does not need Google's app verification.
+   - **Clients:** an **Android** client for `app.atvos.launcher` for each signing key: the app signing
+     key from Play Console > **Test and release** > **App integrity** (copies from Google Play), and
+     the upload or debug key of the builds that you install yourself.
+   - **Audience:** **Publish app**, to move it from **Testing** to **In production**. In Testing,
+     only the listed test users get a photo.
 
-Without a client, the profile picture shows the first letter of the account.
+Without a matching client, the profile picture shows the first letter of the account.
 
 ### Donations
 
@@ -140,7 +160,8 @@ npm run build    # the finished site, in website/dist
 ```
 
 Cloudflare Pages builds and publishes the site from GitHub when a push to `main` changes
-`website/`. When atvOS Launcher is on Google Play, set `onPlay` to `true` in
+`website/`. The link preview image, the logo and the README banner come from `website/social/`
+(`card.html` and `logo.svg`). On a Mac, `render.swift` draws them again: see the comment at its top. When atvOS Launcher is on Google Play, set `onPlay` to `true` in
 `website/src/site.ts`.
 
 ## License
