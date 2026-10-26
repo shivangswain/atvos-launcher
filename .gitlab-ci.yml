@@ -1,8 +1,9 @@
 # Builds and lints atvOS Launcher on GitLab's shared Linux runners. .github/workflows/ci.yml runs the same build on
-# GitHub.
+# GitHub. A version tag (v1.0, v1.0-pre.3) also puts the APKs, the app bundle and their SHA-256 digests (SHA256SUMS)
+# in the package registry, and makes a release that links to them.
 workflow:
   rules:
-    - if: $CI_COMMIT_TAG =~ /^v.*-pre/
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]/
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
         - app/**/*
@@ -12,7 +13,12 @@ workflow:
         - gradlew
         - .gitlab-ci.yml
 
+stages:
+  - build
+  - release
+
 build:
+  stage: build
   image: eclipse-temurin:21-jdk-noble
   timeout: 30 minutes
   variables:
@@ -20,6 +26,8 @@ build:
     GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle-home"
     GRADLE_OPTS: "-Dorg.gradle.daemon=false"
     CMDLINE_TOOLS: commandlinetools-linux-16111833_latest.zip
+    # The runner writes a provenance statement (SLSA) for the artifacts of the job: artifacts-metadata.json.
+    RUNNER_GENERATE_ARTIFACTS_METADATA: "true"
   cache:
     key: android-37-build-tools-36-gradle-9.8.1
     paths:
@@ -49,6 +57,20 @@ build:
       fi
   script:
     - ./gradlew build bundleRelease
+    # A version tag: the files with release names, their digests, and a copy in the generic package registry.
+    - |
+      if [ -n "${CI_COMMIT_TAG:-}" ]; then
+        mkdir dist
+        cp app/build/outputs/apk/release/app-release.apk "dist/atvos-launcher-$CI_COMMIT_TAG.apk"
+        cp app/build/outputs/bundle/release/app-release.aab "dist/atvos-launcher-$CI_COMMIT_TAG.aab"
+        cp app/build/outputs/apk/debug/app-debug.apk "dist/atvos-launcher-$CI_COMMIT_TAG-debug.apk"
+        (cd dist && sha256sum -- *.apk *.aab > SHA256SUMS && cat SHA256SUMS)
+        for f in dist/*; do
+          curl --fail --silent --show-error --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$f" \
+            "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/atvos-launcher/$CI_COMMIT_TAG/$(basename "$f")"
+          echo
+        done
+      fi
   artifacts:
     name: "atvos-launcher-$CI_COMMIT_REF_SLUG"
     when: always
@@ -57,4 +79,39 @@ build:
       - app/build/outputs/apk/release/app-release.apk
       - app/build/outputs/bundle/release/app-release.aab
       - app/build/reports/lint-results-*.html
+      - dist/
     expire_in: 14 days
+
+# The release page of a version tag, with links to the files in the package registry.
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/cli:latest
+  needs: [build]
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]/
+  script:
+    - echo "Release $CI_COMMIT_TAG"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: "atvOS Launcher $CI_COMMIT_TAG"
+    description: |
+      atvOS Launcher $CI_COMMIT_TAG, built and linted by GitLab CI.
+
+      - `atvos-launcher-$CI_COMMIT_TAG.apk`: the release build, to install with `adb install`. It is signed with the upload key if the project has the signing variables, else with a debug key.
+      - `atvos-launcher-$CI_COMMIT_TAG.aab`: the app bundle for Google Play.
+      - `atvos-launcher-$CI_COMMIT_TAG-debug.apk`: the debug build.
+      - `SHA256SUMS`: the SHA-256 digest of each file. Check a download with `sha256sum --check --ignore-missing SHA256SUMS`.
+    assets:
+      links:
+        - name: "atvos-launcher-$CI_COMMIT_TAG.apk"
+          url: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/atvos-launcher/$CI_COMMIT_TAG/atvos-launcher-$CI_COMMIT_TAG.apk"
+          link_type: package
+        - name: "atvos-launcher-$CI_COMMIT_TAG.aab"
+          url: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/atvos-launcher/$CI_COMMIT_TAG/atvos-launcher-$CI_COMMIT_TAG.aab"
+          link_type: package
+        - name: "atvos-launcher-$CI_COMMIT_TAG-debug.apk"
+          url: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/atvos-launcher/$CI_COMMIT_TAG/atvos-launcher-$CI_COMMIT_TAG-debug.apk"
+          link_type: package
+        - name: SHA256SUMS
+          url: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/atvos-launcher/$CI_COMMIT_TAG/SHA256SUMS"
+          link_type: other

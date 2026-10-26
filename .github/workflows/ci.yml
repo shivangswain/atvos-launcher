@@ -1,11 +1,12 @@
-# Builds and lints atvOS Launcher, and makes a draft pre-release from a pre-release tag. .gitlab-ci.yml runs the same
+# Builds and lints atvOS Launcher. A version tag (v1.0, v1.0-pre.3) also makes a draft release with the APKs, the app
+# bundle, their SHA-256 digests (SHA256SUMS) and a signed build provenance attestation. .gitlab-ci.yml runs the same
 # build on GitLab.
 name: CI
 
 on:
   push:
     branches: [main]
-    tags: ["v*-pre*"]
+    tags: ["v*"]
     paths-ignore: ["**.md", "LICENSE*", ".gitlab-ci.yml", "website/**"]
   pull_request:
     paths-ignore: ["**.md", "LICENSE*", ".gitlab-ci.yml", "website/**"]
@@ -76,38 +77,57 @@ jobs:
           retention-days: 14
 
   release:
-    name: Draft pre-release
+    name: Draft release
     if: startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: write # the release
+      id-token: write # the signing certificate of the attestation
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/download-artifact@v8
         with:
           name: apks
           path: apks
 
-      - name: Name the files
+      - name: Name the files and write their digests
         run: |
           mkdir dist
           cp apks/apk/release/app-release.apk "dist/atvos-launcher-$GITHUB_REF_NAME.apk"
           cp apks/bundle/release/app-release.aab "dist/atvos-launcher-$GITHUB_REF_NAME.aab"
           cp apks/apk/debug/app-debug.apk "dist/atvos-launcher-$GITHUB_REF_NAME-debug.apk"
-          (cd dist && sha256sum -- * > SHA256SUMS)
+          (cd dist && sha256sum -- *.apk *.aab > SHA256SUMS && cat SHA256SUMS)
+
+      # A Sigstore-signed SLSA provenance statement: which workflow, commit and runner built each file.
+      - name: Attest the build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/*.apk
+            dist/*.aab
 
       - uses: softprops/action-gh-release@v3
         with:
           draft: true
-          prerelease: true
+          prerelease: ${{ contains(github.ref_name, '-pre') }}
           make_latest: "false"
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: dist/*
           body: |
-            Pre-release build of atvOS Launcher, built and linted by GitHub Actions.
+            atvOS Launcher ${{ github.ref_name }}, built and linted by GitHub Actions.
 
             - `atvos-launcher-${{ github.ref_name }}.apk`: the release build, to install with `adb install`. It is signed with the upload key if the repository has the signing secrets, else with a debug key. Uninstall a copy from Google Play first.
             - `atvos-launcher-${{ github.ref_name }}.aab`: the app bundle for Google Play.
             - `atvos-launcher-${{ github.ref_name }}-debug.apk`: the debug build.
+            - `SHA256SUMS`: the SHA-256 digest of each file.
+
+            Check a download against its digest and the signed build provenance:
+
+            ```
+            sha256sum --check --ignore-missing SHA256SUMS
+            gh attestation verify atvos-launcher-${{ github.ref_name }}.apk --repo ${{ github.repository }}
+            ```
