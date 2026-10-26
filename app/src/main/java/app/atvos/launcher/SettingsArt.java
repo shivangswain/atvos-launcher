@@ -20,7 +20,7 @@ import java.util.Locale;
  */
 final class SettingsArt {
 
-    static final int ABOUT = 0, DEVELOPER = 1, PROMPT = 2;
+    static final int ABOUT = 0, DEVELOPER = 1, PROMPT = 2, ACCESSIBILITY = 3;
 
     // Google TV: two panes. The focused row is a light card.
     private static final int GTV_LIST = 0xFF1E232C, GTV_PREVIEW = 0xFF222730, GTV_TEXT = 0xFFE8EAED,
@@ -39,7 +39,8 @@ final class SettingsArt {
 
     private final boolean googleTv;
     private final String about, model, version, build, developer, colorMode, colorSummary, debugging, usbDebugging,
-            usbSummary, revoke, promptTitle, promptKey, alwaysAllow, allow, cancel, times;
+            usbSummary, revoke, promptTitle, promptKey, alwaysAllow, allow, cancel, times, accessibility, captions,
+            highContrast, services, remoteButtons, off;
     private final String modelValue, versionValue, buildValue;
     private String fingerprint = NO_FINGERPRINT;
 
@@ -71,6 +72,12 @@ final class SettingsArt {
         allow = c.getString(R.string.art_allow);
         cancel = c.getString(R.string.cancel);
         times = c.getString(R.string.art_times);
+        accessibility = c.getString(R.string.art_accessibility);
+        captions = c.getString(R.string.art_captions);
+        highContrast = c.getString(R.string.art_high_contrast);
+        services = c.getString(R.string.art_services);
+        remoteButtons = c.getString(R.string.remote_keys_label);
+        off = c.getString(R.string.off);
         modelValue = Build.MODEL;
         versionValue = Build.VERSION.RELEASE;
         buildValue = Build.DISPLAY;
@@ -101,6 +108,9 @@ final class SettingsArt {
             }
             case DEVELOPER -> {
                 if (googleTv) gtvDeveloper(c); else atvDeveloper(c);
+            }
+            case ACCESSIBILITY -> {
+                if (googleTv) gtvAccessibility(c); else atvAccessibility(c);
             }
             default -> prompt(c);
         }
@@ -155,6 +165,18 @@ final class SettingsArt {
         gtvRow(c, revoke, null, 640f, GTV_TEXT);
     }
 
+    /** Accessibility: the Services section with Remote Buttons focused and off. */
+    private void gtvAccessibility(Canvas c) {
+        gtvPanes(c, accessibility);
+        gtvRow(c, captions, null, 300f, GTV_TEXT);
+        gtvRow(c, highContrast, null, 380f, GTV_TEXT);
+        gtvSwitch(c, 370f, false, false);
+        text.setLetterSpacing(0.06f);
+        draw(c, services.toUpperCase(Locale.getDefault()), 260f, 452f, 20f, medium, GTV_HEADER);
+        text.setLetterSpacing(0f);
+        gtvCard(c, 470f, 596f, remoteButtons, off);
+    }
+
     private void gtvSwitch(Canvas c, float cy, boolean on, boolean onCard) {
         r.set(784f, cy - 14f, 846f, cy + 14f);
         fill.setColor(on ? GTV_ON_TRACK : onCard ? 0xFFB9BEC6 : GTV_OFF_TRACK);
@@ -206,6 +228,16 @@ final class SettingsArt {
         atvRow(c, usbDebugging, usbSummary, 452f, ATV_TEXT);
         atvSwitch(c, 454f, true);
         atvRow(c, revoke, null, 578f, ATV_TEXT);
+    }
+
+    private void atvAccessibility(Canvas c) {
+        atvPanel(c, accessibility);
+        atvRow(c, captions, null, 250f, ATV_TEXT);
+        atvRow(c, highContrast, null, 330f, ATV_TEXT);
+        atvSwitch(c, 320f, false);
+        draw(c, services, 1248f, 422f, 26f, medium, ATV_BLUE);
+        atvFocus(c, 451f, 580f);
+        atvRow(c, remoteButtons, off, 512f, ATV_TEXT);
     }
 
     private void atvSwitch(Canvas c, float cy, boolean on) {

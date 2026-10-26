@@ -31,8 +31,8 @@ import java.util.Locale;
  * has a chevron.
  * <pre>
  *   Home Screen ›            (only when another app has the Home button)
- *   General ›                About › (Model, atvOS, Android TV) · Appearance › · Privacy ·
- *                            Acknowledgements · DATE &amp; TIME: Time Format
+ *   General ›                About › (Model, atvOS Launcher, Android TV) · Appearance › · Remote Buttons ·
+ *                            Privacy · Acknowledgements · DATE &amp; TIME: Time Format
  *   Profiles and Accounts ›  Account · Profile Picture ›
  *   Uninstall ›              Restore Default Launcher · Remove Power Control
  *   Support ›                Website · Open Play Store › · App Info › · Donate ›
@@ -46,6 +46,8 @@ final class SettingsScreen {
         /** Starts the setup steps that give the Home button to atvOS. This screen closes first. */
         void setUpHome();
         void restoreHome(HomeView.SelfSetup progress);
+        /** Turns Remote Buttons on (self-adb, else the user does it in Accessibility) or off. */
+        void setRemoteButtons(boolean on, HomeView.SelfSetup progress);
         void releasePower();
         /** Returns the Google account of the profile picture, or null. */
         String account();
@@ -119,7 +121,7 @@ final class SettingsScreen {
     private final ArrayDeque<int[]> under = new ArrayDeque<>(); // the pages that Back goes to: {page, focused row}
     private int page = MAIN, sel = -1;  // sel: the focused row, or -1 on a page of facts
     private float scroll, fade = 1f;
-    private boolean busy;               // Restore runs over self-adb
+    private boolean busy;               // Restore or Remote Buttons runs over self-adb
     private String note;                // a status message below the description of the focused row
     private int noteRow = -1, notePage = -1;
     private StaticLayout about;         // the description of the focused row, laid out when it changes
@@ -189,6 +191,11 @@ final class SettingsScreen {
                 rows.add(nav(R.string.settings_about, null, null, () -> go(ABOUT)));
                 rows.add(nav(R.string.settings_appearance, s(host.light() ? R.string.settings_light : R.string.settings_dark),
                         s(R.string.settings_appearance_about), () -> go(APPEARANCE)));
+                Controls.Setup st = host.setupState();
+                boolean on = st.keysOn;
+                rows.add(action(R.string.settings_remote_buttons, s(on ? R.string.on : R.string.off),
+                        s(st.standIn ? R.string.settings_remote_buttons_stand_in : R.string.settings_remote_buttons_about),
+                        () -> remoteButtons(!on)));
                 // Google Play asks for a privacy policy link or text in the app, as well as in Play Console.
                 rows.add(action(R.string.settings_privacy, s(R.string.settings_privacy_address), s(R.string.settings_privacy_about), null));
                 rows.add(action(R.string.settings_acknowledgements, null, s(R.string.settings_acknowledgements_about), null));
@@ -229,7 +236,8 @@ final class SettingsScreen {
             case UNINSTALL -> {
                 title = s(R.string.settings_uninstall);
                 Controls.Setup st = host.setupState();
-                boolean restore = !st.disabledHomes.isEmpty() || busy;
+                // Self-adb turned the TV's home app off, or Remote Buttons stands in for it.
+                boolean restore = !st.disabledHomes.isEmpty() || st.standIn || busy;
                 rows.add(new Row(ACTION, s(R.string.settings_restore), null,
                         s(restore ? R.string.settings_restore_about : R.string.settings_restore_not_needed),
                         restore ? this::restore : null, restore, false));
@@ -378,6 +386,12 @@ final class SettingsScreen {
         for (int j = Math.min(i, rows.size() - 1); j < rows.size() && j >= 0; j++) if (rows.get(j).focusable()) return j;
         for (int j = Math.min(i, rows.size() - 1); j >= 0; j--) if (rows.get(j).focusable()) return j;
         return -1;
+    }
+
+    private void remoteButtons(boolean on) {
+        busy = true;
+        if (on) noteHere(context.getString(R.string.setup_tv_connecting));
+        host.setRemoteButtons(on, progress());
     }
 
     private void restore() {
@@ -534,10 +548,11 @@ final class SettingsScreen {
         // the colours of tvOS Settings
         int bg = light ? 0xFFB1B0B1 : 0xFF1C1C1C, pill = light ? 0xFFC1C0C1 : 0xFF333333;
         ink = light ? Color.BLACK : Color.WHITE;
-        valueInk = light ? 0xFF747475 : 0xFF8E8E93;
-        dimInk = light ? 0xFF6B6A6B : 0xFF606060; // page and section titles
+        // The greys of tvOS Settings, darker (light) or lighter (dark) for a contrast of 4.5:1 or more on their background.
+        valueInk = light ? 0xFF4A4A4C : 0xFFA1A1A6;
+        dimInk = light ? 0xFF3F3F41 : 0xFF8E8E93; // page and section titles
         offInk = light ? 0xFF8C8B8C : 0xFF6E6E70; // rows that are disabled
-        int words = light ? 0xFF474748 : 0xFF98989D;
+        int words = light ? 0xFF3A3A3C : 0xFF98989D;
         fill.setColor(bg);
         fill.setAlpha(alpha);
         c.drawRect(0f, 0f, W, height, fill);
@@ -610,7 +625,7 @@ final class SettingsScreen {
             c.drawRoundRect(r, h / 2f, h / 2f, fill);
         }
         int text = row.enabled() ? blend(ink, Color.BLACK, f) : blend(offInk, 0xFFA1A1A6, f);
-        int soft = blend(valueInk, 0xFF8A8A8E, f);
+        int soft = blend(valueInk, 0xFF6C6C70, f); // on the white row of the focus
         boolean mark = row.kind() == NAV || row.kind() == CHOICE && row.checked(); // a chevron or a tick
         float right = r.right - (mark ? 74f : 34f);
         if (fitValue[i] != null) {

@@ -1,6 +1,8 @@
 package app.atvos.launcher;
 
 import android.app.Activity;
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -22,12 +24,17 @@ import java.util.List;
  * consumed immediately after the purchase, and it unlocks nothing.
  *
  * The connection to Google Play starts when the Support page opens ({@link #start}) and ends when Settings closes
- * ({@link #end}). All calls are on the UI thread. Callbacks from Google Play go to the UI thread.
+ * ({@link #end}). A donation that isn't complete yet (a slow payment method) is checked again at each start of atvOS
+ * ({@link #settle}), because Google Play refunds a purchase that isn't consumed within three days. All calls are on the
+ * UI thread. Callbacks from Google Play go to the UI thread.
  */
 final class Donation {
 
     /** The id of the in-app product in Play Console. */
     static final String PRODUCT = "donation";
+
+    /** A purchase sheet opened, or Google Play has a donation that isn't complete: {@link #settle} checks it. */
+    private static final String KEY_OPEN = "donation_open";
 
     /** The state that the Donate row shows. */
     enum State { CONNECTING, READY, UNAVAILABLE, PENDING, THANKS }
@@ -37,14 +44,29 @@ final class Donation {
     }
 
     private final Activity activity;
+    private final SharedPreferences prefs;
     private final Handler main = new Handler(Looper.getMainLooper());
     private BillingClient client;
     private ProductDetails product;
     private Listener listener;
     private State state = State.UNAVAILABLE;
 
+    private boolean settling; // connected for settle() only: the connection ends when the check is done
+    private int consuming;    // consumes that haven't returned
+
     Donation(Activity activity) {
         this.activity = activity;
+        prefs = activity.getSharedPreferences(HomeActivity.PREFS, Context.MODE_PRIVATE);
+    }
+
+    /**
+     * Consumes a donation that Google Play completed after Settings closed, before Google Play refunds it. It connects
+     * only after a purchase sheet opened, until Google Play has no open donation. UI thread.
+     */
+    void settle() {
+        if (client != null || !prefs.getBoolean(KEY_OPEN, false)) return;
+        settling = true;
+        start(null);
     }
 
     State state() {
@@ -60,7 +82,12 @@ final class Donation {
     /** Connects to Google Play and gets the price of the donation. {@code listener} receives each change of state. */
     void start(Listener listener) {
         this.listener = listener;
-        if (client != null) return;
+        if (listener != null) settling = false; // Settings uses the connection now
+        if (client != null) {
+            // A connection that settle() made has no price yet. A connection that isn't ready looks it up when ready.
+            if (listener != null && product == null && client.isReady()) lookUp();
+            return;
+        }
         set(State.CONNECTING);
         try {
             client = BillingClient.newBuilder(activity)
@@ -75,9 +102,10 @@ final class Donation {
                         if (client != connecting) return; // end() was called before the connection
                         if (result.getResponseCode() != BillingClient.BillingResponseCode.OK) {
                             set(State.UNAVAILABLE);
+                            if (settling) end();
                             return;
                         }
-                        lookUp();
+                        if (!settling) lookUp();
                         finishEarlier();
                     });
                 }
@@ -92,15 +120,17 @@ final class Donation {
                     });
                 }
             });
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | LinkageError e) {
+            // Google Play is not available. LinkageError: a class that the library needs is not in the app.
             client = null;
-            set(State.UNAVAILABLE); // Google Play is not available
+            set(State.UNAVAILABLE);
         }
     }
 
     /** Ends the connection to Google Play. */
     void end() {
         listener = null;
+        settling = false;
         if (client != null) client.endConnection();
         client = null;
         product = null;
@@ -116,11 +146,16 @@ final class Donation {
             return;
         }
         if (client == null || product == null) return;
-        BillingFlowParams params = BillingFlowParams.newBuilder()
-                .setProductDetailsParamsList(List.of(BillingFlowParams.ProductDetailsParams.newBuilder()
-                        .setProductDetails(product).build()))
-                .build();
-        client.launchBillingFlow(activity, params);
+        try {
+            BillingFlowParams params = BillingFlowParams.newBuilder()
+                    .setProductDetailsParamsList(List.of(BillingFlowParams.ProductDetailsParams.newBuilder()
+                            .setProductDetails(product).build()))
+                    .build();
+            prefs.edit().putBoolean(KEY_OPEN, true).apply(); // the app can close before Google Play answers
+            client.launchBillingFlow(activity, params);
+        } catch (RuntimeException | LinkageError e) {
+            set(State.UNAVAILABLE);
+        }
     }
 
     private void lookUp() {
@@ -148,7 +183,16 @@ final class Donation {
         BillingClient asked = client;
         client.queryPurchasesAsync(QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.INAPP).build(),
                 (result, purchases) -> main.post(() -> {
-                    if (client == asked && result.getResponseCode() == BillingClient.BillingResponseCode.OK) consumeAll(purchases);
+                    if (client != asked) return;
+                    if (result.getResponseCode() == BillingClient.BillingResponseCode.OK) {
+                        consumeAll(purchases);
+                        boolean open = false;
+                        for (Purchase p : purchases) {
+                            if (p.getProducts().contains(PRODUCT) && p.getPurchaseState() == Purchase.PurchaseState.PENDING) open = true;
+                        }
+                        if (!open && consuming == 0) prefs.edit().remove(KEY_OPEN).apply(); // nothing left to check
+                    }
+                    if (settling && consuming == 0) end();
                 }));
     }
 
@@ -162,13 +206,20 @@ final class Donation {
         for (Purchase p : purchases) {
             if (!p.getProducts().contains(PRODUCT)) continue;
             if (p.getPurchaseState() == Purchase.PurchaseState.PENDING) {
-                set(State.PENDING); // Google Play completes it later. It is consumed at the next start.
+                // Google Play completes it later. It is consumed at the next start of atvOS (settle).
+                prefs.edit().putBoolean(KEY_OPEN, true).apply();
+                set(State.PENDING);
                 continue;
             }
             if (p.getPurchaseState() != Purchase.PurchaseState.PURCHASED) continue;
+            consuming++;
+            BillingClient asked = client;
             client.consumeAsync(ConsumeParams.newBuilder().setPurchaseToken(p.getPurchaseToken()).build(),
                     (done, token) -> main.post(() -> {
+                        consuming--;
                         if (done.getResponseCode() == BillingClient.BillingResponseCode.OK) set(State.THANKS);
+                        // The next settle() checks again: it ends when Google Play has nothing open.
+                        if (settling && client == asked && consuming == 0) end();
                     }));
         }
     }

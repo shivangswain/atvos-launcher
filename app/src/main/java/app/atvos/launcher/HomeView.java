@@ -95,8 +95,12 @@ final class HomeView extends View {
         void requestDefaultHome();
         /** Disables the locked home apps of this TV over self-adb. The user accepts the prompt on the screen. */
         void selfSetupHome(SelfSetup progress);
-        /** Enables the home apps that self-adb disabled. */
+        /** Enables the home apps that self-adb disabled, or turns off Remote Buttons where it stands in for them. */
         void restoreTvHome(SelfSetup progress);
+        /** Opens Accessibility, where the user turns on Remote Buttons. Setup continues when it is on. */
+        void openRemoteButtons();
+        /** Settings > General > Remote Buttons: turns the service on (self-adb, else Accessibility) or off. */
+        void setRemoteButtons(boolean on, SelfSetup progress);
         /** The setup steps closed. The first time, this ends the first-launch setup. */
         void setupDone();
         /** Opens the About screen of Settings. */
@@ -154,7 +158,7 @@ final class HomeView extends View {
     static final float W = 1920f;
     static final float TILE_W = 250f, TILE_H = 150f;
     static final float FOCUS_SCALE = 1.2f;
-    private static final int COLS = 6;
+    static final int COLS = 6; // the apps in a row; the first row is the dock
     private static final float TILE_R = 22f;
     private static final float GAP_X = 47f, ROW_PITCH = 224f;
     private static final float GRID_X = (W - COLS * TILE_W - (COLS - 1) * GAP_X) / 2f;
@@ -171,6 +175,7 @@ final class HomeView extends View {
     // An open folder: a glass panel below its name, with four apps in each row.
     private static final int FOLDER_COLS = 4;
     private static final float FOLDER_W = 1200f, FOLDER_TOP = 150f, FOLDER_PAD = 48f, FOLDER_GAP = 35f;
+    private static final int MAX_FOLDER_NAME = 48; // characters; a longer name is cut when the user types it
     private static final float FOLDER_R = 48f, FOLDER_NAME_Y = 78f, FOLDER_NAME_H = 84f;
     // The Delete alert.
     private static final float ALERT_W = 660f, ALERT_PAD = 40f, ALERT_BUTTON_H = 70f;
@@ -314,6 +319,23 @@ final class HomeView extends View {
 
     // Clock.
     private String time = "";
+    /**
+     * The hint in the clock pill, as on tvOS: "Hold [Home] for Control Center". It shows 10 s after the home screen
+     * starts, then every 2 min, until the user first holds Home. Only while {@link RemoteKeys} is on.
+     */
+    private static final long HOLD_HINT_FIRST_MS = 10_000, HOLD_HINT_EVERY_MS = 120_000, HOLD_HINT_SHOW_MS = 5_000,
+            HOLD_HINT_RETRY_MS = 10_000;
+    private static final float HOLD_KEY = 34f; // the round Home button in the hint
+    private final Drawable homeIcon;
+    private final String holdBefore, holdAfter;
+    private float holdBeforeW, holdW;
+    private boolean holdLearned, holdShown;
+    private float holdHint;    // 0: the time, 1: the hint
+    private long holdNextAt;   // the uptime of the next hint, or 0 before the first
+    private final Runnable showHoldHint = this::showHoldHint, hideHoldHint = () -> {
+        holdShown = false;
+        kick();
+    };
     private float timeWidth;
     private final Runnable tick = this::tick;
 
@@ -376,6 +398,7 @@ final class HomeView extends View {
     private final LinearGradient rimGradient, sheenGradient;
     private LinearGradient marqueeFade;  // the fade of the title edges, made for the width of the focused card
     private float marqueeFadeFor;
+    private int marqueeFadeColor; // the colour of the marquee text (light or dark rows)
     private final Path chevron = new Path(), hintChevron = new Path(), pagerChevron = new Path();
     private final RectF r = new RectF(), r2 = new RectF(), playRect = new RectF();
     private final Matrix m = new Matrix();
@@ -398,6 +421,11 @@ final class HomeView extends View {
         deleteIcon = menuIcon(context, R.drawable.ic_remove_circle);
         checkIcon = menuIcon(context, R.drawable.ic_check);
         chevronIcon = menuIcon(context, R.drawable.ic_chevron_right);
+        homeIcon = menuIcon(context, R.drawable.ic_home);
+        String hold = context.getString(R.string.hint_hold_home), slot = "%1$s";
+        int at = hold.indexOf(slot);
+        holdBefore = at >= 0 ? hold.substring(0, at) : hold;
+        holdAfter = at >= 0 ? hold.substring(at + slot.length()) : "";
         cancelLabel = context.getString(R.string.cancel);
         deleteLabel = context.getString(R.string.delete);
 
@@ -406,6 +434,8 @@ final class HomeView extends View {
         clockText.setTypeface(semibold);
         clockText.setTextSize(27f);
         clockText.setColor(Color.WHITE);
+        holdBeforeW = clockText.measureText(holdBefore);
+        holdW = holdBeforeW + HOLD_KEY + 4f + clockText.measureText(holdAfter);
         labelText.setTypeface(medium);
         labelText.setTextSize(25f);
         labelText.setTextAlign(Paint.Align.CENTER);
@@ -485,6 +515,8 @@ final class HomeView extends View {
             @Override public void openAbout() { HomeView.this.host.openAbout(); }
             @Override public void openDeveloperOptions() { HomeView.this.host.openDeveloperOptions(); }
             @Override public void setUpHome(SelfSetup progress) { HomeView.this.host.selfSetupHome(progress); }
+            @Override public void openRemoteButtons() { HomeView.this.host.openRemoteButtons(); }
+            @Override public void turnOnRemoteButtons(SelfSetup progress) { HomeView.this.host.setRemoteButtons(true, progress); }
             @Override public void requestDefaultHome() { HomeView.this.host.requestDefaultHome(); }
             @Override public void chooseAccount() { HomeView.this.host.chooseAccount(); }
             @Override public void close() { closeSetup(); }
@@ -500,6 +532,7 @@ final class HomeView extends View {
             @Override public Controls.Setup setupState() { return HomeView.this.host.setupState(); }
             @Override public void setUpHome() { closeSettings(); openSetupSteps(); }
             @Override public void restoreHome(SelfSetup progress) { HomeView.this.host.restoreTvHome(progress); }
+            @Override public void setRemoteButtons(boolean on, SelfSetup progress) { HomeView.this.host.setRemoteButtons(on, progress); }
             @Override public void releasePower() { HomeView.this.host.releasePower(); }
             @Override public String account() { return HomeView.this.host.account(); }
             @Override public void chooseAccount() { HomeView.this.host.chooseAccount(); }
@@ -751,6 +784,59 @@ final class HomeView extends View {
     void setClockRunning(boolean run) {
         removeCallbacks(tick);
         if (run) tick();
+        removeCallbacks(showHoldHint);
+        removeCallbacks(hideHoldHint);
+        holdShown = false;
+        if (!run) {
+            holdHint = 0f; // another app is in front: no animation
+            return;
+        }
+        if (holdLearned) return;
+        // 10 s after the home screen shows, and not sooner than 2 min after the last hint.
+        long now = SystemClock.uptimeMillis();
+        holdNextAt = Math.max(holdNextAt, now + HOLD_HINT_FIRST_MS);
+        postDelayed(showHoldHint, holdNextAt - now);
+    }
+
+    /** The user has held Home: the hint doesn't show again. */
+    void setHoldHintLearned(boolean learned) {
+        holdLearned = learned;
+        if (!learned) return;
+        removeCallbacks(showHoldHint);
+        removeCallbacks(hideHoldHint);
+        holdShown = false;
+        kick();
+    }
+
+    /** Shows the hint for 5 s if the home screen is quiet, and plans the next one. */
+    private void showHoldHint() {
+        if (holdLearned) return;
+        if (!RemoteKeys.isOn()) { // holding Home does nothing without the service
+            postDelayed(showHoldHint, HOLD_HINT_EVERY_MS);
+            return;
+        }
+        if (!holdHintFits()) {
+            postDelayed(showHoldHint, HOLD_HINT_RETRY_MS);
+            return;
+        }
+        holdShown = true;
+        holdNextAt = SystemClock.uptimeMillis() + HOLD_HINT_EVERY_MS;
+        postDelayed(hideHoldHint, HOLD_HINT_SHOW_MS);
+        postDelayed(showHoldHint, HOLD_HINT_EVERY_MS);
+        kick();
+    }
+
+    /** The hint shows only on the quiet home screen: the clock pill shows and nothing is open over it. */
+    private boolean holdHintFits() {
+        return !setupOpen && !settingsOpen && !ccOpen && !pillFocused && !menuOpen && !editing && openFolder == null
+                && alertEntry == null && !expanded && inDock();
+    }
+
+    /** Opens Control Center for a held Home button. Returns false while setup shows. */
+    boolean openControlCenterFromRemote() {
+        if (setupOpen) return false;
+        openControlCenter();
+        return true;
     }
 
     /** Settings > Time Format changed. */
@@ -932,12 +1018,6 @@ final class HomeView extends View {
 
     @Override
     public boolean onKeyLongPress(int code, KeyEvent e) {
-        if (isSelect(code) && ccOpen && cc.selected == ControlCenter.POWER) {
-            longPressed = true; // the release does not also power off
-            playSoundEffect(SoundEffectConstants.CLICK);
-            host.releasePower();
-            return true;
-        }
         if (isSelect(code) && !editing && !expanded && !rowFocused && !menuOpen && !setupOpen && !pillFocused && !ccOpen
                 && alertEntry == null && (openFolder == null || folderFocus >= 0)) {
             longPressed = true;
@@ -1332,6 +1412,7 @@ final class HomeView extends View {
             public void done(String text) {
                 renaming = false;
                 String name = text.trim();
+                if (name.length() > MAX_FOLDER_NAME) name = name.substring(0, MAX_FOLDER_NAME).trim();
                 if (!name.isEmpty()) {
                     tile.label = name;
                     tile.shortLabel = null;
@@ -1875,6 +1956,7 @@ final class HomeView extends View {
         settingsAnim = ease(settingsAnim, settingsOpen ? 1f : 0f, 14f, dt, 0.002f);
         if (settingsAnim > 0f && settings.step(dt)) animating = true;
         pillAnim = ease(pillAnim, pillFocused ? 1f : 0f, 16f, dt, 0.002f);
+        holdHint = ease(holdHint, holdShown && holdHintFits() ? 1f : 0f, 7f, dt, 0.002f);
         ccAnim = ease(ccAnim, ccOpen ? 1f : 0f, 14f, dt, 0.002f);
         if (ccAnim > 0f && cc.step(dt)) animating = true;
         // Bright backdrops get dark text. The calculation includes the layers over the image at each location.
@@ -2518,7 +2600,10 @@ final class HomeView extends View {
     private void drawFolderName(Canvas c, int alpha) {
         float f = folderNameFocus, grow = 1f + 0.08f * f, size = titleText.getTextSize();
         titleText.setTextSize(38f * grow);
-        float tw = titleText.measureText(folderName), w = Math.max(tw, 40f) + 72f * grow, h = FOLDER_NAME_H * grow;
+        // A long name is cut to the width of the folder: at its end, or at its start while the user types it.
+        String shown = TextUtils.ellipsize(folderName, titleText, FOLDER_W - 160f,
+                renaming ? TextUtils.TruncateAt.START : TextUtils.TruncateAt.END).toString();
+        float tw = titleText.measureText(shown), w = Math.max(tw, 40f) + 72f * grow, h = FOLDER_NAME_H * grow;
         r.set(W / 2f - w / 2f, FOLDER_NAME_Y - h / 2f, W / 2f + w / 2f, FOLDER_NAME_Y + h / 2f);
         if (f < 0.99f) drawGlass(c, r, h / 2f, 0f, 0x59000000, Math.round(alpha * (1f - f)));
         if (f > 0.01f) {
@@ -2528,7 +2613,7 @@ final class HomeView extends View {
         int ink = blend(Color.WHITE, INK, f);
         titleText.setColor(ink);
         titleText.setAlpha(alpha);
-        c.drawText(folderName, W / 2f, FOLDER_NAME_Y + 13f * grow, titleText);
+        c.drawText(shown, W / 2f, FOLDER_NAME_Y + 13f * grow, titleText);
         if (renaming && SystemClock.uptimeMillis() / 530 % 2 == 0) {
             fill.setColor(ink);
             fill.setAlpha(alpha);
@@ -2607,7 +2692,9 @@ final class HomeView extends View {
         int pillAlpha = Math.round(alpha * (1f - ccAnim));
         if (pillAlpha > 2) {
             float grow = 1f + 0.05f * pillAnim;
-            float w = (pad + timeWidth + gap + size + 8f) * grow, gh = h * grow;
+            // The hint widens the pill to the left. The time and the hint stay at the right, next to the avatar.
+            float content = timeWidth + (Math.max(holdW, timeWidth) - timeWidth) * holdHint;
+            float w = (pad + content + gap + size + 8f) * grow, gh = h * grow;
             r.set(EDGE - w, cy - gh / 2f, EDGE, cy + gh / 2f);
             drawGlass(c, r, gh / 2f, 0f, GLASS_TINT, pillAlpha);
             if (pillAnim > 0.01f) {
@@ -2615,8 +2702,14 @@ final class HomeView extends View {
                 c.drawRoundRect(r, gh / 2f, gh / 2f, fill);
             }
             int ink = Math.round(255 - (255 - 28) * Math.max(clockInk, Math.min(1f, pillAnim * 1.4f)));
-            clockText.setColor(Color.argb(pillAlpha, ink, ink, ink));
-            c.drawText(time, r.left + pad * grow, cy + 9.5f, clockText);
+            float end = r.left + (pad + content) * grow; // the right end of the text
+            float timeFade = 1f - Math.min(1f, holdHint * 2.5f);
+            if (timeFade > 0.01f) {
+                clockText.setColor(Color.argb(Math.round(pillAlpha * timeFade), ink, ink, ink));
+                c.drawText(time, end - timeWidth * grow, cy + 9.5f, clockText);
+            }
+            float hintFade = Math.max(0f, (holdHint - 0.35f) / 0.65f);
+            if (hintFade > 0.01f) drawHoldHint(c, end - holdW, cy, ink, Math.round(pillAlpha * hintFade * hintFade));
         }
         if (ccAnim > 0.01f) {
             int rowAlpha = Math.round(255 * ccAnim);
@@ -2631,6 +2724,27 @@ final class HomeView extends View {
             image.setAlpha(alpha);
             c.drawBitmap(face, null, r, image);
         }
+    }
+
+    /**
+     * Draws "Hold [Home] for Control Center" from {@code x}, clipped to the pill in {@link #r}: the pill reveals it as
+     * it widens. The Home button is a filled circle in the colour of the text, with the house in the opposite colour.
+     */
+    private void drawHoldHint(Canvas c, float x, float cy, int ink, int alpha) {
+        c.save();
+        c.clipRect(r.left + r.height() / 4f, r.top, r.right, r.bottom);
+        clockText.setColor(Color.argb(alpha, ink, ink, ink));
+        c.drawText(holdBefore, x, cy + 9.5f, clockText);
+        float kx = x + holdBeforeW + 2f;
+        fill.setColor(Color.argb(Math.round(alpha * 0.92f), ink, ink, ink));
+        c.drawCircle(kx + HOLD_KEY / 2f, cy, HOLD_KEY / 2f, fill);
+        int glyph = ink > 128 ? 28 : 255;
+        if (homeIcon != null) {
+            float g = 20f;
+            drawTinted(c, homeIcon, kx + (HOLD_KEY - g) / 2f, cy - g / 2f - 0.5f, g, Color.rgb(glyph, glyph, glyph), alpha);
+        }
+        c.drawText(holdAfter, kx + HOLD_KEY + 2f, cy + 9.5f, clockText);
+        c.restore();
     }
 
     /**
@@ -2657,7 +2771,7 @@ final class HomeView extends View {
         c.save();
         c.translate(0f, offset);
         float headerY = ROW_HEADER_Y - ROW_HEADER_LIFT * rowAnim;
-        rowHeaderText.setColor(light ? 0xFF4D4C4E : 0xFF6A6A6A); // for light and for dark
+        rowHeaderText.setColor(light ? 0xFF3F3F41 : 0xFF8A8A8E); // 4.5:1 or more on the light and the dark row
         rowHeaderText.setAlpha(alpha);
         for (int i = 0; i < rowCards.size(); i++) {
             if (rowHeaders[i] == null) continue;
@@ -2709,17 +2823,16 @@ final class HomeView extends View {
             c.drawRoundRect(left, bottom - h, left + Math.max(h, (right - left) * p), bottom, h / 2f, h / 2f, fill);
         }
         if (f > 0.01f && !rowTitles[i].isEmpty()) {
-            // White, also on the light background, with a shadow.
+            // White on the dark row, and dark on the light row: white there has too little contrast.
             TextPaint text = rowTitleWidths[i] <= rect.width() ? rowTitleText : rowMarqueeText;
-            text.setColor(Color.WHITE);
+            text.setColor(light ? INK : Color.WHITE);
             text.setAlpha(Math.round(alpha * f * rowAnim));
-            text.setShadowLayer(light ? 6f : 0f, 0f, 1f, light ? Color.argb(Math.round(alpha * 0.5f * f), 0, 0, 0) : 0);
             float y = rect.bottom + 31f;
             if (text == rowTitleText) {
                 c.drawText(rowTitles[i], rect.centerX(), y, rowTitleText);
             } else { // too long: starts at the left edge of the card, fades out at its right, and scrolls while focused
                 float off = i == marqueeCard ? marqueeOffset : 0f;
-                fitMarqueeFade(card.width() * ROW_FOCUS_SCALE);
+                fitMarqueeFade(card.width() * ROW_FOCUS_SCALE, light ? INK : Color.WHITE); // the shader sets the colour
                 float left = rect.left - MARQUEE_FADE * (1f - Math.min(1f, off / MARQUEE_FADE)); // the left fade, while it moves
                 m.setScale(rect.right - left, 1f);
                 m.postTranslate(left, 0f);
@@ -2737,13 +2850,15 @@ final class HomeView extends View {
      * Makes the edge fades of the marquee, MARQUEE_FADE wide, for a focused card of this width. It makes them again
      * only when the width changes.
      */
-    private void fitMarqueeFade(float width) {
-        if (width == marqueeFadeFor) return;
+    private void fitMarqueeFade(float width, int color) {
+        if (width == marqueeFadeFor && color == marqueeFadeColor) return;
         float edge = MARQUEE_FADE / width; // across the card, 0 to 1
-        marqueeFade = new LinearGradient(0, 0, 1, 0, new int[]{0x00FFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x00FFFFFF},
+        int clear = color & 0x00FFFFFF;
+        marqueeFade = new LinearGradient(0, 0, 1, 0, new int[]{clear, color, color, clear},
                 new float[]{0f, edge, 1f - edge, 1f}, Shader.TileMode.CLAMP);
         rowMarqueeText.setShader(marqueeFade);
         marqueeFadeFor = width;
+        marqueeFadeColor = color;
     }
 
     /** Lays out the details of the full-screen shelf for the program, once for each program. */
@@ -3121,7 +3236,8 @@ final class HomeView extends View {
             }
             if (inDock() || pillFocused || expanded || rowFocused) {
                 float w = 22f + timeWidth + 12f + AVATAR + 8f;
-                out.add(new A11y.Item(A11Y_PILL, c.getString(R.string.a11y_control_center), time, null,
+                String hold = RemoteKeys.isOn() ? c.getString(R.string.a11y_hint_hold_home) : null;
+                out.add(new A11y.Item(A11Y_PILL, c.getString(R.string.a11y_control_center), time, hold,
                         new RectF(EDGE - w, CLOCK_TOP, EDGE, CLOCK_TOP + CLOCK_H), pillFocused));
             }
             Recommendations.Item program = backdrop != null ? backdrop.program : null;
@@ -3214,6 +3330,8 @@ final class HomeView extends View {
                 focusPill();
             } else if (id != A11Y_PLAY || !expanded) {
                 return false;
+            } else {
+                pillFocused = false; // Play, not the clock pill, gets Select
             }
             kick();
             a11y.sync();

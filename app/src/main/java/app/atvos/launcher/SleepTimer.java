@@ -30,7 +30,8 @@ public final class SleepTimer extends BroadcastReceiver {
     static void cancel(Context context) {
         PendingIntent pi = existing(context); // null if there is no alarm
         if (pi != null) {
-            context.getSystemService(AlarmManager.class).cancel(pi);
+            AlarmManager alarms = context.getSystemService(AlarmManager.class);
+            if (alarms != null) alarms.cancel(pi);
             pi.cancel(); // active() then returns false
         }
         forget(context);
@@ -47,6 +48,6 @@ public final class SleepTimer extends BroadcastReceiver {
         PendingIntent spent = existing(context);
         if (spent != null) spent.cancel(); // active() then returns false
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
-        if (dpm.isAdminActive(new ComponentName(context, PowerAdmin.class))) dpm.lockNow();
+        if (dpm != null && dpm.isAdminActive(new ComponentName(context, PowerAdmin.class))) dpm.lockNow();
     }
 }

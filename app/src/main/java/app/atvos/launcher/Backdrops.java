@@ -285,11 +285,15 @@ final class Backdrops {
     }
 
     /**
-     * Downloads the recommendation images that are not cached, then trims the cache. A shelf shows only when its image
-     * is on disk, so {@code onReady} runs after each new download. Network thread.
+     * Downloads the recommendation images of {@code dock} (the apps with a top shelf: those in the dock) that are not
+     * cached, then trims the cache. A shelf shows only when its image is on disk, so {@code onReady} runs after each new
+     * download. Network thread.
      */
-    void prefetch(Runnable onReady) {
-        for (Recommendations.Item item : recommended.values()) {
+    void prefetch(Set<String> dock, Runnable onReady) {
+        Map<String, Recommendations.Item> all = recommended;
+        for (String pkg : dock) {
+            Recommendations.Item item = all.get(pkg);
+            if (item == null) continue;
             String url = item.image();
             if (downloaded.contains(url)) continue;
             Long failed = failedAt.get(url);

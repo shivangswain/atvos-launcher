@@ -101,6 +101,24 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            Remote buttons: holding Home opens Control Center, and the Settings button opens the TV's Settings. A key
+            filter is the only way an app can see these buttons before Android does. Only the system can bind to it.
+            Setup turns it on over self-adb, and Restore Default Launcher turns it off.
+        -->
+        <service
+            android:name=".RemoteKeys"
+            android:exported="true"
+            android:label="@string/remote_keys_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/remote_keys" />
+        </service>
+
         <!-- Receives the sleep timer alarm. It is not exported. -->
         <receiver
             android:name=".SleepTimer"

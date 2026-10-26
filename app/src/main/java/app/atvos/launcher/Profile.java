@@ -41,6 +41,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 import javax.net.ssl.HttpsURLConnection;
 
@@ -63,6 +64,11 @@ final class Profile {
     private static final String SCOPE = "oauth2:https://www.googleapis.com/auth/userinfo.profile";
     private static final String USERINFO = "https://www.googleapis.com/oauth2/v3/userinfo";
     private static final long REFRESH_MS = 24 * 60 * 60_000L;
+    /** After a network or server error, the next try is after this time, not after a day. */
+    private static final long RETRY_MS = 60 * 60_000L;
+    /** The size suffix of a Google photo address, for example "=s96-c". */
+    private static final Pattern SIZE_SUFFIX = Pattern.compile("=s\\d+(-c)?$");
+    private static final Typeface MONOGRAM = Typeface.create(Typeface.DEFAULT, 500, false);
     private static final int MAX_PHOTO = 4 << 20, MAX_FILE = 16 << 20; // the maximum download and the maximum file to decode
 
     private final Activity activity;
@@ -150,7 +156,11 @@ final class Profile {
                 }
                 Bitmap round = shown(name, picture());
                 activity.runOnUiThread(() -> onAvatar.accept(round));
-            } catch (OperationCanceledException | AuthenticatorException | IOException | RuntimeException e) {
+            } catch (IOException e) {
+                // A network or server error: tries again sooner than the next day.
+                prefs.edit().putLong(KEY_PHOTO_TRIED, System.currentTimeMillis() - REFRESH_MS + RETRY_MS).apply();
+                Log.w(TAG, "No Google profile photo: " + e.getMessage());
+            } catch (OperationCanceledException | AuthenticatorException | RuntimeException e) {
                 // The message is "UnregisteredOnApiConsole" when the app has no OAuth client.
                 Log.w(TAG, "No Google profile photo: " + e.getMessage());
             }
@@ -197,10 +207,11 @@ final class Profile {
         // Adds a size suffix to the path for the display size. An address with a query is used as it is. The host check
         // uses the same URL object as the request.
         String sized = picture.indexOf('?') >= 0 ? picture
-                : picture.replaceAll("=s\\d+(-c)?$", "") + "=s" + Math.max(128, size * 2) + "-c";
+                : SIZE_SUFFIX.matcher(picture).replaceAll("") + "=s" + Math.max(128, size * 2) + "-c";
         URL url = new URL(sized);
         String host = url.getHost();
-        if (!"https".equals(url.getProtocol()) || host == null || !host.endsWith(".googleusercontent.com")) {
+        if (!"https".equals(url.getProtocol()) || host == null
+                || !host.toLowerCase(Locale.ROOT).endsWith(".googleusercontent.com")) {
             throw new IOException("unexpected photo address");
         }
         http = (HttpsURLConnection) url.openConnection();
@@ -263,13 +274,18 @@ final class Profile {
     /** Shows the account chooser of Android. The result goes to {@link #onActivityResult}. */
     void choose() {
         Intent pick = AccountManager.newChooseAccountIntent(null, null, new String[]{GOOGLE}, null, null, null, null);
-        // Opens the account chooser activity of the Android system.
-        pick.setComponent(new ComponentName("android", "android.accounts.ChooseTypeAndAccountActivity"));
-        try {
-            activity.startActivityForResult(pick, REQUEST_ACCOUNT);
-        } catch (RuntimeException e) {
-            Toast.makeText(activity, R.string.not_available, Toast.LENGTH_SHORT).show();
+        // The account chooser activity of the Android system first. If a TV doesn't have it there, the chooser that
+        // the intent resolves to.
+        Intent system = new Intent(pick).setComponent(new ComponentName("android", "android.accounts.ChooseTypeAndAccountActivity"));
+        for (Intent intent : new Intent[]{system, pick}) {
+            try {
+                activity.startActivityForResult(intent, REQUEST_ACCOUNT);
+                return;
+            } catch (RuntimeException e) {
+                // try the next
+            }
         }
+        Toast.makeText(activity, R.string.not_available, Toast.LENGTH_SHORT).show();
     }
 
     void onActivityResult(int resultCode, Intent data, Consumer<Bitmap> onAvatar) {
@@ -318,7 +334,7 @@ final class Profile {
         p.setColor(colors[Math.floorMod(account.hashCode(), colors.length)]);
         c.drawCircle(size / 2f, size / 2f, size / 2f, p);
         p.setColor(Color.WHITE);
-        p.setTypeface(Typeface.create(Typeface.DEFAULT, 500, false));
+        p.setTypeface(MONOGRAM);
         p.setTextSize(size * 0.5f);
         p.setTextAlign(Paint.Align.CENTER);
         String letter = account.isEmpty() ? "?" : new String(Character.toChars(account.codePointAt(0))).toUpperCase(Locale.ROOT);

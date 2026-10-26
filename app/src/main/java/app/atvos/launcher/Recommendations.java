@@ -36,9 +36,14 @@ final class Recommendations {
         final Set<String> watchNext = new HashSet<>(), previews = new HashSet<>();
     }
 
-    /** A program and its rank in the programs of its app: lower {@code a} first, then lower {@code b}. */
-    private record Ranked(Item item, long a, long b) {
+    /**
+     * A row of the provider and its rank in the programs of its app: lower {@code a} first, then lower {@code b}. Only
+     * the rows that are kept become {@link Item}s.
+     */
+    private record Ranked(int position, String image, long a, long b) {
     }
+
+    private static final Comparator<Ranked> ORDER = Comparator.comparingLong(Ranked::a).thenComparingLong(Ranked::b);
 
     /** Returns {@code v} as a rank that puts larger values first. The negation does not overflow. */
     private static long descending(long v) {
@@ -116,63 +121,75 @@ final class Recommendations {
     static Found load(Context context, Set<String> noWatchNext, Set<String> noPreviews) {
         Found found = new Found();
         ContentResolver cr = context.getContentResolver();
-        Map<String, List<Ranked>> engaged = new HashMap<>(), channels = new HashMap<>();
+        Map<String, Set<String>> images = new HashMap<>(); // the images of the pages of each app
         try (Cursor c = cr.query(TvContract.WatchNextPrograms.CONTENT_URI, WATCH_NEXT_COLUMNS, null, null, null)) {
+            Map<String, List<Ranked>> engaged = new HashMap<>();
             while (c != null && c.moveToNext()) {
                 try { // a bad row skips only that row
                     if (dismissed(c)) continue;
-                    String pkg = c.getString(PKG);
-                    if (pkg == null || cardImage(c) == null) continue;
+                    String pkg = c.getString(PKG), image = pkg != null ? cardImage(c) : null;
+                    if (image == null) continue;
                     found.watchNext.add(pkg);
                     if (noWatchNext.contains(pkg)) continue;
-                    Item item = item(context, c, null);
-                    if (item == null) continue;
                     long when = c.isNull(ORDER_A) ? 0 : c.getLong(ORDER_A), id = c.isNull(ORDER_B) ? 0 : c.getLong(ORDER_B);
-                    engaged.computeIfAbsent(pkg, k -> new ArrayList<>()).add(new Ranked(item, descending(when), descending(id))); // newest first
+                    engaged.computeIfAbsent(pkg, k -> new ArrayList<>())
+                            .add(new Ranked(c.getPosition(), image, descending(when), descending(id))); // newest first
                 } catch (RuntimeException ignored) {
                     // skips the row
                 }
             }
+            if (c != null) keep(context, c, engaged, null, found.pages, images);
         } catch (RuntimeException ignored) {
             // No TV provider, no permission or an unknown schema: no recommendations.
         }
         try (Cursor c = cr.query(TvContract.PreviewPrograms.CONTENT_URI, PREVIEW_COLUMNS, null, null, null)) {
+            Map<String, List<Ranked>> channels = new HashMap<>();
             while (c != null && c.moveToNext()) {
                 try { // a bad row skips only that row
                     if (dismissed(c)) continue;
-                    String pkg = c.getString(PKG);
-                    if (pkg == null || cardImage(c) == null) continue;
+                    String pkg = c.getString(PKG), image = pkg != null ? cardImage(c) : null;
+                    if (image == null) continue;
                     found.previews.add(pkg);
                     if (noPreviews.contains(pkg)) continue;
                     long channel = c.isNull(ORDER_A) ? Long.MAX_VALUE : c.getLong(ORDER_A);
-                    Item item = item(context, c, ""); // the section is "Recommended" for all channels
-                    if (item == null) continue;
                     long weight = c.isNull(ORDER_B) ? 0 : c.getLong(ORDER_B);
-                    channels.computeIfAbsent(pkg, k -> new ArrayList<>()).add(new Ranked(item, channel, descending(weight)));
+                    channels.computeIfAbsent(pkg, k -> new ArrayList<>())
+                            .add(new Ranked(c.getPosition(), image, channel, descending(weight)));
                 } catch (RuntimeException ignored) {
                     // skips the row
                 }
             }
+            // The section is "Recommended" for all channels. They follow the Watch Next programs of the app.
+            if (c != null) keep(context, c, channels, "", found.pages, images);
         } catch (RuntimeException ignored) {
             // No TV provider, no permission or an unknown schema: no recommendations.
         }
-        Comparator<Ranked> order = Comparator.comparingLong(Ranked::a).thenComparingLong(Ranked::b);
-        Set<String> apps = new HashSet<>(engaged.keySet());
-        apps.addAll(channels.keySet());
-        for (String pkg : apps) {
-            List<Item> pages = new ArrayList<>(MAX_PAGES);
-            Set<String> images = new HashSet<>();
-            for (Map<String, List<Ranked>> source : List.of(engaged, channels)) {
-                List<Ranked> ranked = source.get(pkg);
-                if (ranked == null) continue;
-                ranked.sort(order);
-                for (Ranked r : ranked) {
-                    if (pages.size() < MAX_PAGES && images.add(r.item().image())) pages.add(r.item()); // one page for each image
+        return found;
+    }
+
+    /**
+     * Adds the best rows of each app to its pages, in rank order, until it has {@link #MAX_PAGES}: one page for each
+     * image. It reads all the columns only of these rows, from {@code c}.
+     */
+    private static void keep(Context context, Cursor c, Map<String, List<Ranked>> rows, String section,
+                             Map<String, List<Item>> pages, Map<String, Set<String>> images) {
+        for (Map.Entry<String, List<Ranked>> e : rows.entrySet()) {
+            List<Item> list = pages.computeIfAbsent(e.getKey(), k -> new ArrayList<>(MAX_PAGES));
+            Set<String> seen = images.computeIfAbsent(e.getKey(), k -> new HashSet<>());
+            List<Ranked> ranked = e.getValue();
+            ranked.sort(ORDER);
+            for (Ranked r : ranked) {
+                if (list.size() >= MAX_PAGES) break;
+                if (seen.contains(r.image())) continue;
+                try {
+                    if (!c.moveToPosition(r.position())) continue;
+                    Item item = item(context, c, section);
+                    if (item != null && seen.add(item.image())) list.add(item);
+                } catch (RuntimeException ignored) {
+                    // skips the row
                 }
             }
-            found.pages.put(pkg, pages);
         }
-        return found;
     }
 
     /** Returns true if the user removed the program. The system clears its browsable flag. */

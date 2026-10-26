@@ -53,7 +53,10 @@ final class Controls {
     static final String INPUTS = "com.android.tv.action.VIEW_INPUTS";
     /** The home screen configuration of the TV, for setup and Settings. */
     static final class Setup {
-        boolean homeActive;   // the Home button opens atvOS Launcher
+        boolean homeActive;   // the Home button opens atvOS Launcher: it is the home app, or Remote Buttons stands in
+        boolean keysOn;       // Remote Buttons (RemoteKeys) runs
+        boolean keysStuck;    // Remote Buttons is on in Accessibility, but the TV didn't start it
+        boolean standIn;      // Remote Buttons gives atvOS the Home button, in place of the TV's own home app
         String currentHome;   // the name of the app that the Home button opens, or null
         /**
          * Home apps with a raised priority. They keep the Home button when the user selects a different home app. Only
@@ -220,7 +223,10 @@ final class Controls {
         Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
         ResolveInfo current = pm.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY);
         String currentPkg = current != null ? current.activityInfo.packageName : null;
-        s.homeActive = self.equals(currentPkg);
+        s.keysOn = RemoteKeys.isOn();
+        s.keysStuck = !s.keysOn && RemoteKeys.isEnabled(activity);
+        s.standIn = RemoteKeys.mode(activity, current, s.keysOn) == RemoteKeys.STAND_IN;
+        s.homeActive = self.equals(currentPkg) || s.standIn;
         if (!s.homeActive && currentPkg != null && !"android".equals(currentPkg)) { // "android" is the chooser of Android
             // Uses the app name, not the activity name.
             s.currentHome = current.activityInfo.applicationInfo.loadLabel(pm).toString();
@@ -267,6 +273,11 @@ final class Controls {
     /** Opens Developer options. */
     void openDeveloperSettings() {
         if (!openFresh(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) open(Settings.ACTION_SETTINGS);
+    }
+
+    /** Opens Accessibility in Settings, where the user turns on Remote Buttons. */
+    void openAccessibility() {
+        if (!openFresh(Settings.ACTION_ACCESSIBILITY_SETTINGS)) open(Settings.ACTION_SETTINGS);
     }
 
     /** Opens the About screen of Settings. */

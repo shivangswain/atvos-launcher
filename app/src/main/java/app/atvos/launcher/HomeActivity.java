@@ -41,6 +41,7 @@ import android.widget.Toast;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -56,6 +57,15 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     private static final String KEY_ASKED = "asked_tv_listings", KEY_SET_UP = "set_up";
     /** Settings > Appearance: true for light rows and Settings, else dark. {@link Backdrops} reads it too. */
     static final String KEY_LIGHT = "appearance_light";
+    /** {@link RemoteKeys} sets this on the Home intent of a held Home button: Control Center opens. */
+    static final String EXTRA_CONTROL_CENTER = "app.atvos.launcher.extra.CONTROL_CENTER";
+    /**
+     * {@link RemoteKeys} sets this when it stands in for the TV's home app: the intent is a press of Home, though it
+     * isn't a Home intent.
+     */
+    static final String EXTRA_HOME_BUTTON = "app.atvos.launcher.extra.HOME_BUTTON";
+    /** The user has held Home for Control Center, so the hint doesn't show again. */
+    private static final String KEY_HOLD_LEARNED = "hold_home_learned";
     /** Settings > Time Format: true for 24-hour, false for 12-hour. If it is not set, the setting of the TV applies. */
     private static final String KEY_24_HOUR = "time_24_hour";
     /**
@@ -81,6 +91,10 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     private final ExecutorService decode = new Background("atvos-decode",
             Process.THREAD_PRIORITY_BACKGROUND + Process.THREAD_PRIORITY_MORE_FAVORABLE);
     private final AtomicBoolean prefetchQueued = new AtomicBoolean();
+    /** Remote Buttons started or stopped: setup and Settings read the state again. */
+    private final Runnable keysChanged = () -> this.view.refreshSetup();
+    /** The apps in the dock (a folder: its first app). Only they show a top shelf, so only their images download. */
+    private volatile Set<String> dockPkgs = Set.of();
     private final Set<String> pagesQueued = ConcurrentHashMap.newKeySet(); // apps whose other shelf pages are downloaded
     private Apps apps;
     private Backdrops backdrops;
@@ -149,6 +163,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         root.addView(input = textInput(), new FrameLayout.LayoutParams(1, 1));
         setContentView(root);
         view.requestFocus();
+        view.setHoldHintLearned(getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_HOLD_LEARNED, false));
         profile.load(view::setAvatar);
 
         IntentFilter changes = new IntentFilter();
@@ -158,10 +173,20 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         changes.addAction(Intent.ACTION_PACKAGE_REPLACED);
         changes.addDataScheme("package");
         registerReceiver(packages, changes); // only protected system broadcasts, so no export flag
+        RemoteKeys.listen(keysChanged); // setup continues when Remote Buttons starts
 
         // First launch: the setup steps, then the recommendations prompt when setup closes.
         if (getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_SET_UP, false)) askForListings();
         else view.openSetup();
+        if (getIntent().getBooleanExtra(EXTRA_CONTROL_CENTER, false)) heldHome(); // the held Home started atvOS
+    }
+
+    /** Home was held: Control Center opens, and the hint for it doesn't show again. */
+    private void heldHome() {
+        if (!view.openControlCenterFromRemote()) return; // setup shows
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (!prefs.getBoolean(KEY_HOLD_LEARNED, false)) prefs.edit().putBoolean(KEY_HOLD_LEARNED, true).apply();
+        view.setHoldHintLearned(true);
     }
 
     /**
@@ -186,6 +211,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         resumed = true;
         refresh();
         profile.refresh(view::setAvatar); // not more than once a day
+        donation.settle(); // only after a purchase sheet opened: a donation that Google Play completed later
         view.setClockRunning(true);
         IntentFilter time = new IntentFilter(Intent.ACTION_TIME_CHANGED);
         time.addAction(Intent.ACTION_TIMEZONE_CHANGED);
@@ -210,9 +236,11 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         if (view == null) return; // onCreate handed off: this instance closes
-        if (intent.hasCategory(Intent.CATEGORY_HOME)) {
-            homeInstance = true; // Android sent Home to this instance
+        boolean standIn = intent.getBooleanExtra(EXTRA_HOME_BUTTON, false);
+        if (intent.hasCategory(Intent.CATEGORY_HOME) || standIn) {
+            if (!standIn) homeInstance = true; // Android sent Home to this instance
             view.goHome();
+            if (intent.getBooleanExtra(EXTRA_CONTROL_CENTER, false)) heldHome();
             // Setup completed in an instance that handed off to this one: the prompt shows here.
             if (getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_SET_UP, false)) askForListings();
             return;
@@ -265,6 +293,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         }
         view.removeCallbacks(checkApproval);
         view.removeCallbacks(settled);
+        RemoteKeys.unlisten(keysChanged);
         checkApproval.run(); // stops a run that waits for the prompt
         unregisterReceiver(packages);
         io.shutdownNow();
@@ -286,6 +315,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         io.execute(() -> {
             backdrops.scan(this);
             Apps.Layout layout = reload ? apps.load(previous) : null;
+            if (layout != null) dockPkgs = dock(layout.visible());
             runOnUiThread(() -> {
                 if (isDestroyed()) return;
                 if (layout != null) {
@@ -299,13 +329,29 @@ public final class HomeActivity extends Activity implements HomeView.Host {
                 }
                 updateBackdrop();
             });
-            if (prefetchQueued.compareAndSet(false, true)) {
-                net.execute(() -> {
-                    prefetchQueued.set(false);
-                    backdrops.prefetch(() -> runOnUiThread(this::shelfReady));
-                });
-            }
+            prefetch();
         });
+    }
+
+    /** Downloads the images of the apps in the dock that are not on disk. One download run waits at a time. */
+    private void prefetch() {
+        if (prefetchQueued.compareAndSet(false, true)) {
+            net.execute(() -> {
+                prefetchQueued.set(false);
+                backdrops.prefetch(dockPkgs, () -> runOnUiThread(this::shelfReady));
+            });
+        }
+    }
+
+    /** Returns the packages in the dock: the first row, with the first app of a folder. */
+    private static Set<String> dock(List<Apps.Entry> visible) {
+        Set<String> out = new HashSet<>();
+        for (int i = 0; i < Math.min(HomeView.COLS, visible.size()); i++) {
+            Apps.Entry e = visible.get(i);
+            if (e.folder == null) out.add(e.pkg);
+            else if (!e.folder.apps.isEmpty()) out.add(e.folder.apps.get(0).pkg);
+        }
+        return Set.copyOf(out);
     }
 
     /** Shows a downloaded recommendation image if its app has the focus. */
@@ -442,6 +488,11 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     public void saveLayout(List<Apps.Entry> visible, List<Apps.Entry> hidden) {
         current = all(visible, hidden);
         apps.saveLayout(visible, hidden);
+        Set<String> dock = dock(visible);
+        if (!dock.equals(dockPkgs)) { // an app moved into the dock: its top shelf downloads now
+            dockPkgs = dock;
+            prefetch();
+        }
     }
 
     /** Returns a copy of all tiles and apps, with the apps in folders, for the next load. UI thread. */
@@ -529,22 +580,56 @@ public final class HomeActivity extends Activity implements HomeView.Host {
 
     @Override
     public void selfSetupHome(HomeView.SelfSetup progress) {
-        runSelfAdb(new ArrayList<>(controls.setup().lockedHomes), SelfAdb.Job.HOME, progress, controls::rememberDisabled,
-                SelfAdb.Result.OK.messageRes);
+        runSelfAdb(new ArrayList<>(controls.setup().lockedHomes), SelfAdb.Job.HOME, SelfAdb.Job.KEYS_ON, progress,
+                controls::rememberDisabled, SelfAdb.Result.OK.messageRes);
     }
 
     @Override
     public void restoreTvHome(HomeView.SelfSetup progress) {
-        runSelfAdb(new ArrayList<>(controls.setup().disabledHomes), SelfAdb.Job.RESTORE, progress, controls::forgetDisabled,
-                R.string.setup_tv_restored);
+        Controls.Setup st = controls.setup();
+        if (st.disabledHomes.isEmpty()) {
+            // Remote Buttons gave atvOS the Home button: turning it off gives it back. No adb is needed.
+            boolean off = RemoteKeys.turnOff();
+            progress.done(off, off ? R.string.setup_tv_restored : R.string.settings_restore_not_needed);
+            return;
+        }
+        runSelfAdb(new ArrayList<>(st.disabledHomes), SelfAdb.Job.RESTORE, SelfAdb.Job.KEYS_OFF, progress,
+                controls::forgetDisabled, R.string.setup_tv_restored);
+    }
+
+    @Override
+    public void openRemoteButtons() {
+        // When the user turns the service on, it brings atvOS back to the front (RemoteKeys.onServiceConnected).
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(RemoteKeys.KEY_OPENED_FOR_SETUP, true).apply();
+        controls.openAccessibility();
     }
 
     /**
-     * Disables or enables the home apps of the TV over self-adb. {@code record} receives the changed packages, also
-     * when a later package fails. {@code okMessage} shows when all packages succeed. It runs on its own thread, not
-     * {@link #io}, because it can wait more than one minute for the prompt.
+     * Settings > General > Remote Buttons. Off: Android turns the service off. On: self-adb turns it on if USB debugging
+     * is on, else Accessibility opens for the user to turn it on.
      */
-    private void runSelfAdb(List<String> packages, SelfAdb.Job job, HomeView.SelfSetup progress,
+    @Override
+    public void setRemoteButtons(boolean on, HomeView.SelfSetup progress) {
+        if (!on) {
+            RemoteKeys.turnOff();
+            progress.done(true, 0);
+            return;
+        }
+        if (!controls.adbEnabled()) {
+            openRemoteButtons();
+            progress.done(true, R.string.remote_buttons_turn_on); // an instruction, not an error
+            return;
+        }
+        runSelfAdb(new ArrayList<>(), null, SelfAdb.Job.KEYS_ON, progress, changed -> { }, 0);
+    }
+
+    /**
+     * Disables or enables the home apps of the TV over self-adb, then turns the remote buttons service on or off
+     * ({@code then}). {@code record} receives the changed packages, also when a later package fails. {@code okMessage}
+     * shows when all packages succeed. It runs on its own thread, not {@link #io}, because it can wait more than one
+     * minute for the prompt.
+     */
+    private void runSelfAdb(List<String> packages, SelfAdb.Job job, SelfAdb.Job then, HomeView.SelfSetup progress,
                             java.util.function.Consumer<List<String>> record, int okMessage) {
         if (!controls.adbEnabled()) {
             // The app cannot turn on debugging. This opens the screen where the user turns it on.
@@ -560,7 +645,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         adbApproving = false;
         new Thread(() -> {
             List<String> changed = new ArrayList<>();
-            SelfAdb.Result r = adb.run(packages, job, step -> runOnUiThread(() -> {
+            SelfAdb.Result r = adb.run(packages, job, getPackageName(), then, step -> runOnUiThread(() -> {
                 if (selfAdb != adb || isDestroyed()) return; // a newer run replaced it, or the activity closed
                 adbApproving = step == SelfAdb.Listener.APPROVE;
                 if (adbApproving) progress.prompt(adb.fingerprint());
@@ -568,6 +653,8 @@ public final class HomeActivity extends Activity implements HomeView.Host {
             }), changed);
             if (!changed.isEmpty()) record.accept(changed);
             boolean ok = r == SelfAdb.Result.OK;
+            // Restore: Android turns the service off too, in case adb couldn't.
+            if (ok && then == SelfAdb.Job.KEYS_OFF) runOnUiThread(RemoteKeys::turnOff);
             int message = ok ? okMessage : r.messageRes;
             runOnUiThread(() -> {
                 if (selfAdb != adb || isDestroyed()) return;
@@ -740,7 +827,8 @@ public final class HomeActivity extends Activity implements HomeView.Host {
      */
     @Override
     public void backAtRoot() {
-        if (!homeInstance) finish();
+        // Remote Buttons can stand in for the TV's home app: then atvOS is the home screen, and it stays.
+        if (!homeInstance && RemoteKeys.homeMode(this, RemoteKeys.isOn()) != RemoteKeys.STAND_IN) finish();
     }
 
     /** Opens the TV keyboard for a hidden field. The field sends each change to the view. */

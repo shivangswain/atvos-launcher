@@ -37,8 +37,21 @@
     <string name="setup_debugging_body">Turn on USB debugging, and confirm when the TV asks. atvOS Launcher uses it once, to take over the Home button. Then press Back to come back here.</string>
     <string name="setup_open_developer">Open Developer Options</string>
     <string name="setup_allow_title">Allow USB Debugging</string>
-    <string name="setup_allow_body">Select Set Up. When the TV asks, check that its code is the same as the code in this picture, then select Allow.</string>
+    <string name="setup_allow_body">Select Set Up. When the TV asks, check that its code is the same as the code in this picture, then select Allow. Set Up also turns on atvOS Launcher Remote Buttons, an accessibility service that gets the remote\'s buttons so that holding Home opens Control Center. It acts only on Home and Settings, and keeps nothing.</string>
     <string name="setup_set_up">Set Up</string>
+    <!-- The choice between the two ways to take over the Home button. USB debugging comes first. -->
+    <string name="setup_how_title">Take Over the Home Button</string>
+    <string name="setup_how_body">This TV keeps the Home button for its own home screen. The best way to change this is USB debugging: atvOS Launcher turns the TV\'s home screen off once, from inside the TV. Or use Accessibility, with no developer settings: atvOS Launcher opens each time you press Home, and the TV\'s home screen can show for a moment first.</string>
+    <string name="setup_use_debugging">Use USB Debugging</string>
+    <string name="setup_use_accessibility">Use Accessibility</string>
+    <!-- The Accessibility way. This text is the disclosure that Google Play asks for before the user turns the service on. -->
+    <string name="setup_buttons_title">Turn On Remote Buttons</string>
+    <string name="setup_buttons_body">Under Services, select atvOS Launcher Remote Buttons and turn it on. It gets the buttons that you press on the remote, and sees when the TV\'s home screen opens, so that it can open atvOS Launcher instead. It acts only on Home and Settings, doesn\'t read the screen, and keeps and sends nothing. atvOS Launcher comes back when it\'s on.</string>
+    <string name="setup_open_accessibility">Open Accessibility</string>
+    <!-- Remote Buttons only, when atvOS already has the Home button. Also the disclosure before it turns on. -->
+    <string name="setup_keys_body">Hold Home to open Control Center, and press the Settings button for the TV\'s settings. atvOS Launcher Remote Buttons is an accessibility service that gets the buttons that you press on the remote. It acts only on Home and Settings, doesn\'t read the screen, and keeps and sends nothing.</string>
+    <string name="setup_turn_on">Turn On</string>
+    <string name="remote_buttons_stuck">The TV didn\'t start Remote Buttons. On TCL TVs, set up with USB debugging instead.</string>
     <string name="setup_try_again">Try Again</string>
     <string name="setup_pick_title">Make It Your Home Screen</string>
     <string name="setup_pick_body">Choose atvOS Launcher in the list that opens.</string>
@@ -71,7 +84,7 @@
     <string name="settings_about">About</string>
     <string name="settings_model">Model</string>
     <!-- The app version, in About. -->
-    <string name="settings_atvos">atvOS</string>
+    <string name="settings_atvos">atvOS Launcher</string>
     <string name="settings_android_tv">Android TV</string>
     <string name="settings_appearance">Appearance</string>
     <string name="settings_appearance_about">Select Light or Dark to change the appearance of Settings and of the rows of programs on the top shelf.</string>
@@ -135,6 +148,10 @@
     <string name="art_allow">Allow</string>
     <!-- The badge on the build row: the number of times to select it. -->
     <string name="art_times">7×</string>
+    <string name="art_accessibility">Accessibility</string>
+    <string name="art_captions">Captions</string>
+    <string name="art_high_contrast">High contrast text</string>
+    <string name="art_services">Services</string>
     <string name="cannot_open">Can\'t open %s</string>
     <string name="not_available">Not available on this TV</string>
 
@@ -194,4 +211,18 @@
     <string name="power_released">Power control removed. atvOS Launcher can now be uninstalled.</string>
     <string name="power_admin_description">Lets atvOS Launcher put the TV to sleep for Power Off and the Sleep Timer. It can\'t do anything else. To remove it, use Remove Power Control in atvOS Launcher\'s Settings, under Uninstall.</string>
     <string name="power_not_held">atvOS Launcher doesn\'t have power control.</string>
+
+    <!-- Remote buttons -->
+    <!-- The name of the remote buttons service in the TV's Accessibility settings. -->
+    <string name="remote_keys_label">atvOS Launcher Remote Buttons</string>
+    <string name="remote_keys_description">Lets atvOS Launcher open Control Center when you hold the Home button, and open the TV\'s Settings with the Settings button. If you set up atvOS Launcher without USB debugging, it also opens atvOS Launcher when you press Home or when the TV\'s own home screen opens. It acts on these buttons only, passes every other button to the TV unchanged, and keeps and sends nothing. It doesn\'t read the screen.</string>
+    <!-- Settings > General. -->
+    <string name="settings_remote_buttons">Remote Buttons</string>
+    <string name="settings_remote_buttons_about">Hold Home for Control Center, and press the Settings button for the TV\'s Settings. Remote Buttons is an accessibility service that gets the remote\'s buttons, acts only on these two, and keeps nothing.</string>
+    <string name="settings_remote_buttons_stand_in">Remote Buttons gives atvOS Launcher the Home button, and opens Control Center when you hold Home. Turning it off gives the Home button back to the TV\'s own home screen.</string>
+    <string name="remote_buttons_turn_on">In Accessibility, turn on atvOS Launcher Remote Buttons.</string>
+    <!-- The hint in the clock pill. %1$s is where the Home button icon goes. -->
+    <string name="hint_hold_home">Hold %1$s for Control Center</string>
+    <!-- The same hint for screen readers. -->
+    <string name="a11y_hint_hold_home">Hold the Home button for Control Center</string>
 </resources>

@@ -26,8 +26,8 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * An adb client for the adb daemon of this TV on 127.0.0.1:5555. It does two jobs: it disables the locked home apps of
- * the TV so that the Home button opens atvOS, and it enables them again. It sends only the fixed commands in
+ * An adb client for the adb daemon of this TV on 127.0.0.1:5555. It disables the locked home apps of the TV so that the
+ * Home button opens atvOS, and turns on {@link RemoteKeys}; and it undoes both. It sends only the fixed commands in
  * {@link Job}, each with a package name that matches {@link #PKG}. No method runs a different command.
  * <p>
  * The user turns on network debugging in Developer options and accepts the "Allow debugging" prompt one time. The RSA
@@ -47,16 +47,40 @@ final class SelfAdb {
      * status. {@link #PKG} does not allow '-', so the output of {@code pm} cannot contain this line.
      */
     private static final String DONE = "atvos-ok";
+    /**
+     * Sets {@code n} to the enabled accessibility services without those of the package {@code %1$s}, colon-separated.
+     * The Android user is {@code %2$d}.
+     */
+    private static final String KEEP_OTHERS = "set -f ; n= ; IFS=: ; " // no file name expansion of the list
+            + "for e in $(settings --user %2$d get secure enabled_accessibility_services) ; do "
+            + "case \"$e\" in %1$s/*|null|'') ;; *) n=\"${n:+$n:}$e\" ;; esac ; done ; unset IFS ; set +f ; ";
 
     /**
-     * The command for each package. {@code %1$s} is the package name and {@code %2$d} the Android user that runs atvOS.
-     * Without {@code --user}, both commands change user 0, which is a different user on a TV with profiles.
+     * The command for each package. {@code %1$s} is the package name, {@code %2$d} the Android user that runs atvOS and
+     * {@code %3$s} the package of atvOS. Without {@code --user}, the commands change user 0, which is a different user
+     * on a TV with profiles.
      */
     enum Job {
-        /** Makes atvOS the default home app of this user, then disables one locked home app for this user. */
-        HOME("cmd package set-home-activity --user %2$d app.atvos.launcher/.HomeActivity ; pm disable-user --user %2$d %1$s && echo " + DONE),
+        /**
+         * Makes atvOS the default home app of this user, then disables one locked home app for this user. The disable
+         * runs also if set-home-activity fails (some TVs have no home role): with the locked home app off, atvOS is the
+         * home app, or Android asks which home app to use. It is never without one, because atvOS is a home app.
+         */
+        HOME("cmd package set-home-activity --user %2$d %3$s/.HomeActivity ; pm disable-user --user %2$d %1$s && echo " + DONE),
         /** Enables one home app again for this user. */
-        RESTORE("pm enable --user %2$d %1$s && echo " + DONE);
+        RESTORE("pm enable --user %2$d %1$s && echo " + DONE),
+        /**
+         * Turns on {@link RemoteKeys} of atvOS ({@code %1$s}) and keeps the other accessibility services. It removes the
+         * service from the list and adds it again, so that Android binds it again. TCL TVs bind it only with their own
+         * AUTO_START app-op; other TVs don't have that op, and its error is ignored.
+         */
+        KEYS_ON("appops set --user %2$d %1$s AUTO_START allow >/dev/null 2>&1 ; " + KEEP_OTHERS
+                + "settings --user %2$d put secure enabled_accessibility_services \"$n\" ; "
+                + "settings --user %2$d put secure enabled_accessibility_services \"${n:+$n:}%1$s/.RemoteKeys\" && "
+                + "settings --user %2$d put secure accessibility_enabled 1 && echo " + DONE),
+        /** Turns off the accessibility services of atvOS ({@code %1$s}) and keeps the others. */
+        KEYS_OFF(KEEP_OTHERS + "settings --user %2$d put secure enabled_accessibility_services \"$n\" && "
+                + "{ [ -n \"$n\" ] || settings --user %2$d put secure accessibility_enabled 0 ; } && echo " + DONE);
 
         final String command;
 
@@ -128,12 +152,16 @@ final class SelfAdb {
 
     /**
      * Runs {@code job} on each package over self-adb and adds each package that succeeds to {@code done}. It returns at
-     * the first failure. A package name that does not match {@link #PKG} fails the run before anything is sent.
+     * the first failure. Then, if all succeed, it runs {@code then} on {@code self}, the package of atvOS. Its result is
+     * the result of the run only when there are no packages ({@code job} is then null). A name that does not match
+     * {@link #PKG} fails the run before anything is sent.
      */
-    Result run(List<String> packages, Job job, Listener listener, List<String> done) {
+    Result run(List<String> packages, Job job, String self, Job then, Listener listener, List<String> done) {
+        if (job == null && !packages.isEmpty()) return Result.FAILED;
         for (String pkg : packages) {
             if (!PKG.matcher(pkg).matches()) return Result.FAILED; // sends only names that match PKG
         }
+        if (!PKG.matcher(self).matches()) return Result.FAILED;
         listener.step(Listener.CONNECTING);
         Socket socket = new Socket();
         this.socket = socket;
@@ -148,9 +176,13 @@ final class SelfAdb {
             int user = android.os.Process.myUid() / PER_USER_RANGE; // 0, or the user of a TV profile
             for (String pkg : packages) {
                 // ROOT: some locales format numbers with other digits, which the shell does not read.
-                String cmd = String.format(Locale.ROOT, job.command, pkg, user);
+                String cmd = String.format(Locale.ROOT, job.command, pkg, user, self);
                 if (!shell(in, out, ++stream, cmd)) return Result.FAILED;
                 done.add(pkg); // records each change before the next step
+            }
+            if (then != null) {
+                boolean ok = shell(in, out, ++stream, String.format(Locale.ROOT, then.command, self, user));
+                if (!ok && packages.isEmpty()) return Result.FAILED;
             }
             return Result.OK;
         } catch (IOException e) {

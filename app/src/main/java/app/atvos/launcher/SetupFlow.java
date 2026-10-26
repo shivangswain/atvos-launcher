@@ -26,8 +26,13 @@ import java.util.List;
  * screen to find and a button that opens it. Steps that are complete are skipped. When the user comes back from
  * Settings, the next step shows.
  * <pre>
- *   Welcome → Developer options → USB debugging → Allow → Profile picture → Done
+ *   Welcome → How → Developer options → USB debugging → Allow → Profile picture → Done
+ *                 ↘ Remote Buttons (Accessibility) ↗
  * </pre>
+ * When atvOS has the Home button but Remote Buttons is off (after Clear data, or an update from a version without
+ * it), the first-launch setup has one Remote Buttons step for it.
+ * USB debugging comes first: it turns the TV's home app off. Accessibility needs no developer settings, but the TV's
+ * home screen can show for a moment before atvOS opens over it.
  * From Settings, it runs only the steps that the TV needs ({@link #openSteps}).
  */
 final class SetupFlow {
@@ -39,6 +44,10 @@ final class SetupFlow {
         void openAbout();
         void openDeveloperOptions();
         void setUpHome(HomeView.SelfSetup progress);
+        /** Opens Accessibility, where the user turns on Remote Buttons. */
+        void openRemoteButtons();
+        /** Turns on Remote Buttons over self-adb if USB debugging is on, else opens Accessibility for it. */
+        void turnOnRemoteButtons(HomeView.SelfSetup progress);
         void requestDefaultHome();
         void chooseAccount();
         void close();
@@ -48,8 +57,8 @@ final class SetupFlow {
     }
 
     // The steps. The numbers give their order.
-    private static final int WELCOME = 0, DEVELOPER = 1, DEBUGGING = 2, ALLOW = 3, PICK_HOME = 4, ACCOUNT = 5,
-            DONE = 6;
+    private static final int WELCOME = 0, HOW = 1, DEVELOPER = 2, DEBUGGING = 3, ALLOW = 4, BUTTONS = 5, PICK_HOME = 6,
+            ACCOUNT = 7, DONE = 8;
     private static final int ART_NONE = -1, ART_LOGO = 10, ART_AVATAR = 11, ART_CHECK = 12;
 
     private static final float W = HomeView.W, CARD_W = 1080f, PAD = 56f, CARD_R = 56f;
@@ -80,6 +89,7 @@ final class SetupFlow {
     private final List<Integer> dots = new ArrayList<>();
     private final List<Integer> journey = new ArrayList<>(); // the steps of this run, one dot each
     private boolean busy;      // the on-TV setup runs
+    private boolean accessibility; // How: the user chose Accessibility, not USB debugging
     private int sel, dot = -1;
     private final float[] focus = new float[6]; // the focus highlight of each button
     private float fade = 1f;
@@ -119,6 +129,7 @@ final class SetupFlow {
     void open() {
         origin = WELCOME;
         busy = false;
+        accessibility = false;
         journey.clear();
         setup = host.state();
         go(origin);
@@ -127,6 +138,7 @@ final class SetupFlow {
     /** Opens only the steps that the TV needs to give the Home button to atvOS. Back on the first step closes it. */
     void openSteps() {
         busy = false;
+        accessibility = false;
         setup = host.state();
         startJourney();
         origin = DONE;
@@ -146,7 +158,8 @@ final class SetupFlow {
         boolean done = switch (step) {
             case DEVELOPER -> setup.developerOn || setup.homeActive;
             case DEBUGGING -> setup.adbOn || setup.homeActive;
-            case ALLOW, PICK_HOME -> setup.homeActive;
+            case HOW, ALLOW, PICK_HOME -> setup.homeActive;
+            case BUTTONS -> setup.keysOn;
             case ACCOUNT -> host.hasAccount();
             default -> false;
         };
@@ -171,13 +184,20 @@ final class SetupFlow {
         Controls.Setup s = setup;
         if (!s.homeActive) {
             if (!s.lockedHomes.isEmpty()) {
-                // The home app of the TV keeps the Home button until adb disables it.
-                if (!s.developerOn) p.add(DEVELOPER);
-                if (!s.adbOn) p.add(DEBUGGING);
-                p.add(ALLOW);
+                // The home app of the TV keeps the Home button until adb disables it, or Remote Buttons stands in.
+                p.add(HOW);
+                if (accessibility) {
+                    p.add(BUTTONS);
+                } else {
+                    if (!s.developerOn) p.add(DEVELOPER);
+                    if (!s.adbOn) p.add(DEBUGGING);
+                    p.add(ALLOW);
+                }
             } else if (s.canPickHome) {
                 p.add(PICK_HOME);
             }
+        } else if (!s.keysOn && origin == WELCOME) {
+            p.add(BUTTONS); // only the Remote Buttons, for holding Home
         }
         if (!host.hasAccount()) p.add(ACCOUNT);
         p.add(DONE);
@@ -262,6 +282,13 @@ final class SetupFlow {
 
     // Steps
 
+    /** How: the user chose USB debugging or Accessibility. The dots show the steps of that way. */
+    private void choose(boolean useAccessibility) {
+        accessibility = useAccessibility;
+        startJourney();
+        next();
+    }
+
     /** Disables the home app of the TV over self-adb. The user accepts the prompt of the TV. */
     private void runSetUp() {
         busy = true;
@@ -290,6 +317,31 @@ final class SetupFlow {
         });
     }
 
+    /** Turns on Remote Buttons for holding Home: self-adb, else Accessibility. The service start moves setup on. */
+    private void runButtons() {
+        busy = true;
+        showNote(R.string.setup_tv_connecting, TEAL);
+        host.turnOnRemoteButtons(new HomeView.SelfSetup() {
+            @Override
+            public void status(int messageRes) {
+                showNote(messageRes, TEAL);
+            }
+
+            @Override
+            public void prompt(String fingerprint) {
+                art.fingerprint(fingerprint);
+            }
+
+            @Override
+            public void done(boolean ok, int messageRes) {
+                busy = false;
+                setup = host.state();
+                if (setup.keysOn) next();
+                else showNote(messageRes != 0 ? messageRes : R.string.setup_tv_working, ok ? TEAL : RED);
+            }
+        });
+    }
+
     private void showNote(int res, int color) {
         note = context.getString(res);
         noteColor = color;
@@ -307,6 +359,36 @@ final class SetupFlow {
                 artKind = ART_LOGO;
                 add(R.string.setup_get_started, this::next);
                 add(R.string.setup_not_now, host::close);
+            }
+            case HOW -> {
+                title = context.getString(R.string.setup_how_title);
+                bodyRes = R.string.setup_how_body;
+                artKind = ART_LOGO;
+                add(R.string.setup_use_debugging, () -> choose(false)); // the first choice: it turns the TV's home app off
+                add(R.string.setup_use_accessibility, () -> choose(true));
+                add(R.string.setup_back, this::back);
+            }
+            case BUTTONS -> {
+                title = context.getString(R.string.setup_buttons_title);
+                // The disclosure before the user turns the service on.
+                if (!setup.homeActive) { // the Accessibility way to get the Home button
+                    bodyRes = R.string.setup_buttons_body;
+                    artKind = SettingsArt.ACCESSIBILITY;
+                    add(R.string.setup_open_accessibility, host::openRemoteButtons);
+                    add(R.string.setup_back, this::back);
+                } else { // atvOS has the Home button: only holding Home and the Settings button
+                    bodyRes = R.string.setup_keys_body;
+                    artKind = setup.adbOn ? ART_LOGO : SettingsArt.ACCESSIBILITY;
+                    if (!busy) {
+                        add(R.string.setup_turn_on, this::runButtons);
+                        add(R.string.setup_not_now, this::next);
+                    }
+                }
+                // On in Accessibility, but not started: some TVs (TCL) start only the services that they allow.
+                if (setup.keysStuck && note == null) {
+                    note = context.getString(R.string.remote_buttons_stuck);
+                    noteColor = RED;
+                }
             }
             case DEVELOPER -> {
                 title = context.getString(R.string.setup_developer_title);
