@@ -1,5 +1,6 @@
 ---
 // The footer: links, the trademark notice and the licence.
+import Chevron from "./Chevron.astro";
 import { site } from "../site";
 
 const year = new Date().getFullYear();
@@ -17,9 +18,9 @@ const year = new Date().getFullYear();
       tvOS are trademarks of Apple Inc. Google TV, Android TV and Google Play are trademarks of Google LLC.
     </p>
     <p>
-      © {year} {site.developer}. atvOS Launcher is free software under the <a
-        href={`${site.github}/blob/main/LICENSE.md`}>GNU General Public License v3.0</a>. Icons from Material Symbols
-      (Apache License 2.0).
+      © {year} <a href={site.developer_url}>{site.developer_name}<Chevron /></a>. atvOS Launcher is free software
+      under the <a href={`${site.github}/blob/main/LICENSE.md`}>GNU General Public License v3.0</a>. Icons from
+      Material Symbols (Apache License 2.0).
     </p>
   </div>
 </footer>

@@ -1,6 +1,7 @@
 ---
 // atvos.tv/privacy: the privacy policy of atvOS Launcher. The app and Play Console link to this address.
 import Base from "../layouts/Base.astro";
+import Chevron from "../components/Chevron.astro";
 import { site } from "../site";
 ---
 <Base
@@ -19,7 +20,7 @@ import { site } from "../site";
 
       <h2>Who makes atvOS Launcher</h2>
       <p>
-        atvOS Launcher ("atvOS", "the app") is a home screen app for Google TV and Android TV, made by {site.developer},
+        atvOS Launcher ("atvOS", "the app") is a home screen app for Google TV and Android TV, made by <a href={site.developer_url}>{site.developer_name}<Chevron /></a>,
         an independent developer. For questions about this policy, open an issue on <a href={site.issues}>GitHub</a>.
       </p>
 
@@ -51,6 +52,12 @@ import { site } from "../site";
         profile. atvOS then gets your profile photo from Google over HTTPS. It keeps the account address and the photo
         on the TV, and it does not keep the access token. If you don't choose an account, atvOS shows an initial or no
         picture.
+      </p>
+      <p>
+        From the profile that Google returns, atvOS uses only the address of your photo. atvOS Launcher's use and
+        transfer of information received from Google APIs adheres to the
+        <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data
+        Policy</a>, including the Limited Use requirements.
       </p>
 
       <h3>Donations</h3>

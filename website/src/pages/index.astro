@@ -39,6 +39,29 @@ const features = [
   },
 ];
 
+// Structured data (schema.org) for search engines: the name of the site, and the app with its price and maker.
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    { "@type": "WebSite", "@id": `${site.url}/#website`, name: site.name, alternateName: "atvOS", url: `${site.url}/` },
+    {
+      "@type": "SoftwareApplication",
+      name: site.name,
+      url: `${site.url}/`,
+      image: `${site.url}/social/og.png`,
+      applicationCategory: "UtilitiesApplication",
+      operatingSystem: "Android 12 or later (Google TV, Android TV)",
+      description: "A free, open-source home screen for Google TV and Android TV, inspired by the tvOS Home Screen.",
+      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+      license: "https://www.gnu.org/licenses/gpl-3.0.html",
+      codeRepository: site.github,
+      ...(site.onPlay ? { downloadUrl: site.play, installUrl: site.play } : {}),
+      author: { "@type": "Person", name: site.developer_name, url: site.developer_url },
+      publisher: { "@type": "Person", name: site.developer_name, url: site.developer_url },
+    },
+  ],
+};
+
 const steps = [
   {
     title: "Turn on Developer options",
@@ -63,6 +86,7 @@ const steps = [
   description="atvOS Launcher is a free, open-source home screen for Google TV, inspired by the tvOS Home Screen."
   current="overview"
 >
+  <script is:inline slot="head" type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
   <section class="hero">
     <div class="wrap center text-col">
       <h1>The home screen your TV deserves</h1>
@@ -165,6 +189,16 @@ const steps = [
           </div>
         </details>
         <details>
+          <summary>Why don't the Settings and Guide buttons on my remote work?<Icon name="chevron" /></summary>
+          <div class="answer">
+            <p>
+              On Google TV, these buttons open panels that belong to the TV's built-in home screen, which atvOS turns
+              off so that the Home button opens atvOS. To open the TV's settings, select the clock, then the settings
+              button in the Control Center. Restore Default Launcher brings the buttons back.
+            </p>
+          </div>
+        </details>
+        <details>
           <summary>Why is a top shelf empty?<Icon name="chevron" /></summary>
           <div class="answer">
             <p>
@@ -221,7 +255,7 @@ const steps = [
             If you enjoy atvOS, you can donate from atvOS Settings, under Support, then Donate. Donations are completely
             optional: atvOS is the same for everyone.
           </p>
-          <a class="more" href={site.paypal}>Or buy me a coffee on PayPal<Chevron /></a>
+          <a class="more" href={site.paypal}>Or buy me a coffee<Chevron /></a>
         </div>
       </div>
     </div>
