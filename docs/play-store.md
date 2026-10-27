@@ -89,9 +89,10 @@ and agree to the TV review policy. Do this early, so the TV review runs while th
 **Instructions for reviewers** (App access): "No account or login is needed. On first launch,
 select Not Now to skip setup and use the home screen. On Google TV and Android TV, the built-in home
 screen keeps the Home button. The optional setup turns it off through the TV's own debugging
-connection (Developer options > USB debugging), with fixed commands, and Settings > Uninstall >
-Restore Default Launcher turns it back on. Setup can use Accessibility instead: the user turns on
-atvOS Launcher Remote Buttons. Donate is in atvOS Settings > Support."
+connection (Developer options > USB debugging), with two fixed commands, and Settings > Uninstall >
+Restore Default Launcher turns it back on. If the user selects Not Now there, setup offers
+Accessibility instead: the user turns on atvOS Launcher Remote Buttons in the TV's Accessibility
+settings. Hold Home for Control Center uses the same service. Donate is in atvOS Settings > Support."
 
 **Data safety.** atvOS Launcher sends no user data to you or to anyone else:
 
@@ -117,10 +118,10 @@ accessibility tool (`isAccessibilityTool` is false), so Play asks for a declarat
 | Question | Answer |
 | --- | --- |
 | Core functionality | A home screen (launcher) for TVs. The service makes the remote's Home and Settings buttons work for it: holding Home opens the Control Center, the Settings button opens the TV's settings, and, without USB debugging, Home opens the launcher in place of the TV's built-in home screen. |
-| Data accessed | Key events of the remote (it acts only on Home and Settings), and the window changes of the TV's built-in home app only, when it stands in for it. No window content (`canRetrieveWindowContent` is false). |
+| Data accessed | Key events of the remote, from a key filter (`flagRequestFilterKeyEvents`). It acts only on `KEYCODE_HOME` and `KEYCODE_SETTINGS` / `KEYCODE_NOTIFICATION`, and passes every other key on. When the user chose Accessibility instead of USB debugging, also `TYPE_WINDOW_STATE_CHANGED` events, only from the TV's built-in home app, set at run time with `packageNames`. It compares their package and class names only. No window content: `canRetrieveWindowContent` is false in `res/xml/remote_keys.xml`. |
 | Data use and sharing | Used only on the TV to open the launcher, the Control Center or Settings. Nothing is stored or sent. |
-| Prominent disclosure | Setup shows it before the user turns the service on: the "Allow USB Debugging" step (`setup_allow_body`) and the "Turn On Remote Buttons" step (`setup_buttons_body`). Settings > General > Remote Buttons repeats it. |
-| Video | Record setup on a TV: the disclosure, turning the service on, then holding Home for the Control Center. Upload it to YouTube (unlisted) and paste the link. |
+| Prominent disclosure | A setup card shows it every time, before the app opens Accessibility: "Hold Home for Control Center: Sees only your remote's buttons. Nothing is stored or shared." (`setup_buttons_body`), or "Use Accessibility Instead: Sees your remote and the TV's home screen, only to open atvOS. Nothing is stored or shared." (`setup_accessibility_body`). The title says what for; the line says what the service sees and that nothing is stored or shared. The user selects **Turn On** or **Open Accessibility** (or **Not Now**), then turns the service on in Android's own Accessibility settings, with Android's own warning. The app never turns the service on itself, also not over adb. Settings > Home Screen opens the same card. |
+| Video | Record on a TV: the setup card, selecting Turn On, turning the service on in Accessibility (with Android's dialog), then holding Home for the Control Center. Upload it to YouTube (unlisted) and paste the link. |
 
 Also add the service to the privacy policy (done: [atvos.tv/privacy](https://atvos.tv/privacy)) and
 answer **No** to "collects or shares user data" in Data safety: the key events stay on the TV.

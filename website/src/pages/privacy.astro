@@ -70,20 +70,20 @@ import { site } from "../site";
       <h3>Setup and the debugging connection</h3>
       <p>
         To replace the TV's built-in home screen, atvOS can connect to the TV's own debugging service at 127.0.0.1, a
-        connection that stays inside the TV. It sends only fixed commands: one turns the built-in home screen off and
-        one turns it back on, and one turns Remote Buttons on and one turns it off. Its key is made and kept in the TV's
-        Android Keystore and never leaves the TV.
+        connection that stays inside the TV. It sends only two fixed commands: one turns the built-in home screen off
+        (and, on TCL TVs, lets atvOS's own services start), and one turns it back on. It never turns on an accessibility
+        service. Its key is made and kept in the TV's Android Keystore and never leaves the TV.
       </p>
 
       <h3>Remote Buttons (an accessibility service)</h3>
       <p>
-        atvOS Launcher Remote Buttons is an accessibility service. It gets the buttons that you press on the remote, so
-        that holding Home opens the Control Center and the Settings button opens the TV's settings. If you set up atvOS
-        with Accessibility instead of USB debugging, it also opens atvOS when you press Home, and when the TV's own home
-        screen opens: for this, it sees only the window changes of that one app. It acts only on Home and Settings and
-        passes every other button on. It cannot read the screen or anything that you type, and it keeps and sends
-        nothing. Setup tells you this before it turns the service on, and you can turn it off in atvOS Settings, under
-        General, or in the TV's Accessibility settings.
+        atvOS Launcher Remote Buttons is an optional accessibility service. Only you can turn it on, in the TV's
+        Accessibility settings, and atvOS tells you what it does before it opens them. It sees the buttons that you
+        press on the remote, so that holding Home opens the Control Center and the Settings button opens the TV's
+        settings. If you use Accessibility instead of USB debugging, it also opens atvOS when you press Home, and when
+        the TV's own home screen opens: for this, it sees only the window changes of that one app. It acts only on Home
+        and Settings and passes every other button on. It cannot read the screen or anything on it, and nothing is
+        stored or shared. Turn it off in atvOS Settings, under Home Screen, or in the TV's Accessibility settings.
       </p>
 
       <h3>Power Off and the sleep timer</h3>

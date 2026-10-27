@@ -64,10 +64,6 @@ const jsonLd = {
 
 const steps = [
   {
-    title: "Choose how",
-    body: "USB debugging is best. Or use Accessibility, with no developer settings.",
-  },
-  {
     title: "Turn on Developer options",
     body: "atvOS opens the TV's About screen. Select the build row seven times.",
   },
@@ -80,8 +76,8 @@ const steps = [
     body: "When the TV asks, select Allow. atvOS becomes the home screen.",
   },
   {
-    title: "Or turn on Remote Buttons",
-    body: "With Accessibility, atvOS opens Accessibility for you. Turn on atvOS Launcher Remote Buttons.",
+    title: "Hold Home for Control Center",
+    body: "Optional. Turn on atvOS Launcher Remote Buttons in Accessibility.",
   },
   {
     title: "Add your profile picture",
@@ -158,12 +154,13 @@ const steps = [
         <p>
           The built-in home screens of Google TV and Android TV keep the Home button, even after you choose a
           different home app. atvOS turns the built-in home screen off through the TV's own debugging connection,
-          inside the TV. It sends only fixed commands: one turns the built-in home screen off and one turns it back on,
-          and one turns Remote Buttons on and one turns it off.
+          inside the TV. It sends only two fixed commands: one turns the built-in home screen off, and one turns it
+          back on.
         </p>
         <p>
-          Don't want developer settings? Choose Accessibility instead: Remote Buttons opens atvOS when you press Home
-          and when the TV's home screen opens, which can show for a moment first.
+          Don't want developer settings? Select Not Now, and atvOS offers Accessibility instead: Remote Buttons opens
+          atvOS when you press Home and when the TV's home screen opens, which can show for a moment first. Switch any
+          time in atvOS Settings, under Home Screen.
         </p>
         <p>
           When setup is done, you can turn USB debugging off again. On a TV that lets you choose the home app, atvOS
@@ -206,9 +203,10 @@ const steps = [
           <div class="answer">
             <p>
               With Remote Buttons on, holding Home opens the Control Center, and the Settings button opens the TV's
-              settings. Remote Buttons is an accessibility service: it gets the remote's buttons, acts only on Home and
-              Settings, and passes every other button on. It doesn't read the screen. Turn it on or off in atvOS
-              Settings, under General.
+              settings. Remote Buttons is an accessibility service that you turn on in the TV's Accessibility settings.
+              It sees only the remote's buttons, acts only on Home and Settings, and passes every other button on. It
+              doesn't read the screen, and nothing is stored or shared. Turn it off in atvOS Settings, under Home
+              Screen.
             </p>
             <p>
               The Guide button opens a panel of the TV's built-in home screen, so it does nothing while atvOS replaces

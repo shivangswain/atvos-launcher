@@ -53,34 +53,37 @@ On first launch, a card on the TV walks you through the steps that are left. It 
 that are already done, shows a picture of each TV Settings screen, and opens that screen for you.
 Select **Not Now** to skip setup. To run it later, open atvOS Settings > **Home Screen**.
 
-1. **Take Over the Home Button.** Choose **Use USB Debugging** (best) or **Use Accessibility**.
-2. **Turn On Developer Options.** Opens the TV's About screen. Select the build row seven times.
-3. **Turn On USB Debugging.** Opens Developer options.
-4. **Allow USB Debugging.** Select **Set Up**, then **Allow** on the TV's prompt. atvOS Launcher
-   becomes the home app, turns off the TV's built-in home screen and turns on **Remote Buttons**.
-5. **Turn On Remote Buttons** (instead of steps 2 to 4, with **Use Accessibility**). Opens
-   Accessibility, where you turn on **atvOS Launcher Remote Buttons** under Services.
-6. **Make It Your Home Screen.** On a TV whose home app is not locked, Android's home app dialog
-   opens instead of steps 1 to 5.
-7. **Add Your Profile Picture** (optional). Choose your Google account.
+1. **Turn On Developer Options.** Opens the TV's About screen. Select the build row seven times.
+2. **Turn On USB Debugging.** Opens Developer options.
+3. **Allow USB Debugging.** Select **Set Up**, then **Allow** on the TV's prompt. atvOS Launcher
+   becomes the home app and turns off the TV's built-in home screen.
+4. **Hold Home for Control Center** (optional). Opens Accessibility, where you turn on
+   **atvOS Launcher Remote Buttons**.
+5. **Make It Your Home Screen.** On a TV whose home app is not locked, Android's home app dialog
+   opens instead of steps 1 to 3.
+6. **Add Your Profile Picture** (optional). Choose your Google account.
+
+**Don't want USB debugging?** Select **Not Now** on steps 1 to 3, or decline the TV's prompt.
+Setup then offers **Use Accessibility Instead**: turn on Remote Buttons, and it opens atvOS
+Launcher when you press Home and when the TV's home screen opens. The TV's home screen can show
+for a moment first. Switch between the two in atvOS Settings > **Home Screen**.
 
 **Why USB debugging:** the built-in home screens of Google TV and Android TV keep the Home button
 even after you choose a different home app. atvOS Launcher turns them off through the TV's own
-debugging connection (127.0.0.1:5555). It sends only fixed commands: one turns off the built-in home
-screen and one turns it back on, and one turns Remote Buttons on and one turns it off. It uses the
-debugging connection for nothing else.
-
-**Why Accessibility:** with no developer settings, Remote Buttons opens atvOS Launcher when you
-press Home and when the TV's home screen opens. The TV's home screen can show for a moment first.
+debugging connection (127.0.0.1:5555). It sends only two fixed commands: one turns off the
+built-in home screen (and, on TCL TVs, lets atvOS Launcher's own services start), and one turns it
+back on. It uses the debugging connection for nothing else, and never turns on Remote Buttons.
 
 When setup ends the first time, the TV asks you to allow access to app recommendations.
 
-**Remote buttons:** with **Remote Buttons** on, holding Home opens the Control Center, and the
-Settings button opens the TV's settings. The clock pill shows "Hold ⌂ for Control Center" until you
-first hold Home. Remote Buttons is an accessibility service: it gets the remote's buttons, acts only
-on Home and Settings, and passes every other button on. It does not read the screen, and it keeps
-and sends nothing. Turn it on or off in atvOS Settings > General > **Remote Buttons**. On TCL TVs, the
-Guide button goes through TCL's own service first, so atvOS Launcher can't see it.
+**Remote Buttons:** with it on, holding Home opens the Control Center, and the Settings button opens
+the TV's settings. The clock pill shows "Hold ⌂ for Control Center" until you first hold Home.
+Remote Buttons is an accessibility service, and only you can turn it on, in the TV's Accessibility
+settings; atvOS Launcher tells you what it does first. It sees the remote's buttons (and, with
+Accessibility instead of USB debugging, when the TV's home screen opens), acts only on Home and
+Settings, and passes every other button on. It doesn't read the screen, and nothing is stored or
+shared. Turn it off in atvOS Settings > **Home Screen**. On TCL TVs, the Guide button goes through
+TCL's own service first, so atvOS Launcher can't see it.
 
 ## Privacy and permissions
 
@@ -97,7 +100,7 @@ the TV. The access token for the photo is not stored. Donations go through Googl
 | Google Play billing (`com.android.vending.BILLING`) | **Donate**. | At install. |
 | Alarms & reminders (`SCHEDULE_EXACT_ALARM`) | Puts the TV to sleep at the exact time of the sleep timer. | At install up to Android 13. From Android 14, the first sleep timer press opens **Alarms & reminders**. |
 | Device admin, lock screen only | Power Off and the sleep timer. It cannot erase, reset or read anything. | A prompt the first time that you use Power Off or the sleep timer. |
-| Accessibility service, key filter (`BIND_ACCESSIBILITY_SERVICE`) | **Remote Buttons**: holding Home for the Control Center, the Settings button, and the Home button without USB debugging. It cannot read the screen. | Setup over USB debugging, or **Accessibility** in the TV's Settings. |
+| Accessibility service, key filter (`BIND_ACCESSIBILITY_SERVICE`) | **Remote Buttons**: holding Home for the Control Center, the Settings button, and the Home button without USB debugging. It cannot read the screen. | You turn it on in the TV's **Accessibility** settings, after setup explains it. |
 
 ## Uninstall
 
