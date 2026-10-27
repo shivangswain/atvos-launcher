@@ -72,6 +72,10 @@ public final class RemoteKeys extends AccessibilityService {
         held = true;
         open(homeDown, true);
     };
+    /** Opens atvOS over the TV's home screen, once the time after the last opening has passed. */
+    private final Runnable reopen = () -> {
+        if (update() == STAND_IN) open(STAND_IN, false);
+    };
 
     /** Returns true while Android has the service bound. Any thread. */
     static boolean isOn() {
@@ -157,6 +161,7 @@ public final class RemoteKeys extends AccessibilityService {
             if (changed != null) changed.run();
         }
         handler.removeCallbacks(hold);
+        handler.removeCallbacks(reopen);
     }
 
     /**
@@ -169,13 +174,19 @@ public final class RemoteKeys extends AccessibilityService {
         CharSequence pkg = e.getPackageName(), cls = e.getClassName();
         if (pkg == null || cls == null || !standInFor.getPackageName().contentEquals(pkg)
                 || !standInFor.getClassName().contentEquals(cls)) return;
-        if (update() != STAND_IN || SystemClock.uptimeMillis() - openedAt < REOPEN_MS) return;
-        open(STAND_IN, false);
+        if (update() != STAND_IN) return;
+        // Soon after atvOS opened (at start-up the TV's home screen can come up just after it), atvOS opens again when
+        // the time has passed, not at once, so the two can't take turns quickly.
+        handler.removeCallbacks(reopen);
+        long wait = REOPEN_MS - (SystemClock.uptimeMillis() - openedAt);
+        if (wait > 0) handler.postDelayed(reopen, wait);
+        else open(STAND_IN, false);
     }
 
     @Override
     public void onInterrupt() {
         handler.removeCallbacks(hold);
+        handler.removeCallbacks(reopen);
     }
 
     /** Returns true to take the key; Android then doesn't deliver it. Main thread. */

@@ -95,12 +95,14 @@ final class HomeView extends View {
         void requestDefaultHome();
         /** Disables the locked home apps of this TV over self-adb. The user accepts the prompt on the screen. */
         void selfSetupHome(SelfSetup progress);
-        /** Enables the home apps that self-adb disabled, or turns off Remote Buttons where it stands in for them. */
-        void restoreTvHome(SelfSetup progress);
+        /**
+         * Gives the Home button back to the TV's home app: enables the home apps that self-adb disabled. Remote Buttons
+         * turns off too, unless {@code keepRemoteButtons} (it then stands in for the TV's home app).
+         */
+        void restoreTvHome(SelfSetup progress, boolean keepRemoteButtons);
         /** Opens Accessibility, where the user turns on Remote Buttons. Setup continues when it is on. */
         void openRemoteButtons();
-        /** Settings > General > Remote Buttons: turns the service on (self-adb, else Accessibility) or off. */
-        void setRemoteButtons(boolean on, SelfSetup progress);
+        void turnOffRemoteButtons();
         /** The setup steps closed. The first time, this ends the first-launch setup. */
         void setupDone();
         /** Opens the About screen of Settings. */
@@ -516,7 +518,6 @@ final class HomeView extends View {
             @Override public void openDeveloperOptions() { HomeView.this.host.openDeveloperOptions(); }
             @Override public void setUpHome(SelfSetup progress) { HomeView.this.host.selfSetupHome(progress); }
             @Override public void openRemoteButtons() { HomeView.this.host.openRemoteButtons(); }
-            @Override public void turnOnRemoteButtons(SelfSetup progress) { HomeView.this.host.setRemoteButtons(true, progress); }
             @Override public void requestDefaultHome() { HomeView.this.host.requestDefaultHome(); }
             @Override public void chooseAccount() { HomeView.this.host.chooseAccount(); }
             @Override public void close() { closeSetup(); }
@@ -530,9 +531,11 @@ final class HomeView extends View {
         });
         settings = new SettingsScreen(context, new SettingsScreen.Host() {
             @Override public Controls.Setup setupState() { return HomeView.this.host.setupState(); }
-            @Override public void setUpHome() { closeSettings(); openSetupSteps(); }
-            @Override public void restoreHome(SelfSetup progress) { HomeView.this.host.restoreTvHome(progress); }
-            @Override public void setRemoteButtons(boolean on, SelfSetup progress) { HomeView.this.host.setRemoteButtons(on, progress); }
+            @Override public void setUpHome(int way) { closeSettings(); openSetupSteps(way); }
+            @Override public void restoreHome(SelfSetup progress, boolean keepRemoteButtons) {
+                HomeView.this.host.restoreTvHome(progress, keepRemoteButtons);
+            }
+            @Override public void turnOffRemoteButtons() { HomeView.this.host.turnOffRemoteButtons(); }
             @Override public void releasePower() { HomeView.this.host.releasePower(); }
             @Override public String account() { return HomeView.this.host.account(); }
             @Override public void chooseAccount() { HomeView.this.host.chooseAccount(); }
@@ -1167,7 +1170,7 @@ final class HomeView extends View {
             if (editing) {
                 finishEditing();
             } else if (folderFocus < 0) {
-                startRename();
+                if (!renaming) startRename();
             } else {
                 Apps.Entry app = openFolder.folder.apps.get(folderFocus);
                 host.launch(app, tileRect(app, -folderScroll));
@@ -1763,11 +1766,11 @@ final class HomeView extends View {
         kick();
     }
 
-    /** Opens the setup steps that this TV needs to give the Home button to atvOS. */
-    private void openSetupSteps() {
+    /** Opens the setup steps for {@code way}: a {@link SetupFlow} WAY constant. */
+    private void openSetupSteps(int way) {
         closeAll();
         setupOpen = true;
-        setupFlow.openSteps();
+        setupFlow.openSteps(way);
         kick();
         a11y.sync();
     }
@@ -2600,9 +2603,7 @@ final class HomeView extends View {
     private void drawFolderName(Canvas c, int alpha) {
         float f = folderNameFocus, grow = 1f + 0.08f * f, size = titleText.getTextSize();
         titleText.setTextSize(38f * grow);
-        // A long name is cut to the width of the folder: at its end, or at its start while the user types it.
-        String shown = TextUtils.ellipsize(folderName, titleText, FOLDER_W - 160f,
-                renaming ? TextUtils.TruncateAt.START : TextUtils.TruncateAt.END).toString();
+        String shown = shownFolderName();
         float tw = titleText.measureText(shown), w = Math.max(tw, 40f) + 72f * grow, h = FOLDER_NAME_H * grow;
         r.set(W / 2f - w / 2f, FOLDER_NAME_Y - h / 2f, W / 2f + w / 2f, FOLDER_NAME_Y + h / 2f);
         if (f < 0.99f) drawGlass(c, r, h / 2f, 0f, 0x59000000, Math.round(alpha * (1f - f)));
@@ -2621,6 +2622,15 @@ final class HomeView extends View {
             c.drawRect(x, FOLDER_NAME_Y - 20f * grow, x + 3f, FOLDER_NAME_Y + 20f * grow, fill);
         }
         titleText.setTextSize(size);
+    }
+
+    /**
+     * Returns the folder name as it shows: cut to the width of the folder, at its end, or at its start while the user
+     * types it. It uses the size that {@link #titleText} has now.
+     */
+    private String shownFolderName() {
+        return TextUtils.ellipsize(folderName, titleText, FOLDER_W - 160f,
+                renaming ? TextUtils.TruncateAt.START : TextUtils.TruncateAt.END).toString();
     }
 
     /** Draws "Press up for full screen" above the dock, in the tint from the picture behind. */
@@ -3214,7 +3224,11 @@ final class HomeView extends View {
                 return;
             }
             if (openFolder != null) {
-                float w = titleText.measureText(folderName) + 72f;
+                // The width of the pill as drawn (38 px text, cut to fit), without the focus growth.
+                float size = titleText.getTextSize();
+                titleText.setTextSize(38f);
+                float w = Math.max(titleText.measureText(shownFolderName()), 40f) + 72f;
+                titleText.setTextSize(size);
                 out.add(new A11y.Item(A11Y_FOLDER, folderName, c.getString(R.string.a11y_folder), c.getString(R.string.a11y_rename_hint),
                         new RectF(W / 2f - w / 2f, FOLDER_NAME_Y - FOLDER_NAME_H / 2f, W / 2f + w / 2f, FOLDER_NAME_Y + FOLDER_NAME_H / 2f),
                         folderFocus < 0));

@@ -26,14 +26,13 @@ import java.util.List;
  * screen to find and a button that opens it. Steps that are complete are skipped. When the user comes back from
  * Settings, the next step shows.
  * <pre>
- *   Welcome → How → Developer options → USB debugging → Allow → Profile picture → Done
- *                 ↘ Remote Buttons (Accessibility) ↗
+ *   Welcome → Developer options → USB debugging → Allow → Remote Buttons → Profile picture → Done
+ *                      ↘ Not Now, or the TV prompt declined: Accessibility ↗
  * </pre>
- * When atvOS has the Home button but Remote Buttons is off (after Clear data, or an update from a version without
- * it), the first-launch setup has one Remote Buttons step for it.
- * USB debugging comes first: it turns the TV's home app off. Accessibility needs no developer settings, but the TV's
- * home screen can show for a moment before atvOS opens over it.
- * From Settings, it runs only the steps that the TV needs ({@link #openSteps}).
+ * USB debugging is the way to take over the Home button: it turns the TV's home app off. If the user doesn't want it,
+ * Accessibility is offered: Remote Buttons then opens atvOS in place of the TV's home screen. Remote Buttons (holding
+ * Home) is optional with USB debugging. The user turns the service on in Accessibility, after the disclosure here.
+ * From Settings, it runs only the steps for one way ({@link #openSteps}).
  */
 final class SetupFlow {
 
@@ -46,8 +45,6 @@ final class SetupFlow {
         void setUpHome(HomeView.SelfSetup progress);
         /** Opens Accessibility, where the user turns on Remote Buttons. */
         void openRemoteButtons();
-        /** Turns on Remote Buttons over self-adb if USB debugging is on, else opens Accessibility for it. */
-        void turnOnRemoteButtons(HomeView.SelfSetup progress);
         void requestDefaultHome();
         void chooseAccount();
         void close();
@@ -57,8 +54,13 @@ final class SetupFlow {
     }
 
     // The steps. The numbers give their order.
-    private static final int WELCOME = 0, HOW = 1, DEVELOPER = 2, DEBUGGING = 3, ALLOW = 4, BUTTONS = 5, PICK_HOME = 6,
-            ACCOUNT = 7, DONE = 8;
+    private static final int WELCOME = 0, DEVELOPER = 1, DEBUGGING = 2, ALLOW = 3, ACCESSIBILITY = 4, PICK_HOME = 5,
+            BUTTONS = 6, ACCOUNT = 7, DONE = 8;
+    /**
+     * The ways that {@link #openSteps} runs: the Home button (USB debugging, or what the TV allows), the Home button
+     * with USB debugging (also in place of Accessibility), the Home button with Accessibility, and Remote Buttons only.
+     */
+    static final int WAY_HOME = 0, WAY_DEBUGGING = 1, WAY_ACCESSIBILITY = 2, WAY_BUTTONS = 3;
     private static final int ART_NONE = -1, ART_LOGO = 10, ART_AVATAR = 11, ART_CHECK = 12;
 
     private static final float W = HomeView.W, CARD_W = 1080f, PAD = 56f, CARD_R = 56f;
@@ -89,7 +91,9 @@ final class SetupFlow {
     private final List<Integer> dots = new ArrayList<>();
     private final List<Integer> journey = new ArrayList<>(); // the steps of this run, one dot each
     private boolean busy;      // the on-TV setup runs
-    private boolean accessibility; // How: the user chose Accessibility, not USB debugging
+    private boolean accessibility; // the user didn't want USB debugging: Accessibility instead
+    private boolean wantDebugging; // from Settings: USB debugging, also where Remote Buttons stands in now
+    private boolean offerButtons;  // Remote Buttons is a step of this run
     private int sel, dot = -1;
     private final float[] focus = new float[6]; // the focus highlight of each button
     private float fade = 1f;
@@ -129,25 +133,28 @@ final class SetupFlow {
     void open() {
         origin = WELCOME;
         busy = false;
-        accessibility = false;
+        accessibility = wantDebugging = false;
+        offerButtons = true;
         journey.clear();
         setup = host.state();
         go(origin);
     }
 
-    /** Opens only the steps that the TV needs to give the Home button to atvOS. Back on the first step closes it. */
-    void openSteps() {
+    /** Opens only the steps of {@code way}, one of the WAY constants. Back on the first step closes it. */
+    void openSteps(int way) {
         busy = false;
-        accessibility = false;
+        accessibility = way == WAY_ACCESSIBILITY;
+        wantDebugging = way == WAY_DEBUGGING;
+        offerButtons = way == WAY_BUTTONS;
         setup = host.state();
-        startJourney();
-        origin = DONE;
+        origin = DONE; // not Welcome: no profile picture step
         for (int s : plan()) {
             if (s < ACCOUNT) {
                 origin = s;
                 break;
             }
         }
+        startJourney();
         go(origin);
     }
 
@@ -156,14 +163,20 @@ final class SetupFlow {
         setup = host.state();
         if (busy) return;
         boolean done = switch (step) {
-            case DEVELOPER -> setup.developerOn || setup.homeActive;
-            case DEBUGGING -> setup.adbOn || setup.homeActive;
-            case HOW, ALLOW, PICK_HOME -> setup.homeActive;
+            case DEVELOPER -> setup.developerOn || taken();
+            case DEBUGGING -> setup.adbOn || taken();
+            case ALLOW -> taken();
+            case ACCESSIBILITY, PICK_HOME -> setup.homeActive;
             case BUTTONS -> setup.keysOn;
             case ACCOUNT -> host.hasAccount();
             default -> false;
         };
         if (done) next(); else layOut();
+    }
+
+    /** Returns true if atvOS has the Home button in the way of this run. */
+    private boolean taken() {
+        return setup.homeActive && !(wantDebugging && setup.standIn);
     }
 
     /** Returns true for a setup step (not Welcome or Done). */
@@ -182,24 +195,20 @@ final class SetupFlow {
     private List<Integer> plan() {
         List<Integer> p = new ArrayList<>();
         Controls.Setup s = setup;
-        if (!s.homeActive) {
-            if (!s.lockedHomes.isEmpty()) {
-                // The home app of the TV keeps the Home button until adb disables it, or Remote Buttons stands in.
-                p.add(HOW);
-                if (accessibility) {
-                    p.add(BUTTONS);
-                } else {
-                    if (!s.developerOn) p.add(DEVELOPER);
-                    if (!s.adbOn) p.add(DEBUGGING);
-                    p.add(ALLOW);
-                }
-            } else if (s.canPickHome) {
-                p.add(PICK_HOME);
+        if (!taken() && (!s.lockedHomes.isEmpty() || s.standIn)) {
+            // The home app of the TV keeps the Home button until adb disables it, or Remote Buttons stands in for it.
+            if (accessibility) {
+                p.add(ACCESSIBILITY);
+            } else {
+                if (!s.developerOn) p.add(DEVELOPER);
+                if (!s.adbOn) p.add(DEBUGGING);
+                p.add(ALLOW);
             }
-        } else if (!s.keysOn && origin == WELCOME) {
-            p.add(BUTTONS); // only the Remote Buttons, for holding Home
+        } else if (!s.homeActive && s.canPickHome) {
+            p.add(PICK_HOME);
         }
-        if (!host.hasAccount()) p.add(ACCOUNT);
+        if (offerButtons && !s.keysOn && !accessibility) p.add(BUTTONS); // holding Home, an option
+        if (origin == WELCOME && !host.hasAccount()) p.add(ACCOUNT);
         p.add(DONE);
         return p;
     }
@@ -217,7 +226,10 @@ final class SetupFlow {
 
     private void back() {
         if (busy) return;
-        if (step == origin || step == DONE && origin != WELCOME) {
+        if (step == ACCESSIBILITY && origin != ACCESSIBILITY) { // back to USB debugging
+            accessibility = false;
+            startJourney();
+        } else if (step == origin || step == DONE && origin != WELCOME) {
             host.close();
             return;
         }
@@ -282,9 +294,16 @@ final class SetupFlow {
 
     // Steps
 
-    /** How: the user chose USB debugging or Accessibility. The dots show the steps of that way. */
-    private void choose(boolean useAccessibility) {
-        accessibility = useAccessibility;
+    /**
+     * Not Now on a USB debugging step, or the TV prompt declined: Accessibility instead. From Settings, where Remote
+     * Buttons already stands in, it closes.
+     */
+    private void declineDebugging() {
+        if (setup.standIn) {
+            host.close();
+            return;
+        }
+        accessibility = true;
         startJourney();
         next();
     }
@@ -310,34 +329,11 @@ final class SetupFlow {
                 setup = host.state();
                 if (ok) {
                     next();
+                } else if (messageRes == R.string.setup_tv_denied && !setup.standIn) {
+                    declineDebugging(); // the user declined the TV prompt
                 } else {
                     showNote(messageRes, RED);
                 }
-            }
-        });
-    }
-
-    /** Turns on Remote Buttons for holding Home: self-adb, else Accessibility. The service start moves setup on. */
-    private void runButtons() {
-        busy = true;
-        showNote(R.string.setup_tv_connecting, TEAL);
-        host.turnOnRemoteButtons(new HomeView.SelfSetup() {
-            @Override
-            public void status(int messageRes) {
-                showNote(messageRes, TEAL);
-            }
-
-            @Override
-            public void prompt(String fingerprint) {
-                art.fingerprint(fingerprint);
-            }
-
-            @Override
-            public void done(boolean ok, int messageRes) {
-                busy = false;
-                setup = host.state();
-                if (setup.keysOn) next();
-                else showNote(messageRes != 0 ? messageRes : R.string.setup_tv_working, ok ? TEAL : RED);
             }
         });
     }
@@ -360,49 +356,19 @@ final class SetupFlow {
                 add(R.string.setup_get_started, this::next);
                 add(R.string.setup_not_now, host::close);
             }
-            case HOW -> {
-                title = context.getString(R.string.setup_how_title);
-                bodyRes = R.string.setup_how_body;
-                artKind = ART_LOGO;
-                add(R.string.setup_use_debugging, () -> choose(false)); // the first choice: it turns the TV's home app off
-                add(R.string.setup_use_accessibility, () -> choose(true));
-                add(R.string.setup_back, this::back);
-            }
-            case BUTTONS -> {
-                title = context.getString(R.string.setup_buttons_title);
-                // The disclosure before the user turns the service on.
-                if (!setup.homeActive) { // the Accessibility way to get the Home button
-                    bodyRes = R.string.setup_buttons_body;
-                    artKind = SettingsArt.ACCESSIBILITY;
-                    add(R.string.setup_open_accessibility, host::openRemoteButtons);
-                    add(R.string.setup_back, this::back);
-                } else { // atvOS has the Home button: only holding Home and the Settings button
-                    bodyRes = R.string.setup_keys_body;
-                    artKind = setup.adbOn ? ART_LOGO : SettingsArt.ACCESSIBILITY;
-                    if (!busy) {
-                        add(R.string.setup_turn_on, this::runButtons);
-                        add(R.string.setup_not_now, this::next);
-                    }
-                }
-                // On in Accessibility, but not started: some TVs (TCL) start only the services that they allow.
-                if (setup.keysStuck && note == null) {
-                    note = context.getString(R.string.remote_buttons_stuck);
-                    noteColor = RED;
-                }
-            }
             case DEVELOPER -> {
                 title = context.getString(R.string.setup_developer_title);
                 bodyRes = R.string.setup_developer_body;
                 artKind = SettingsArt.ABOUT;
                 add(R.string.setup_open_about, host::openAbout);
-                add(R.string.setup_back, this::back);
+                add(R.string.setup_not_now, this::declineDebugging);
             }
             case DEBUGGING -> {
                 title = context.getString(R.string.setup_debugging_title);
                 bodyRes = R.string.setup_debugging_body;
                 artKind = SettingsArt.DEVELOPER;
                 add(R.string.setup_open_developer, host::openDeveloperOptions);
-                add(R.string.setup_back, this::back);
+                add(R.string.setup_not_now, this::declineDebugging);
             }
             case ALLOW -> {
                 title = context.getString(R.string.setup_allow_title);
@@ -410,7 +376,21 @@ final class SetupFlow {
                 artKind = SettingsArt.PROMPT;
                 if (!busy) {
                     add(note != null ? R.string.setup_try_again : R.string.setup_set_up, this::runSetUp);
-                    add(R.string.setup_back, this::back);
+                    add(R.string.setup_not_now, this::declineDebugging);
+                }
+            }
+            case ACCESSIBILITY, BUTTONS -> {
+                // The disclosure for the service, before the user turns it on in Accessibility.
+                boolean home = step == ACCESSIBILITY;
+                title = context.getString(home ? R.string.setup_accessibility_title : R.string.setup_buttons_title);
+                bodyRes = home ? R.string.setup_accessibility_body : R.string.setup_buttons_body;
+                artKind = SettingsArt.ACCESSIBILITY;
+                add(home ? R.string.setup_open_accessibility : R.string.setup_turn_on, host::openRemoteButtons);
+                add(R.string.setup_not_now, step == origin ? host::close : this::next); // from Settings: closes
+                // On in Accessibility, but not started: TCL TVs start it only after setup with USB debugging.
+                if (setup.keysStuck && note == null) {
+                    note = context.getString(R.string.remote_buttons_stuck);
+                    noteColor = RED;
                 }
             }
             case PICK_HOME -> {

@@ -30,9 +30,10 @@ import java.util.Locale;
  * atvOS logo is at the left, with a description of the focused row. The focused row is white. A row that opens a page
  * has a chevron.
  * <pre>
- *   Home Screen ›            (only when another app has the Home button)
- *   General ›                About › (Model, atvOS Launcher, Android TV) · Appearance › · Remote Buttons ·
- *                            Privacy · Acknowledgements · DATE &amp; TIME: Time Format
+ *   Home Screen ›            HOME BUTTON: USB Debugging · Accessibility (or Make It Your Home Screen) ·
+ *                            Remote Buttons
+ *   General ›                About › (Model, atvOS Launcher, Android TV) · Appearance › · Privacy ·
+ *                            Acknowledgements · DATE &amp; TIME: Time Format
  *   Profiles and Accounts ›  Account · Profile Picture ›
  *   Uninstall ›              Restore Default Launcher · Remove Power Control
  *   Support ›                Website · Open Play Store › · App Info › · Donate ›
@@ -43,11 +44,11 @@ final class SettingsScreen {
 
     interface Host {
         Controls.Setup setupState();
-        /** Starts the setup steps that give the Home button to atvOS. This screen closes first. */
-        void setUpHome();
-        void restoreHome(HomeView.SelfSetup progress);
-        /** Turns Remote Buttons on (self-adb, else the user does it in Accessibility) or off. */
-        void setRemoteButtons(boolean on, HomeView.SelfSetup progress);
+        /** Starts the setup steps of {@code way} (a {@link SetupFlow} WAY constant). This screen closes first. */
+        void setUpHome(int way);
+        /** Gives the Home button back to the TV's home app; Remote Buttons stays on if {@code keepRemoteButtons}. */
+        void restoreHome(HomeView.SelfSetup progress, boolean keepRemoteButtons);
+        void turnOffRemoteButtons();
         void releasePower();
         /** Returns the Google account of the profile picture, or null. */
         String account();
@@ -75,7 +76,7 @@ final class SettingsScreen {
     static final int STORE = 1, APP_INFO = 2;
 
     private static final int MAIN = 0, GENERAL = 1, ABOUT = 2, APPEARANCE = 3, PROFILES = 4, PICTURE = 5,
-            UNINSTALL = 6, SUPPORT = 7;
+            UNINSTALL = 6, SUPPORT = 7, HOME_SCREEN = 8;
     /**
      * Row kinds: NAV opens a page (with a chevron). ACTION does an action on the page (with its value). CHOICE is one
      * choice of a page (with a tick when selected). INFO is a fact (no pill). HEADER is the title of the section below
@@ -121,7 +122,7 @@ final class SettingsScreen {
     private final ArrayDeque<int[]> under = new ArrayDeque<>(); // the pages that Back goes to: {page, focused row}
     private int page = MAIN, sel = -1;  // sel: the focused row, or -1 on a page of facts
     private float scroll, fade = 1f;
-    private boolean busy;               // Restore or Remote Buttons runs over self-adb
+    private boolean busy;               // Restore runs over self-adb
     private String note;                // a status message below the description of the focused row
     private int noteRow = -1, notePage = -1;
     private StaticLayout about;         // the description of the focused row, laid out when it changes
@@ -191,11 +192,6 @@ final class SettingsScreen {
                 rows.add(nav(R.string.settings_about, null, null, () -> go(ABOUT)));
                 rows.add(nav(R.string.settings_appearance, s(host.light() ? R.string.settings_light : R.string.settings_dark),
                         s(R.string.settings_appearance_about), () -> go(APPEARANCE)));
-                Controls.Setup st = host.setupState();
-                boolean on = st.keysOn;
-                rows.add(action(R.string.settings_remote_buttons, s(on ? R.string.on : R.string.off),
-                        s(st.standIn ? R.string.settings_remote_buttons_stand_in : R.string.settings_remote_buttons_about),
-                        () -> remoteButtons(!on)));
                 // Google Play asks for a privacy policy link or text in the app, as well as in Play Console.
                 rows.add(action(R.string.settings_privacy, s(R.string.settings_privacy_address), s(R.string.settings_privacy_about), null));
                 rows.add(action(R.string.settings_acknowledgements, null, s(R.string.settings_acknowledgements_about), null));
@@ -240,7 +236,7 @@ final class SettingsScreen {
                 boolean restore = !st.disabledHomes.isEmpty() || st.standIn || busy;
                 rows.add(new Row(ACTION, s(R.string.settings_restore), null,
                         s(restore ? R.string.settings_restore_about : R.string.settings_restore_not_needed),
-                        restore ? this::restore : null, restore, false));
+                        restore ? () -> restore(false) : null, restore, false));
                 rows.add(new Row(ACTION, s(R.string.settings_release_power), null,
                         s(st.holdsPower ? R.string.settings_release_power_about : R.string.power_not_held),
                         st.holdsPower ? host::releasePower : null, st.holdsPower, false));
@@ -263,13 +259,36 @@ final class SettingsScreen {
                 rows.add(nav(R.string.settings_donate, ready ? price : null, words,
                         ready || d.state() == Donation.State.THANKS ? d::give : null));
             }
+            case HOME_SCREEN -> {
+                title = s(R.string.settings_home);
+                Controls.Setup st = host.setupState();
+                if (twoWays(st)) {
+                    // How atvOS gets the Home button. USB debugging is the first choice.
+                    boolean usb = usb(st), a11y = st.standIn;
+                    rows.add(new Row(HEADER, s(R.string.settings_home_button).toUpperCase(Locale.getDefault()), null, null, null, true, false));
+                    rows.add(choice(s(R.string.settings_home_debugging), usb, s(R.string.settings_home_debugging_about),
+                            usb ? null : () -> host.setUpHome(SetupFlow.WAY_DEBUGGING)));
+                    rows.add(choice(s(R.string.settings_home_accessibility), a11y, s(R.string.settings_home_accessibility_about),
+                            a11y ? null : () -> useAccessibility(usb)));
+                } else if (!st.homeActive) {
+                    String home = st.currentHome != null ? st.currentHome : s(R.string.settings_home_other);
+                    rows.add(action(R.string.setup_pick_title, null, context.getString(R.string.settings_home_about, home),
+                            () -> host.setUpHome(SetupFlow.WAY_HOME)));
+                }
+                if (st.homeActive && !st.standIn) { // holding Home: an option (Accessibility needs it on)
+                    boolean on = st.keysOn;
+                    rows.add(action(R.string.settings_remote_buttons, s(on ? R.string.on : R.string.off),
+                            s(R.string.settings_remote_buttons_about),
+                            on ? host::turnOffRemoteButtons : () -> host.setUpHome(SetupFlow.WAY_BUTTONS)));
+                }
+            }
             default -> {
                 title = s(R.string.settings_title);
                 Controls.Setup st = host.setupState();
-                if (!st.homeActive) { // only when another app has the Home button
-                    String home = st.currentHome != null ? st.currentHome : s(R.string.settings_home_other);
-                    rows.add(nav(R.string.settings_home, home, context.getString(R.string.settings_home_about, home), host::setUpHome));
-                }
+                String way = st.standIn ? s(R.string.settings_home_accessibility)
+                        : st.homeActive ? (usb(st) ? s(R.string.settings_home_debugging) : null)
+                        : st.currentHome != null ? st.currentHome : s(R.string.settings_home_other);
+                rows.add(nav(R.string.settings_home, way, null, () -> go(HOME_SCREEN)));
                 rows.add(nav(R.string.settings_general, null, null, () -> go(GENERAL)));
                 rows.add(nav(R.string.settings_profiles, null, null, () -> go(PROFILES)));
                 rows.add(nav(R.string.settings_uninstall, null, null, () -> go(UNINSTALL)));
@@ -388,20 +407,43 @@ final class SettingsScreen {
         return -1;
     }
 
-    private void remoteButtons(boolean on) {
-        busy = true;
-        if (on) noteHere(context.getString(R.string.setup_tv_connecting));
-        host.setRemoteButtons(on, progress());
+    /** Returns true if this TV's home app keeps the Home button, so atvOS gets it with USB debugging or Accessibility. */
+    private static boolean twoWays(Controls.Setup st) {
+        return !st.lockedHomes.isEmpty() || !st.disabledHomes.isEmpty() || st.standIn;
     }
 
-    private void restore() {
+    /** Returns true if atvOS has the Home button because self-adb turned the TV's home app off. */
+    private static boolean usb(Controls.Setup st) {
+        return !st.disabledHomes.isEmpty() && st.homeActive && !st.standIn;
+    }
+
+    /**
+     * Home Screen > Accessibility. From USB debugging: self-adb gives the Home button back to the TV's home app, and
+     * Remote Buttons stays on and stands in for it. If Remote Buttons is off, setup shows how to turn it on.
+     */
+    private void useAccessibility(boolean fromUsb) {
+        if (!fromUsb) {
+            host.setUpHome(SetupFlow.WAY_ACCESSIBILITY);
+            return;
+        }
         busy = true;
         noteHere(context.getString(R.string.setup_tv_connecting));
-        host.restoreHome(progress());
+        host.restoreHome(progress(() -> {
+            if (!host.setupState().keysOn) host.setUpHome(SetupFlow.WAY_ACCESSIBILITY);
+        }), true);
     }
 
-    /** Returns a listener that shows the self-adb progress below the description of the focused row. */
-    private HomeView.SelfSetup progress() {
+    private void restore(boolean keepRemoteButtons) {
+        busy = true;
+        noteHere(context.getString(R.string.setup_tv_connecting));
+        host.restoreHome(progress(null), keepRemoteButtons);
+    }
+
+    /**
+     * Returns a listener that shows the self-adb progress below the description of the focused row. {@code then} runs
+     * after a success, if not null.
+     */
+    private HomeView.SelfSetup progress(Runnable then) {
         int row = sel, on = page;
         return new HomeView.SelfSetup() {
             @Override
@@ -424,6 +466,7 @@ final class SettingsScreen {
                     note = null;
                 }
                 host.changed();
+                if (ok && then != null) then.run();
             }
         };
     }

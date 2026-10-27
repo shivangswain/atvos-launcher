@@ -115,6 +115,8 @@ final class Profile {
     void setPicture(String picture, Consumer<Bitmap> onAvatar) {
         prefs.edit().putString(KEY_PICTURE, picture).apply();
         load(onAvatar);
+        // Google Photo with no photo yet: gets it now, with the consent screen if Google needs it.
+        if (PHOTO.equals(picture) && !photo.isFile()) refresh(onAvatar, true);
     }
 
     /**
@@ -129,7 +131,8 @@ final class Profile {
     private void refresh(Consumer<Bitmap> onAvatar, boolean ask) {
         String name = prefs.getString(KEY_ACCOUNT, null);
         long now = System.currentTimeMillis();
-        if (name == null || now - prefs.getLong(KEY_PHOTO_TRIED, 0) < REFRESH_MS) return;
+        // Once a day in the background. When the user asks ({@code ask}), now.
+        if (name == null || !ask && now - prefs.getLong(KEY_PHOTO_TRIED, 0) < REFRESH_MS) return;
         // Tries only when the network is connected.
         if (!online()) return;
         prefs.edit().putLong(KEY_PHOTO_TRIED, now).apply();

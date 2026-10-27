@@ -580,21 +580,33 @@ public final class HomeActivity extends Activity implements HomeView.Host {
 
     @Override
     public void selfSetupHome(HomeView.SelfSetup progress) {
-        runSelfAdb(new ArrayList<>(controls.setup().lockedHomes), SelfAdb.Job.HOME, SelfAdb.Job.KEYS_ON, progress,
-                controls::rememberDisabled, SelfAdb.Result.OK.messageRes);
+        runSelfAdb(new ArrayList<>(controls.setup().lockedHomes), SelfAdb.Job.HOME, progress, controls::rememberDisabled,
+                SelfAdb.Result.OK.messageRes);
     }
 
+    /**
+     * Gives the Home button back to the TV's home app. {@code keepRemoteButtons}: Remote Buttons stays on, so that it
+     * stands in for the TV's home app (Settings > Home Screen > Accessibility); else it turns off too (Restore Default
+     * Launcher).
+     */
     @Override
-    public void restoreTvHome(HomeView.SelfSetup progress) {
+    public void restoreTvHome(HomeView.SelfSetup progress, boolean keepRemoteButtons) {
         Controls.Setup st = controls.setup();
-        if (st.disabledHomes.isEmpty()) {
-            // Remote Buttons gave atvOS the Home button: turning it off gives it back. No adb is needed.
-            boolean off = RemoteKeys.turnOff();
+        if (st.disabledHomes.isEmpty()) { // Remote Buttons gave atvOS the Home button: no adb is needed
+            boolean off = !keepRemoteButtons && RemoteKeys.turnOff();
             progress.done(off, off ? R.string.setup_tv_restored : R.string.settings_restore_not_needed);
             return;
         }
-        runSelfAdb(new ArrayList<>(st.disabledHomes), SelfAdb.Job.RESTORE, SelfAdb.Job.KEYS_OFF, progress,
-                controls::forgetDisabled, R.string.setup_tv_restored);
+        runSelfAdb(new ArrayList<>(st.disabledHomes), SelfAdb.Job.RESTORE, new HomeView.SelfSetup() {
+            @Override public void status(int messageRes) { progress.status(messageRes); }
+            @Override public void prompt(String fingerprint) { progress.prompt(fingerprint); }
+
+            @Override
+            public void done(boolean ok, int messageRes) {
+                if (ok && !keepRemoteButtons) RemoteKeys.turnOff(); // else it would stand in for the TV's home app
+                progress.done(ok, messageRes);
+            }
+        }, controls::forgetDisabled, keepRemoteButtons ? R.string.settings_home_switched : R.string.setup_tv_restored);
     }
 
     @Override
@@ -604,32 +616,17 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         controls.openAccessibility();
     }
 
-    /**
-     * Settings > General > Remote Buttons. Off: Android turns the service off. On: self-adb turns it on if USB debugging
-     * is on, else Accessibility opens for the user to turn it on.
-     */
     @Override
-    public void setRemoteButtons(boolean on, HomeView.SelfSetup progress) {
-        if (!on) {
-            RemoteKeys.turnOff();
-            progress.done(true, 0);
-            return;
-        }
-        if (!controls.adbEnabled()) {
-            openRemoteButtons();
-            progress.done(true, R.string.remote_buttons_turn_on); // an instruction, not an error
-            return;
-        }
-        runSelfAdb(new ArrayList<>(), null, SelfAdb.Job.KEYS_ON, progress, changed -> { }, 0);
+    public void turnOffRemoteButtons() {
+        RemoteKeys.turnOff();
     }
 
     /**
-     * Disables or enables the home apps of the TV over self-adb, then turns the remote buttons service on or off
-     * ({@code then}). {@code record} receives the changed packages, also when a later package fails. {@code okMessage}
-     * shows when all packages succeed. It runs on its own thread, not {@link #io}, because it can wait more than one
-     * minute for the prompt.
+     * Disables or enables the home apps of the TV over self-adb. {@code record} receives the changed packages, also
+     * when a later package fails. {@code okMessage} shows when all packages succeed. It runs on its own thread, not
+     * {@link #io}, because it can wait more than one minute for the prompt.
      */
-    private void runSelfAdb(List<String> packages, SelfAdb.Job job, SelfAdb.Job then, HomeView.SelfSetup progress,
+    private void runSelfAdb(List<String> packages, SelfAdb.Job job, HomeView.SelfSetup progress,
                             java.util.function.Consumer<List<String>> record, int okMessage) {
         if (!controls.adbEnabled()) {
             // The app cannot turn on debugging. This opens the screen where the user turns it on.
@@ -645,7 +642,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         adbApproving = false;
         new Thread(() -> {
             List<String> changed = new ArrayList<>();
-            SelfAdb.Result r = adb.run(packages, job, getPackageName(), then, step -> runOnUiThread(() -> {
+            SelfAdb.Result r = adb.run(packages, job, getPackageName(), step -> runOnUiThread(() -> {
                 if (selfAdb != adb || isDestroyed()) return; // a newer run replaced it, or the activity closed
                 adbApproving = step == SelfAdb.Listener.APPROVE;
                 if (adbApproving) progress.prompt(adb.fingerprint());
@@ -653,8 +650,6 @@ public final class HomeActivity extends Activity implements HomeView.Host {
             }), changed);
             if (!changed.isEmpty()) record.accept(changed);
             boolean ok = r == SelfAdb.Result.OK;
-            // Restore: Android turns the service off too, in case adb couldn't.
-            if (ok && then == SelfAdb.Job.KEYS_OFF) runOnUiThread(RemoteKeys::turnOff);
             int message = ok ? okMessage : r.messageRes;
             runOnUiThread(() -> {
                 if (selfAdb != adb || isDestroyed()) return;

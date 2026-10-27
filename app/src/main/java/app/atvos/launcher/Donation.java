@@ -116,6 +116,7 @@ final class Donation {
                         if (client != connecting) return;
                         client = null; // connects again when Settings opens again
                         product = null;
+                        consuming = 0; // their answers are ignored: the next start checks again
                         if (state != State.THANKS) set(State.UNAVAILABLE);
                     });
                 }
@@ -131,6 +132,7 @@ final class Donation {
     void end() {
         listener = null;
         settling = false;
+        consuming = 0; // answers for this connection are ignored; the next settle() checks again
         if (client != null) client.endConnection();
         client = null;
         product = null;
@@ -216,10 +218,11 @@ final class Donation {
             BillingClient asked = client;
             client.consumeAsync(ConsumeParams.newBuilder().setPurchaseToken(p.getPurchaseToken()).build(),
                     (done, token) -> main.post(() -> {
+                        if (client != asked) return; // the connection ended or was replaced
                         consuming--;
                         if (done.getResponseCode() == BillingClient.BillingResponseCode.OK) set(State.THANKS);
                         // The next settle() checks again: it ends when Google Play has nothing open.
-                        if (settling && client == asked && consuming == 0) end();
+                        if (settling && consuming == 0) end();
                     }));
         }
     }
