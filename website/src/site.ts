@@ -9,7 +9,9 @@ export const site = {
   issues: "https://github.com/shivangswain/atvos-launcher/issues",
   play: "https://play.google.com/store/apps/details?id=app.atvos.launcher",
   paypal: "https://www.paypal.com/paypalme/shivangswain",
-  // true when atvOS Launcher is on Google Play. While it is false, the pages say "Coming soon to Google Play".
+  // The internal test on Google Play, for early access before the release.
+  earlyAccess: "https://play.google.com/apps/internaltest/4700671716853603598",
+  // true when atvOS Launcher is on Google Play. While it is false, the pages link to early access instead.
   onPlay: false,
   policyDate: "27 October 2026",
 };

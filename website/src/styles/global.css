@@ -238,12 +238,6 @@ a:hover {
   color: #fff !important;
 }
 
-.pill.soon {
-  background: var(--glass);
-  box-shadow: inset 0 0 0 1px var(--rim);
-  color: var(--text);
-}
-
 .more {
   display: inline-block;
   font-size: 1.0625rem;
@@ -595,6 +589,18 @@ a:hover {
 
 .pair .glyph {
   margin-bottom: 20px;
+}
+
+/* The cards of a pair are as tall as each other. Their links line up at the bottom, however long the text above. */
+.pair .card-box {
+  display: flex;
+  flex-direction: column;
+}
+
+.pair .card-box .more {
+  align-self: flex-start;
+  margin-top: auto;
+  padding-top: 18px;
 }
 
 /* Questions */
