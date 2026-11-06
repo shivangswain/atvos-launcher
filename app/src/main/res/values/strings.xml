@@ -85,6 +85,8 @@
     <string name="settings_home_debugging_about">atvOS turns off the TV\'s home screen.</string>
     <string name="settings_home_accessibility">Accessibility</string>
     <string name="settings_home_accessibility_about">Remote Buttons opens atvOS when you press Home.</string>
+    <!-- Remote Buttons is on, and USB debugging gives atvOS the Home button. -->
+    <string name="settings_home_accessibility_on_about">Remote Buttons is on. Select to use it for the Home button instead of USB debugging.</string>
     <string name="settings_home_switched">Done. Remote Buttons opens atvOS now.</string>
     <string name="settings_home_about">%s opens when you press Home.</string>
     <string name="settings_general">General</string>

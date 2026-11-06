@@ -263,12 +263,15 @@ final class SettingsScreen {
                 title = s(R.string.settings_home);
                 Controls.Setup st = host.setupState();
                 if (twoWays(st)) {
-                    // How atvOS gets the Home button. USB debugging is the first choice.
+                    // How atvOS gets the Home button. USB debugging is the first choice. Accessibility has a tick while
+                    // Remote Buttons runs, also when USB debugging gives atvOS the Home button: then Select moves the
+                    // Home button to Remote Buttons.
                     boolean usb = usb(st), a11y = st.standIn;
                     rows.add(new Row(HEADER, s(R.string.settings_home_button).toUpperCase(Locale.getDefault()), null, null, null, true, false));
                     rows.add(choice(s(R.string.settings_home_debugging), usb, s(R.string.settings_home_debugging_about),
                             usb ? null : () -> host.setUpHome(SetupFlow.WAY_DEBUGGING)));
-                    rows.add(choice(s(R.string.settings_home_accessibility), a11y, s(R.string.settings_home_accessibility_about),
+                    rows.add(choice(s(R.string.settings_home_accessibility), a11y || st.keysOn,
+                            s(usb && st.keysOn ? R.string.settings_home_accessibility_on_about : R.string.settings_home_accessibility_about),
                             a11y ? null : () -> useAccessibility(usb)));
                 } else if (!st.homeActive) {
                     String home = st.currentHome != null ? st.currentHome : s(R.string.settings_home_other);
@@ -284,11 +287,11 @@ final class SettingsScreen {
             }
             default -> {
                 title = s(R.string.settings_title);
+                // The app that the Home button opens. The page shows how atvOS gets the Home button.
                 Controls.Setup st = host.setupState();
-                String way = st.standIn ? s(R.string.settings_home_accessibility)
-                        : st.homeActive ? (usb(st) ? s(R.string.settings_home_debugging) : null)
+                String home = st.homeActive ? s(R.string.app_name)
                         : st.currentHome != null ? st.currentHome : s(R.string.settings_home_other);
-                rows.add(nav(R.string.settings_home, way, null, () -> go(HOME_SCREEN)));
+                rows.add(nav(R.string.settings_home, home, null, () -> go(HOME_SCREEN)));
                 rows.add(nav(R.string.settings_general, null, null, () -> go(GENERAL)));
                 rows.add(nav(R.string.settings_profiles, null, null, () -> go(PROFILES)));
                 rows.add(nav(R.string.settings_uninstall, null, null, () -> go(UNINSTALL)));
