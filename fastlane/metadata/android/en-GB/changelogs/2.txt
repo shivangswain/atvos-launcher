@@ -1,0 +1,4 @@
+• Refresh a top shelf: long press an app, then choose Top Shelf > Refresh. atvOS asks the app for its latest Continue Watching and Recommended programs and downloads their pictures again. Settings > General > Refresh All Apps does every app.
+• New programs show as soon as an app sends them.
+• Icons no longer shrink a little after the focus moves away.
+• Settings shows which app the Home button opens, and ticks Accessibility while Remote Buttons is on.

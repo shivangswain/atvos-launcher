@@ -18,8 +18,8 @@ android {
         applicationId = "app.atvos.launcher"
         minSdk = 31 // Android 12 and later
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.0.1"
     }
 
     signingConfigs {
