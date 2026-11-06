@@ -160,6 +160,8 @@ final class HomeView extends View {
     static final float W = 1920f;
     static final float TILE_W = 250f, TILE_H = 150f;
     static final float FOCUS_SCALE = 1.2f;
+    /** The time that a tile takes to grow or shrink with the focus: as fast at the start as the old ease of rate 14. */
+    private static final float FOCUS_S = 0.22f;
     static final int COLS = 6; // the apps in a row; the first row is the dock
     private static final float TILE_R = 22f;
     private static final float GAP_X = 47f, ROW_PITCH = 224f;
@@ -1884,6 +1886,22 @@ final class HomeView extends View {
         return v + d * (1f - (float) Math.exp(-rate * dt));
     }
 
+    /**
+     * Moves the focus of a tile ({@code v}, 0 to 1) to {@code target} on an ease-out curve that arrives in FOCUS_S
+     * seconds. {@link #ease} slows down for half a second at the end, and an icon that grows or shrinks by a pixel in
+     * that time looks as if it moves again. The distance left is the cube of the time left, so the curve starts as fast
+     * as the ease and ends at the target. A change of direction continues from where the tile is.
+     */
+    private float easeFocus(float v, float target, float dt) {
+        float d = Math.abs(target - v);
+        if (!motion || d == 0f) return target;
+        animating = true;
+        float u = (float) Math.cbrt(d) - dt / FOCUS_S; // the time left, from 0 to 1
+        if (u <= 0f) return target;
+        float left = u * u * u;
+        return target > v ? target - left : target + left;
+    }
+
     private void step(float dt) {
         boolean dock = inDock();
         float scrollTo = 0f;
@@ -1946,7 +1964,7 @@ final class HomeView extends View {
                 }
                 e.x = ease(e.x, sx, 14f, dt, 0.2f);
                 e.y = ease(e.y, sy, 14f, dt, 0.2f);
-                e.focus = ease(e.focus, i == folderFocus ? 1f : 0f, 14f, dt, 0.002f);
+                e.focus = easeFocus(e.focus, i == folderFocus ? 1f : 0f, dt);
             }
             if (renaming) animating = true; // the caret blinks
         }
@@ -1980,7 +1998,7 @@ final class HomeView extends View {
             }
             e.x = ease(e.x, sx, 14f, dt, 0.2f);
             e.y = ease(e.y, sy, 14f, dt, 0.2f);
-            e.focus = ease(e.focus, i == focus && !expanded && !rowFocused && !pillFocused ? 1f : 0f, 14f, dt, 0.002f);
+            e.focus = easeFocus(e.focus, i == focus && !expanded && !rowFocused && !pillFocused ? 1f : 0f, dt);
         }
         if (editing && motion) animating = true; // the held app wiggles
         homeSig = homeFingerprint();
