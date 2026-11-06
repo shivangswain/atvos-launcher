@@ -1,6 +1,6 @@
-# Builds and lints atvOS Launcher. A version tag (v1.0, v1.0-pre.3) also makes a draft release with the APKs, the app
-# bundle, their SHA-256 digests (SHA256SUMS) and a signed build provenance attestation. .gitlab-ci.yml runs the same
-# build on GitLab.
+# Builds and lints atvOS Launcher. A version tag also makes a release with the APKs, the app bundle, their SHA-256
+# digests (SHA256SUMS) and a signed build provenance attestation: a published release for a version (v1.0), and a draft
+# pre-release for a pre-release tag (v1.0-pre.3). .gitlab-ci.yml runs the same build on GitLab.
 name: CI
 
 on:
@@ -77,7 +77,7 @@ jobs:
           retention-days: 14
 
   release:
-    name: Draft release
+    name: Release
     if: startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: ubuntu-latest
@@ -111,9 +111,10 @@ jobs:
 
       - uses: softprops/action-gh-release@v3
         with:
-          draft: true
+          # v1.0: published, and the latest release. v1.0-pre.3: a draft pre-release.
+          draft: ${{ contains(github.ref_name, '-pre') }}
           prerelease: ${{ contains(github.ref_name, '-pre') }}
-          make_latest: "false"
+          make_latest: ${{ contains(github.ref_name, '-pre') && 'false' || 'true' }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: dist/*
