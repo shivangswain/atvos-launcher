@@ -21,6 +21,10 @@
     <string name="hidden_toast">Long press to enter the hidden apps section</string>
     <string name="continue_watching">Continue Watching</string>
     <string name="recommendations">Recommended</string>
+    <!-- In Top Shelf…: asks the app for its latest programs and downloads their pictures again. -->
+    <string name="refresh_shelf">Refresh</string>
+    <!-- Toast after Refresh. %s: the name of the app. -->
+    <string name="refreshing_shelf">Refreshing the top shelf of %s</string>
     <string name="play">Play</string>
     <string name="full_screen_hint">Press up for full screen</string>
     <!-- Setup. It shows on the first launch, and from Settings when another app is the home app. -->
@@ -111,6 +115,12 @@
     <string name="settings_time_format_about">How the clock beside your profile picture shows the time.</string>
     <string name="settings_12_hour">12-Hour</string>
     <string name="settings_24_hour">24-Hour</string>
+    <!-- A section title. It shows in capital letters. -->
+    <string name="settings_top_shelf">Top Shelf</string>
+    <string name="settings_refresh_shelves">Refresh All Apps</string>
+    <string name="settings_refresh_shelves_about">Asks your apps for their latest Continue Watching and Recommended programs, and downloads their pictures again. To refresh one app, long press it and choose Top Shelf.</string>
+    <!-- Below the description after Refresh All Apps. -->
+    <string name="settings_refresh_shelves_started">Refreshing. New programs can take a few minutes.</string>
     <string name="settings_profiles">Profiles and Accounts</string>
     <string name="settings_account">Account</string>
     <string name="settings_account_about">The Google account whose picture appears beside the clock. Select to choose an account.</string>

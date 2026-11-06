@@ -81,6 +81,10 @@ final class HomeView extends View {
         int shelfSources(Apps.Entry entry);
         boolean shelfSourceOn(Apps.Entry entry, int source);
         void setShelfSource(Apps.Entry entry, int source, boolean on);
+        /** Returns true if the app publishes programs, or can publish them when atvOS asks. */
+        boolean canRefreshShelf(Apps.Entry entry);
+        /** Asks the app (all apps if null) for its programs again, and downloads their pictures again. */
+        void refreshShelf(Apps.Entry entry);
         Controls.State controlState();
         /** Runs a Control Center action. Returns true to keep the Control Center open. */
         boolean control(int id);
@@ -286,7 +290,7 @@ final class HomeView extends View {
     private final List<MenuRow> menuRows = new ArrayList<>(), subRows = new ArrayList<>();
     private static final float MENU_ITEM_H = 66f, MENU_PAD = 12f;
     private final RectF menuBox = new RectF(), subBox = new RectF(); // the bounds at the last draw, for screen readers
-    private final Drawable editIcon, newFolderIcon, deleteIcon, checkIcon, chevronIcon;
+    private final Drawable editIcon, newFolderIcon, refreshIcon, deleteIcon, checkIcon, chevronIcon;
     private Apps.Entry menuEntry;            // the tile of the menu
     private int menuSel, subSel, subOf = -1; // subOf: the option whose list is open, or -1
     private float menuWidth, subWidth, subAnim, subSelAnim;
@@ -422,6 +426,7 @@ final class HomeView extends View {
         hiddenEmpty = context.getString(R.string.hidden_empty);
         editIcon = menuIcon(context, R.drawable.ic_tv);
         newFolderIcon = menuIcon(context, R.drawable.ic_add_circle);
+        refreshIcon = menuIcon(context, R.drawable.ic_refresh);
         deleteIcon = menuIcon(context, R.drawable.ic_remove_circle);
         checkIcon = menuIcon(context, R.drawable.ic_check);
         chevronIcon = menuIcon(context, R.drawable.ic_chevron_right);
@@ -549,6 +554,7 @@ final class HomeView extends View {
             @Override public void setUse24Hour(boolean on) { HomeView.this.host.setUse24Hour(on); }
             @Override public boolean open(int what) { return HomeView.this.host.openFromSettings(what); }
             @Override public Donation donation() { return HomeView.this.host.donation(); }
+            @Override public void refreshShelves() { HomeView.this.host.refreshShelf(null); }
             @Override public void close() { closeSettings(); }
             @Override public void sound(int effect) { playSoundEffect(effect); }
 
@@ -1591,7 +1597,7 @@ final class HomeView extends View {
         addRow(menuRows, R.string.edit_home, editIcon, ROW_PLAIN, this::startEditing, null);
         if (e.folder == null) {
             addRow(menuRows, R.string.move_to, null, ROW_SUBMENU, () -> openSubmenu(() -> buildMoveTo(e)), null);
-            if (host.shelfSources(e) != 0) {
+            if (host.canRefreshShelf(e)) {
                 addRow(menuRows, R.string.top_shelf, null, ROW_SUBMENU, () -> openSubmenu(() -> buildTopShelf(e)), null);
             }
             addRow(menuRows, R.string.app_info, null, ROW_PLAIN, () -> host.showInfo(e), null);
@@ -1616,14 +1622,15 @@ final class HomeView extends View {
     }
 
     /**
-     * Builds the Top Shelf… list: one switch for each source. The shelf shows one, both or none (then the logo of the
-     * app).
+     * Builds the Top Shelf… list: one switch for each source, then Refresh. The shelf shows one, both or none (then the
+     * logo of the app).
      */
     private void buildTopShelf(Apps.Entry e) {
         subRows.clear();
         int sources = host.shelfSources(e);
         if ((sources & Recommendations.WATCH_NEXT) != 0) addSwitch(R.string.continue_watching, e, Recommendations.WATCH_NEXT);
         if ((sources & Recommendations.PREVIEWS) != 0) addSwitch(R.string.recommendations, e, Recommendations.PREVIEWS);
+        addRow(subRows, R.string.refresh_shelf, refreshIcon, ROW_PLAIN, () -> host.refreshShelf(e), null);
         subWidth = listWidth(subRows);
     }
 

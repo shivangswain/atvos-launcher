@@ -1,7 +1,12 @@
 package app.atvos.launcher;
 
+import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.database.Cursor;
 import android.media.tv.TvContract;
 
@@ -165,6 +170,53 @@ final class Recommendations {
             // No TV provider, no permission or an unknown schema: no recommendations.
         }
         return found;
+    }
+
+    /**
+     * Returns the receivers of {@link TvContract#ACTION_INITIALIZE_PROGRAMS} that atvOS can send to: the apps that
+     * publish their programs when Android asks. Package visibility lists only launcher apps, which these are.
+     */
+    @SuppressWarnings("deprecation") // the int-flag method is available on Android 12 and later
+    private static List<ActivityInfo> publisherReceivers(Context context) {
+        List<ActivityInfo> out = new ArrayList<>();
+        try {
+            for (ResolveInfo r : context.getPackageManager()
+                    .queryBroadcastReceivers(new Intent(TvContract.ACTION_INITIALIZE_PROGRAMS), 0)) {
+                ActivityInfo a = r.activityInfo;
+                if (a == null || !a.exported || context.getPackageName().equals(a.packageName)) continue;
+                if (a.permission != null && context.checkSelfPermission(a.permission) != PackageManager.PERMISSION_GRANTED) {
+                    continue; // the app would not receive it
+                }
+                out.add(a);
+            }
+        } catch (RuntimeException ignored) {
+            // no receivers
+        }
+        return out;
+    }
+
+    /** Returns the apps that publish their programs again when atvOS asks (see {@link #askToPublish}). */
+    static Set<String> publishers(Context context) {
+        Set<String> out = new HashSet<>();
+        for (ActivityInfo a : publisherReceivers(context)) out.add(a.packageName);
+        return out;
+    }
+
+    /**
+     * Asks apps to publish their programs again: it sends {@link TvContract#ACTION_INITIALIZE_PROGRAMS}, which Android
+     * sends to an app after its install, to the apps in {@code pkgs} (null: all apps). Each app then updates its
+     * channels and Watch Next programs in the background, in its own time. An app that the user stopped is not woken.
+     */
+    static void askToPublish(Context context, Set<String> pkgs) {
+        for (ActivityInfo a : publisherReceivers(context)) {
+            if (pkgs != null && !pkgs.contains(a.packageName)) continue;
+            try {
+                context.sendBroadcast(new Intent(TvContract.ACTION_INITIALIZE_PROGRAMS)
+                        .setComponent(new ComponentName(a.packageName, a.name)));
+            } catch (RuntimeException ignored) {
+                // the app is gone
+            }
+        }
     }
 
     /**

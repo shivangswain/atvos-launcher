@@ -11,12 +11,16 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
+import android.database.ContentObserver;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
+import android.media.tv.TvContract;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Process;
 import android.provider.Settings;
 import android.text.Editable;
@@ -126,6 +130,37 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     private static final long SETTLE_MS = 150;
     private long focusMovedAt;
     private final Runnable settled = this::updateBackdrop;
+    /** A refresh downloaded the pictures again: the backdrop is made again, also if its key is the same. */
+    private boolean backdropStale;
+
+    /**
+     * The time from a change of the programs of an app to the next read. An app writes its programs one by one, so a
+     * change is followed by more.
+     */
+    private static final long PROGRAMS_WAIT_MS = 2000;
+    /**
+     * After Refresh, the time in which the apps publish: until then, a change of the programs of an app that was
+     * refreshed downloads its pictures again too, because an app can put a new picture at the same address.
+     */
+    private static final long REFRESH_WINDOW_MS = 120_000;
+    private long refreshUntil;
+    private Set<String> refreshPkgs; // the apps of the last Refresh, or null for all apps
+    private boolean programsQueued;
+    private final Runnable programsChanged = () -> {
+        programsQueued = false;
+        if (!resumed) return;
+        if (android.os.SystemClock.uptimeMillis() < refreshUntil) reloadShelves(refreshPkgs, false);
+        else refresh();
+    };
+    /** An app published or removed programs while the home screen shows: the top shelves change without a resume. */
+    private final ContentObserver programs = new ContentObserver(new Handler(Looper.getMainLooper())) {
+        @Override
+        public void onChange(boolean selfChange) {
+            if (programsQueued || !resumed) return;
+            programsQueued = true;
+            view.postDelayed(programsChanged, PROGRAMS_WAIT_MS);
+        }
+    };
 
     /** Installs, updates and removals. Without them, a refresh does not query PackageManager. */
     private final BroadcastReceiver packages = new BroadcastReceiver() {
@@ -216,6 +251,12 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         IntentFilter time = new IntentFilter(Intent.ACTION_TIME_CHANGED);
         time.addAction(Intent.ACTION_TIMEZONE_CHANGED);
         registerReceiver(clock, time); // only protected system broadcasts, so no export flag
+        try {
+            getContentResolver().registerContentObserver(TvContract.WatchNextPrograms.CONTENT_URI, true, programs);
+            getContentResolver().registerContentObserver(TvContract.PreviewPrograms.CONTENT_URI, true, programs);
+        } catch (RuntimeException e) {
+            // no TV provider: the programs are read at each resume
+        }
         view.refreshSetup(); // after the home app dialog or Settings
         // After the "Allow debugging" prompt: adb does not answer a declined prompt, so the wait ends after
         // APPROVE_GRACE_MS.
@@ -229,6 +270,9 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         resumed = false;
         view.setClockRunning(false);
         unregisterReceiver(clock);
+        getContentResolver().unregisterContentObserver(programs);
+        view.removeCallbacks(programsChanged); // the next resume reads the programs
+        programsQueued = false;
         super.onPause();
     }
 
@@ -293,6 +337,7 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         }
         view.removeCallbacks(checkApproval);
         view.removeCallbacks(settled);
+        view.removeCallbacks(programsChanged);
         RemoteKeys.unlisten(keysChanged);
         checkApproval.run(); // stops a run that waits for the prompt
         unregisterReceiver(packages);
@@ -313,11 +358,15 @@ public final class HomeActivity extends Activity implements HomeView.Host {
         appsDirty = false;
         pagesQueued.clear(); // pages of the apps can change: download them again at focus
         io.execute(() -> {
-            backdrops.scan(this);
+            Set<String> changed = backdrops.scan(this);
             Apps.Layout layout = reload ? apps.load(previous) : null;
             if (layout != null) dockPkgs = dock(layout.visible());
             runOnUiThread(() -> {
                 if (isDestroyed()) return;
+                if (!changed.isEmpty()) { // a program can change its title or progress and keep its picture
+                    backdrops.forget(changed);
+                    backdropStale = true;
+                }
                 if (layout != null) {
                     // During an edit, or after a change of the layout during this load: apply at the next refresh.
                     if (!apps.isLatest(layout) || !view.setApps(layout.visible(), layout.hidden())) {
@@ -341,6 +390,12 @@ public final class HomeActivity extends Activity implements HomeView.Host {
                 backdrops.prefetch(dockPkgs, () -> runOnUiThread(this::shelfReady));
             });
         }
+    }
+
+    private static Set<String> union(Set<String> a, Set<String> b) {
+        Set<String> out = new HashSet<>(a);
+        out.addAll(b);
+        return out;
     }
 
     /** Returns the packages in the dock: the first row, with the first app of a folder. */
@@ -367,7 +422,8 @@ public final class HomeActivity extends Activity implements HomeView.Host {
                 ? (focused.folder.apps.isEmpty() ? null : focused.folder.apps.get(0)) : focused;
         String key = shown != null ? backdrops.backdropKey(shown.pkg, fullScreen) : Backdrops.DEFAULT;
         Recommendations.Item program = shown != null ? backdrops.recommendation(shown.pkg) : null;
-        if (key.equals(wantedBackdrop)) return;
+        if (key.equals(wantedBackdrop) && !backdropStale) return;
+        backdropStale = false;
         wantedBackdrop = key;
         Backdrops.Backdrop cached = backdrops.cached(key);
         if (cached != null) {
@@ -442,6 +498,54 @@ public final class HomeActivity extends Activity implements HomeView.Host {
     public void setShelfSource(Apps.Entry entry, int source, boolean on) {
         backdrops.setSource(entry.pkg, source, on);
         refresh(); // reads the recommendations again and changes the backdrop
+    }
+
+    @Override
+    public boolean canRefreshShelf(Apps.Entry entry) {
+        return backdrops.canRefresh(entry.pkg);
+    }
+
+    /**
+     * Refreshes the top shelf of the app, or of all apps if {@code entry} is null. It asks the apps to publish their
+     * programs again, reads the programs and downloads their pictures again. The apps publish in their own time, and
+     * {@link #programs} shows what they publish while the home screen shows.
+     */
+    @Override
+    public void refreshShelf(Apps.Entry entry) {
+        Set<String> pkgs = entry != null ? Set.of(entry.pkg) : null;
+        if (entry != null) Toast.makeText(this, getString(R.string.refreshing_shelf, entry.label), Toast.LENGTH_SHORT).show();
+        refreshPkgs = pkgs;
+        refreshUntil = android.os.SystemClock.uptimeMillis() + REFRESH_WINDOW_MS;
+        backdrops.showBest(pkgs); // the newest program
+        io.execute(() -> Recommendations.askToPublish(this, pkgs));
+        reloadShelves(pkgs, true);
+    }
+
+    /**
+     * Reads the programs again, and downloads again the pictures of the apps in {@code pkgs} (null: all apps) that are
+     * on disk. {@code always}: also for the apps whose programs did not change. Then the backdrop is made again.
+     */
+    private void reloadShelves(Set<String> pkgs, boolean always) {
+        pagesQueued.clear(); // the other pages download again at the next focus
+        io.execute(() -> {
+            Set<String> changed = backdrops.scan(this);
+            Set<String> targets = always ? pkgs : new HashSet<>(changed);
+            if (!always && pkgs != null) targets.retainAll(pkgs);
+            Set<String> reloaded = targets;
+            net.execute(() -> {
+                if (reloaded == null || !reloaded.isEmpty()) backdrops.reload(reloaded);
+                runOnUiThread(() -> {
+                    if (isDestroyed()) return;
+                    if (reloaded == null || !reloaded.isEmpty() || !changed.isEmpty()) {
+                        backdrops.forget(reloaded == null ? null : union(reloaded, changed));
+                        backdropStale = true;
+                    }
+                    updateBackdrop();
+                    view.shelfPagesChanged();
+                });
+                prefetch(); // the new images of the dock
+            });
+        });
     }
 
     @Override

@@ -15,7 +15,9 @@ and tvOS are trademarks of Apple Inc.
 ## Features
 
 - **Top shelf.** The focused app in the dock fills the screen with what it recommends: a full-screen
-  picture with a **Play** button, or a row of **Continue Watching** and **Recommended** cards.
+  picture with a **Play** button, or a row of **Continue Watching** and **Recommended** cards. New
+  programs show as soon as an app sends them. To ask an app for its latest, long press it and choose
+  **Top Shelf…** > **Refresh**, or refresh every app in Settings > General.
 - **Your layout.** Reorder apps, make folders and hide the apps you don't use.
 - **Control Center.** Power, network, Do Not Disturb, Bluetooth, a sleep timer and shortcuts to
   inputs, accessibility, system settings and search.

@@ -50,6 +50,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -191,6 +192,8 @@ final class Backdrops {
     // it.
     private final Set<String> downloaded = ConcurrentHashMap.newKeySet();
     private volatile Set<String> watchNext = Collections.emptySet(), previews = Collections.emptySet();
+    // The apps that publish their programs again when atvOS asks (see Recommendations.askToPublish).
+    private volatile Set<String> publishers = Collections.emptySet();
 
     // The time of the last failure of each URL, so that a failed URL is not tried again too soon. Network thread only.
     private final Map<String, Long> failedAt = new HashMap<>();
@@ -223,10 +226,10 @@ final class Backdrops {
     }
 
     /**
-     * Reads the recommendations of the apps again. The keys contain the image URL, so a new image gets a new key. IO
-     * thread.
+     * Reads the recommendations of the apps again. The keys contain the image URL, so a new image gets a new key.
+     * Returns the apps whose programs changed. IO thread.
      */
-    void scan(Context context) {
+    Set<String> scan(Context context) {
         Recommendations.Found found = Recommendations.load(context, off(NO_WATCH_NEXT), off(NO_PREVIEWS));
         // The cache key is the address only. This removes the images that an app cannot show, so that a different app
         // cannot get an image from the cache.
@@ -251,10 +254,67 @@ final class Backdrops {
         }
         downloaded.removeIf(url -> !cacheFile(url).isFile());
         hd.keySet().retainAll(downloaded); // sizes only of the cached images
+        Set<String> changed = new HashSet<>(shown.keySet());
+        changed.addAll(pages.keySet());
+        changed.removeIf(pkg -> Objects.equals(pages.get(pkg), shown.get(pkg)));
         watchNext = found.watchNext;
         previews = found.previews;
+        publishers = Recommendations.publishers(context);
         pages = shown;
         recommended = best;
+        return changed;
+    }
+
+    /** Returns true if Refresh can update the top shelf of the app: it publishes programs, or can publish them. */
+    boolean canRefresh(String pkg) {
+        return publishers.contains(pkg) || sources(pkg) != 0;
+    }
+
+    /**
+     * Downloads again the images of these apps (null: all apps) that are on disk, because an app can change the picture
+     * at an address. A new image replaces the old one only when its download completes. It also ends the wait before
+     * failed images are tried again. Network thread, after a {@link #scan}.
+     */
+    void reload(Set<String> pkgs) {
+        for (Map.Entry<String, List<Recommendations.Item>> e : pages.entrySet()) {
+            if (pkgs != null && !pkgs.contains(e.getKey())) continue;
+            for (Recommendations.Item item : e.getValue()) {
+                String url = item.image();
+                failedAt.remove(url);
+                if (downloaded.contains(url) && fetch(url, e.getKey(), true) != null) {
+                    hd.remove(url); // the new image can have a different size
+                    measure(url);
+                }
+            }
+        }
+    }
+
+    /** The dock shows the best page of these apps (null: all apps) again, not the page that was chosen last. */
+    void showBest(Set<String> pkgs) {
+        if (pkgs == null) chosen.clear();
+        else chosen.keySet().removeAll(pkgs);
+    }
+
+    /**
+     * Removes the backdrops of these apps (null: all apps) from the memory cache, so that they are made again: from the
+     * new images after a {@link #reload}, or with the new title and details of a program whose picture stayed the same.
+     * UI thread.
+     */
+    void forget(Set<String> pkgs) {
+        if (pkgs == null) {
+            cache.clear();
+            return;
+        }
+        Set<String> keys = new HashSet<>();
+        for (String pkg : pkgs) {
+            List<Recommendations.Item> list = pages.get(pkg);
+            if (list == null) continue;
+            for (Recommendations.Item item : list) {
+                keys.add(REMOTE + item.image());
+                keys.add(FULL + item.image());
+            }
+        }
+        cache.keySet().removeIf(key -> keys.contains(key) || pkgs.stream().anyMatch(pkg -> key.startsWith(ROW + pkg + "#")));
     }
 
     /**
@@ -1174,6 +1234,11 @@ final class Backdrops {
      * cleartext, no cookies, limited size) or the content of the app, as {@link #mayShow} allows.
      */
     private File fetch(String url, String owner) {
+        return fetch(url, owner, false);
+    }
+
+    /** {@code again}: downloads the image also if it is on disk. */
+    private File fetch(String url, String owner, boolean again) {
         // Checked before the cache, so that a different app with the same URI cannot get the cached image.
         if (!mayShow(url, owner)) return null;
         Uri uri = Uri.parse(url);
@@ -1181,7 +1246,7 @@ final class Backdrops {
         boolean https = scheme.equalsIgnoreCase("https");
         boolean local = scheme.equals(ContentResolver.SCHEME_CONTENT) || scheme.equals(ContentResolver.SCHEME_ANDROID_RESOURCE);
         File out = cacheFile(url);
-        if (out.isFile()) {
+        if (out.isFile() && !again) {
             //noinspection ResultOfMethodCallIgnored
             out.setLastModified(System.currentTimeMillis()); // the time of use, for the cache trim
             return out;

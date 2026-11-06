@@ -63,6 +63,8 @@ final class SettingsScreen {
         /** Opens {@link #STORE} or {@link #APP_INFO}. Returns false if the TV cannot open it. */
         boolean open(int what);
         Donation donation();
+        /** Asks all apps for their programs again, and downloads the pictures of the top shelves again. */
+        void refreshShelves();
         void close();
         void sound(int effect);
         /** Draws the screen again and updates screen readers. */
@@ -198,6 +200,11 @@ final class SettingsScreen {
                 rows.add(new Row(HEADER, s(R.string.settings_date_time).toUpperCase(Locale.getDefault()), null, null, null, true, false));
                 rows.add(action(R.string.settings_time_format, s(host.use24Hour() ? R.string.settings_24_hour : R.string.settings_12_hour),
                         s(R.string.settings_time_format_about), () -> host.setUse24Hour(!host.use24Hour())));
+                rows.add(new Row(HEADER, s(R.string.settings_top_shelf).toUpperCase(Locale.getDefault()), null, null, null, true, false));
+                rows.add(action(R.string.settings_refresh_shelves, null, s(R.string.settings_refresh_shelves_about), () -> {
+                    host.refreshShelves();
+                    note(R.string.settings_refresh_shelves_started);
+                }));
             }
             case ABOUT -> {
                 title = s(R.string.settings_about);
