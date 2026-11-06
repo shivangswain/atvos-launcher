@@ -9,8 +9,9 @@ export const site = {
   issues: "https://github.com/shivangswain/atvos-launcher/issues",
   play: "https://play.google.com/store/apps/details?id=app.atvos.launcher",
   paypal: "https://www.paypal.com/paypalme/shivangswain",
-  // The internal test on Google Play, for early access before the release.
-  earlyAccess: "https://play.google.com/apps/internaltest/4700671716853603598",
+  // The closed test on Google Play, for early access before the release: testers opt in here on the web, then install
+  // from the Play listing (site.play), which shows only for testers until the app is published.
+  earlyAccess: "https://play.google.com/apps/testing/app.atvos.launcher",
   // true when atvOS Launcher is on Google Play. While it is false, the pages link to early access instead.
   onPlay: false,
   policyDate: "27 October 2026",
